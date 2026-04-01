@@ -1,0 +1,17 @@
+schema: spec-driven
+
+context: |
+  Tech stack: TypeScript, React, Node.js
+  API conventions: RESTful, JSON responses
+  Testing: Vitest for unit tests, Playwright for e2e
+  Style: ESLint with Prettier, strict TypeScript
+  Domain: Tetris-like games
+
+rules:
+  proposal:
+    - Include rollback plan
+    - Identify affected teams
+  specs:
+    - Use Given/When/Then format for scenarios
+  design:
+    - Include sequence diagrams for complex flows
