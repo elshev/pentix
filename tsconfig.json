@@ -1,7 +1,8 @@
 {
   "files": [],
   "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
+    { "path": "./packages/pentix-core/tsconfig.json" },
+    { "path": "./apps/pentix-server/tsconfig.json" },
+    { "path": "./apps/pentix-web/tsconfig.json" }
   ]
 }

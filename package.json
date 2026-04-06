@@ -1,13 +1,19 @@
 {
   "name": "pentix",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev:web": "vite --config apps/pentix-web/vite.config.ts",
+    "build:web": "tsc -p apps/pentix-web/tsconfig.json && vite build --config apps/pentix-web/vite.config.ts",
+    "preview:web": "vite preview --config apps/pentix-web/vite.config.ts",
+    "build:core": "tsc -p packages/pentix-core/tsconfig.json",
+    "build:server": "tsc -p apps/pentix-server/tsconfig.json",
+    "start:server": "npm run build:core && npm run build:server && node apps/pentix-server/dist/main.js",
+    "build": "npm run build:core && npm run build:server && npm run build:web",
+    "test": "npm run build:core && npm run build:server && node --test tests/pentix-core.test.mjs tests/pentix-server.test.mjs",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "npm run preview:web"
   },
   "dependencies": {
     "react": "^19.2.4",

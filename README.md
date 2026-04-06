@@ -1,73 +1,67 @@
-# React + TypeScript + Vite
+# Pentix
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Pentix is a modern TypeScript reboot of a legacy Delphi Pentix/Tetris project. The repository is being prepared for two applications that share the same game-domain code:
 
-Currently, two official plugins are available:
+- `PentixServer`: the future backend responsible for players, Pentix games, and Pentix game history
+- `Pentix` web browser application: the future client that will render boards, statistics, menus, and game flow in the browser
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+This first implementation increment does not build the full game yet. It establishes the repository layout, creates an empty `PentixServer`, and ports the legacy piece definitions into shared TypeScript code.
 
-## React Compiler
+## Glossary
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- `Mino`: one square of a piece
+- `Piece`: a Pentix figure that contains from 1 to 5 minos
+- `Board`: rectangular playfield
+- `BoardCell`: one cell of the board
+- `GameLevel`: difficulty level; higher level means higher speed
+- `Tick`: unit of internal game time
+- `PentixGame`: one game for many players
+- `PentixGameSession`: one game for one player
 
-## Expanding the ESLint configuration
+## Repository Layout
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```text
+apps/
+  pentix-server/   Empty server bootstrap
+  pentix-web/      Browser application shell
+packages/
+  pentix-core/     Shared Pentix domain primitives
+delphi/
+  Tetris.pas       Legacy Delphi source used as the migration reference
+docs/
+  foundation.md    Notes about the current foundation change
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Current Foundation Scope
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+The codebase currently includes:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- an empty `PentixServer` bootstrap implemented with Node.js and TypeScript
+- a shared `pentix-core` package with:
+  - `Piece`
+  - `Offset`
+  - Delphi-compatible rotation behavior
+  - the full legacy piece catalog
+  - `Board` and `BoardCell`
+- a lightweight browser placeholder that imports the shared piece catalog
+
+The following are intentionally not implemented yet:
+
+- player management endpoints
+- PentixGame creation and next-piece endpoints
+- PentixGame history endpoints
+- browser gameplay, scoring, ticks, and UI behavior from the final product goals
+
+## Commands
+
+- `npm run build`: build the shared core, server, and web app
+- `npm run start:server`: build and start the empty PentixServer
+- `npm run dev:web`: run the browser app with Vite
+- `npm run test`: verify the shared piece catalog and server bootstrap
+- `npm run lint`: run ESLint across the repository
+
+## Legacy Notes
+
+The initial piece catalog is ported from [Tetris.pas](C:/ai/pentix/delphi/Tetris.pas). Most pieces occupy `(0, 0)` as the rotation-center mino. One known exception is `5Corner`, whose legacy Delphi offsets rotate around an empty origin; this repository intentionally preserves that behavior for parity with the original code.
+
+More detail about the current foundation change lives in [docs/foundation.md](C:/ai/pentix/docs/foundation.md).

@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+*.tsbuildinfo
+
+# TypeScript output
+packages/pentix-core/**/*.js
+packages/pentix-core/**/*.js.map
+packages/pentix-core/**/*.d.ts
+apps/pentix-server/**/*.js
+apps/pentix-server/**/*.js.map
+apps/pentix-server/**/*.d.ts
+apps/pentix-web/**/*.js
+apps/pentix-web/**/*.js.map
+apps/pentix-web/**/*.d.ts

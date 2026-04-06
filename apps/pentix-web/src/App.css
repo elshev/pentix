@@ -1,0 +1,142 @@
+.shell {
+  width: min(1100px, calc(100vw - 2rem));
+  margin: 0 auto;
+  padding: 3rem 0 4rem;
+  display: grid;
+  gap: 2rem;
+}
+
+.hero {
+  padding: 2rem;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at top left, rgba(247, 199, 95, 0.22), transparent 32%),
+    linear-gradient(135deg, rgba(17, 25, 40, 0.92), rgba(26, 41, 74, 0.82));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 80px rgba(4, 10, 24, 0.35);
+}
+
+.eyebrow {
+  margin: 0 0 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.78rem;
+  color: #f7c75f;
+}
+
+.hero h1,
+.catalog h2 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3.8rem);
+  line-height: 0.95;
+}
+
+.lede {
+  margin: 1rem 0 0;
+  max-width: 42rem;
+  font-size: 1.05rem;
+  color: rgba(233, 239, 255, 0.82);
+}
+
+.summary {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.card,
+.piece-card,
+.catalog-copy {
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(9, 15, 28, 0.72);
+  box-shadow: 0 16px 48px rgba(4, 10, 24, 0.28);
+}
+
+.card {
+  padding: 1.4rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.label {
+  margin: 0;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(247, 199, 95, 0.88);
+}
+
+.card strong {
+  font-size: 1.3rem;
+}
+
+.card span,
+.catalog-copy p,
+.piece-card p {
+  color: rgba(233, 239, 255, 0.72);
+}
+
+.catalog {
+  display: grid;
+  gap: 1rem;
+}
+
+.catalog-copy {
+  padding: 1.6rem;
+}
+
+.catalog-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.piece-card {
+  padding: 1.25rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.piece-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+}
+
+.piece-card header span {
+  color: rgba(247, 199, 95, 0.88);
+  text-transform: capitalize;
+  font-size: 0.9rem;
+}
+
+.piece-card p {
+  margin: 0;
+}
+
+.piece-card code {
+  color: #d8e7ff;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+@media (max-width: 900px) {
+  .summary,
+  .catalog-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .shell {
+    width: min(100vw - 1rem, 1100px);
+    padding: 1rem 0 2rem;
+  }
+
+  .hero,
+  .card,
+  .catalog-copy,
+  .piece-card {
+    border-radius: 20px;
+  }
+}
