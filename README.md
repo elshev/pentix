@@ -62,6 +62,6 @@ The following are intentionally not implemented yet:
 
 ## Legacy Notes
 
-The initial piece catalog is ported from [Tetris.pas](C:/ai/pentix/delphi/Tetris.pas). Most pieces occupy `(0, 0)` as the rotation-center mino. One known exception is `5Corner`, whose legacy Delphi offsets rotate around an empty origin; this repository intentionally preserves that behavior for parity with the original code.
+The initial piece catalog is ported from [Tetris.pas](./delphi/Tetris.pas). Most pieces occupy `(0, 0)` as the rotation-center mino. One known exception is `5Corner`, whose legacy Delphi offsets rotate around an empty origin; this repository intentionally preserves that behavior for parity with the original code.
 
-More detail about the current foundation change lives in [docs/foundation.md](C:/ai/pentix/docs/foundation.md).
+More detail about the current foundation change lives in [docs/foundation.md](./docs/foundation.md).
