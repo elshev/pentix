@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  createPentixGameSession,
   Board,
   DEFAULT_BOARD_SIZE,
   PIECE_CATALOG,
@@ -142,4 +143,25 @@ test('occupied offsets can be computed without a Piece instance', () => {
       [1, 0],
     ],
   )
+})
+test('game session initializer starts with shared defaults', () => {
+  const selectedKeys = ['bi3Corner', 'bi5T']
+  let selectionIndex = 0
+  const session = createPentixGameSession({
+    sessionId: 'test-session',
+    selectPieceKey: () => selectedKeys[selectionIndex++],
+  })
+
+  assert.equal(session.sessionId, 'test-session')
+  assert.equal(session.status, 'active')
+  assert.deepEqual([session.board.width, session.board.height], [12, 22])
+  assert.equal(session.board.rows.flat().some((cell) => cell.isOccupied), false)
+  assert.deepEqual(session.statistics, { score: 0, level: 1, clearedLines: 0 })
+  assert.deepEqual(session.activePiece.origin, { row: 1, column: 6 })
+  assert.equal(session.activePiece.angle, 0)
+  assert.equal(session.activePiece.key, selectedKeys[0])
+  assert.equal(session.nextPieceKey, selectedKeys[1])
+  assert.ok(PIECES_BY_KEY[session.activePiece.key])
+  assert.ok(PIECES_BY_KEY[session.nextPieceKey])
+  assert.doesNotThrow(() => JSON.stringify(session))
 })

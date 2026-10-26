@@ -5,8 +5,8 @@ This repository now uses an `apps/` and `packages/` layout so the browser client
 ## What Exists Today
 
 - `apps/pentix-web`: a lightweight browser placeholder
-- `apps/pentix-server`: an empty Node.js server bootstrap
-- `packages/pentix-core`: shared piece and board primitives
+- `apps/pentix-server`: a Node.js server bootstrap with `POST /game-sessions`
+- `packages/pentix-core`: shared piece, board, and game-session primitives
 
 ## Shared Piece Model
 
@@ -28,6 +28,10 @@ That means:
 - `5Corner` rotates around the origin even though the origin itself is empty
 
 ## Next Likely Steps
+
+- The current session-start API creates a fresh in-memory snapshot only. It does not persist sessions or provide resume, movement, ticking, scoring, or history behavior.
+
+- The first supported server flow is `POST /game-sessions`, which returns an empty default board, opening statistics, an active piece at the centered spawn origin, and one next-piece preview.
 
 - add explicit player and PentixGame API contracts
 - define Pentix game settings and history models

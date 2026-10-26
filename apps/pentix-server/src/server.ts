@@ -1,6 +1,11 @@
+import { randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 
-import type { Board, PieceDefinition } from '../../../packages/pentix-core/dist/index.js'
+import {
+  createPentixGameSession,
+  type Board,
+  type PieceDefinition,
+} from '../../../packages/pentix-core/dist/index.js'
 
 export interface PentixServerContext {
   readonly boardPrototype?: Board
@@ -34,15 +39,31 @@ export function createPentixServer(_context: PentixServerContext = {}): Server {
   void _context
 
   return createServer((request, response) => {
+    const requestUrl = new URL(request.url ?? '/', 'http://localhost')
+
+    if (
+      request.method === 'POST' &&
+      requestUrl.pathname === '/game-sessions'
+    ) {
+      const session = createPentixGameSession({
+        sessionId: randomUUID(),
+      })
+
+      response.statusCode = 201
+      response.setHeader('content-type', 'application/json; charset=utf-8')
+      response.end(JSON.stringify(session))
+      return
+    }
+
     response.statusCode = 404
     response.setHeader('content-type', 'application/json; charset=utf-8')
     response.end(
       JSON.stringify({
         service: 'PentixServer',
         method: request.method ?? 'UNKNOWN',
-        path: request.url ?? '/',
+        path: requestUrl.pathname,
         message:
-          'PentixServer bootstrap is running. Player, PentixGame, and history endpoints are not implemented yet.',
+          'PentixServer bootstrap is running. Session start is available at POST /game-sessions. Player, PentixGame, and history endpoints are not implemented yet.',
       }),
     )
   })
