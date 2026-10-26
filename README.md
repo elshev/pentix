@@ -5,7 +5,7 @@ Pentix is a modern TypeScript reboot of a legacy Delphi Pentix/Tetris project. T
 - `PentixServer`: the future backend responsible for players, Pentix games, and Pentix game history
 - `Pentix` web browser application: the future client that will render boards, statistics, menus, and game flow in the browser
 
-This first implementation increment does not build the full game yet. It establishes the repository layout, creates an empty `PentixServer`, and ports the legacy piece definitions into shared TypeScript code.
+This implementation increment does not build the full game yet. It establishes the repository layout, adds a narrow `PentixServer` with `POST /game-sessions`, and shares the legacy piece, board, and session primitives across TypeScript code.
 
 ## Glossary
 
@@ -22,7 +22,7 @@ This first implementation increment does not build the full game yet. It establi
 
 ```text
 apps/
-  pentix-server/   Empty server bootstrap
+  pentix-server/   Server bootstrap with session start API
   pentix-web/      Browser application shell
 packages/
   pentix-core/     Shared Pentix domain primitives
@@ -36,32 +36,34 @@ docs/
 
 The codebase currently includes:
 
-- an empty `PentixServer` bootstrap implemented with Node.js and TypeScript
+- a `PentixServer` bootstrap implemented with Node.js and TypeScript, including `POST /game-sessions`
 - a shared `pentix-core` package with:
   - `Piece`
   - `Offset`
   - Delphi-compatible rotation behavior
   - the full legacy piece catalog
   - `Board` and `BoardCell`
+  - serializable `PentixGameSession` snapshots and opening defaults
 - a lightweight browser placeholder that imports the shared piece catalog
 
 The following are intentionally not implemented yet:
 
 - player management endpoints
-- PentixGame creation and next-piece endpoints
-- PentixGame history endpoints
+- multiplayer `PentixGame` creation and next-piece endpoints
+- PentixGame session persistence, resume, and history endpoints
+- gameplay movement, scoring, ticks, and line-clearing endpoints
 - browser gameplay, scoring, ticks, and UI behavior from the final product goals
 
 ## Commands
 
 - `npm run build`: build the shared core, server, and web app
-- `npm run start:server`: build and start the empty PentixServer
+- `npm run start:server`: build and start PentixServer
 - `npm run dev:web`: run the browser app with Vite
-- `npm run test`: verify the shared piece catalog and server bootstrap
+- `npm run test`: verify the shared primitives, session initialization, and server API
 - `npm run lint`: run ESLint across the repository
 
 ## Legacy Notes
 
-The initial piece catalog is ported from [Tetris.pas](C:/ai/pentix/delphi/Tetris.pas). Most pieces occupy `(0, 0)` as the rotation-center mino. One known exception is `5Corner`, whose legacy Delphi offsets rotate around an empty origin; this repository intentionally preserves that behavior for parity with the original code.
+The initial piece catalog is ported from [Tetris.pas](./delphi/Tetris.pas). Most pieces occupy `(0, 0)` as the rotation-center mino. One known exception is `5Corner`, whose legacy Delphi offsets rotate around an empty origin; this repository intentionally preserves that behavior for parity with the original code.
 
-More detail about the current foundation change lives in [docs/foundation.md](C:/ai/pentix/docs/foundation.md).
+More detail about the current foundation change lives in [docs/foundation.md](./docs/foundation.md).

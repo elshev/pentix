@@ -1,5 +1,15 @@
 export { Board, createBoard, DEFAULT_BOARD_SIZE } from './board.js'
 export type { BoardCell, BoardSize } from './board.js'
+export { createPentixGameSession } from './session.js'
+export type {
+  ActivePieceState,
+  BoardPosition,
+  BoardSnapshot,
+  CreatePentixGameSessionOptions,
+  GameSessionStatistics,
+  GameSessionStatus,
+  PentixGameSession,
+} from './session.js'
 export {
   getPieceDefinition,
   PIECE_CATALOG,
