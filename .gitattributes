@@ -1,0 +1,3 @@
+# The OpenSpec CLI reads and writes these markdown files directly and aborts
+# when requirement headers end with CRLF. Keep them LF in every checkout.
+openspec/** text eol=lf

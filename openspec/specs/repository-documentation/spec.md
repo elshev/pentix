@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Describe the repository documentation that explains Pentix goals, glossary terms, repository layout, and the scope of the current implementation increment.
+
+## Requirements
 
 ### Requirement: Repository documentation reflects Pentix goals and the first bootstrap scope
 The repository SHALL replace the default starter documentation with Pentix-specific documentation that explains the project glossary, the long-term goals for `PentixServer` and the browser application, and the limited scope of the first implementation increment.

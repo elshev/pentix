@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
 
+Describe the dedicated `PentixServer` application scaffold, the endpoints it exposes, and the deliberate boundaries of the current server increment.
+## Requirements
 ### Requirement: The repository contains an empty PentixServer application
 The repository SHALL include a dedicated PentixServer application scaffold that is separate from the browser application and can be started as a Node.js/TypeScript process.
 
@@ -8,23 +10,23 @@ The PentixServer scaffold SHALL:
 - live in its own application directory,
 - have a dedicated TypeScript entry point,
 - integrate with repository-level scripts or workspace commands,
-- expose a documented `POST /game-sessions` bootstrap endpoint,
-- and remain intentionally limited with respect to player management, multiplayer `PentixGame` orchestration, gameplay progression commands, and PentixGame history APIs.
+- expose documented `POST /games`, `POST /game-sessions`, and `POST /game-sessions/{id}/next-piece` endpoints,
+- use a named internal base constant when parsing relative request URLs while retaining host and port as server settings,
+- and remain intentionally limited with respect to player management, durable persistence, multiplayer orchestration, gameplay movement, and history APIs.
 
 #### Scenario: A dedicated server application exists
-- **GIVEN** the session-start change has been implemented
+- **GIVEN** the game lifecycle change has been implemented
 - **WHEN** a developer inspects the repository structure and server entry points
-- **THEN** they can find a dedicated PentixServer application directory
-- **AND** that application has its own startup entry point
+- **THEN** they can find a dedicated PentixServer application directory and startup entry point
 - **AND** the repository provides a documented command to run it
-- **AND** the server now documents `POST /game-sessions` as its first supported endpoint
+- **AND** the server documents game creation, session creation, and next-piece advancement as supported endpoints
 
-#### Scenario: The first functional server increment stays narrow
-- **GIVEN** the PentixServer application exposes `POST /game-sessions`
+#### Scenario: The functional server increment stays narrow
+- **GIVEN** the PentixServer application exposes game and session lifecycle endpoints
 - **WHEN** a developer reviews its implemented features
-- **THEN** it does not yet provide player CRUD endpoints
-- **AND** it does not yet provide gameplay move, tick, or line-clear endpoints
-- **AND** it does not yet provide multiplayer `PentixGame` orchestration or history endpoints
+- **THEN** it does not provide player CRUD or user-assignment endpoints
+- **AND** it does not provide gameplay move, tick, or line-clear endpoints
+- **AND** it does not provide durable history, multiplayer orchestration, or restart-safe persistence
 
 ### Requirement: PentixServer depends on shared game primitives instead of duplicating them
 The PentixServer application SHALL consume the shared game-primitives package for `Piece` and `Board` concepts instead of defining its own independent piece catalog.
@@ -34,3 +36,4 @@ The PentixServer application SHALL consume the shared game-primitives package fo
 - **WHEN** a developer inspects the PentixServer application
 - **THEN** the server imports the shared `Piece` and `Board` contracts from the shared package
 - **AND** the server does not define a second copy of the piece catalog
+
