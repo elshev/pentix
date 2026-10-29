@@ -1,3 +1,5 @@
+import type { PieceKey } from './catalog.js'
+
 export interface Offset {
   readonly x: number
   readonly y: number
@@ -8,8 +10,7 @@ export type RotationMode = 'none' | 'half' | 'full'
 
 export interface PieceDefinition {
   readonly id: number
-  readonly key: string
-  readonly name: string
+  readonly key: PieceKey
   readonly colorName: string
   readonly rotationMode: RotationMode
   readonly offsets: readonly Offset[]
@@ -103,12 +104,8 @@ export class Piece {
     return this.definition.id
   }
 
-  get key(): string {
+  get key(): PieceKey {
     return this.definition.key
-  }
-
-  get name(): string {
-    return this.definition.name
   }
 
   get colorName(): string {

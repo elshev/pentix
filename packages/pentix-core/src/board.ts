@@ -1,10 +1,10 @@
-import type { LegacyPieceKey } from './catalog.js'
+import type { PieceKey } from './catalog.js'
 
 export interface BoardCell {
   readonly row: number
   readonly column: number
   readonly isOccupied: boolean
-  readonly pieceKey?: LegacyPieceKey
+  readonly pieceKey?: PieceKey
 }
 
 export interface BoardSize {
@@ -12,11 +12,17 @@ export interface BoardSize {
   readonly height: number
 }
 
+export interface BoardSnapshot {
+  readonly width: number
+  readonly height: number
+  readonly rows: readonly (readonly BoardCell[])[]
+}
+
 function createBoardCell(
   row: number,
   column: number,
   isOccupied = false,
-  pieceKey?: LegacyPieceKey,
+  pieceKey?: PieceKey,
 ): BoardCell {
   return Object.freeze({
     row,
@@ -68,7 +74,7 @@ export class Board {
     return this.cells[row][column]
   }
 
-  setCell(row: number, column: number, pieceKey?: LegacyPieceKey): BoardCell {
+  setCell(row: number, column: number, pieceKey?: PieceKey): BoardCell {
     this.assertInBounds(row, column)
     const nextCell = createBoardCell(row, column, pieceKey !== undefined, pieceKey)
     this.cells[row][column] = nextCell
@@ -95,6 +101,14 @@ export class Board {
       )
     }
   }
+}
+
+export function createBoardSnapshot(board: Board): BoardSnapshot {
+  return Object.freeze({
+    width: board.width,
+    height: board.height,
+    rows: board.toRows(),
+  })
 }
 
 export function createBoard(size: BoardSize = DEFAULT_BOARD_SIZE): Board {
