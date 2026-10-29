@@ -1,20 +1,21 @@
 import {
   createBoard,
-  DEFAULT_BOARD_SIZE,
+  createBoardSnapshot,
   type Board,
-  type BoardCell,
-  type BoardSize,
+  type BoardSnapshot,
 } from './board.js'
-import { PIECE_CATALOG, type LegacyPieceKey } from './catalog.js'
+import {
+  getPieceDefinitionById,
+  type PieceKey,
+} from './catalog.js'
+import {
+  ensurePentixGamePieceAtIndex,
+  type PentixGame,
+  type PieceIdSelector,
+} from './game.js'
 import type { RotationAngle } from './piece.js'
 
 export type GameSessionStatus = 'active'
-
-export interface BoardSnapshot {
-  readonly width: number
-  readonly height: number
-  readonly rows: readonly (readonly BoardCell[])[]
-}
 
 export interface GameSessionStatistics {
   readonly score: number
@@ -28,63 +29,100 @@ export interface BoardPosition {
 }
 
 export interface ActivePieceState {
-  readonly key: LegacyPieceKey
+  readonly key: PieceKey
   readonly angle: RotationAngle
   readonly origin: BoardPosition
 }
 
 export interface PentixGameSession {
-  readonly sessionId: string
+  readonly id: string
+  readonly userId: string | null
+  readonly gameId: string
   readonly status: GameSessionStatus
   readonly board: BoardSnapshot
   readonly statistics: GameSessionStatistics
   readonly activePiece: ActivePieceState
-  readonly nextPieceKey: LegacyPieceKey
+  readonly nextPieceKey: PieceKey
+  readonly nextPieceIndex: number
 }
 
 export interface CreatePentixGameSessionOptions {
-  readonly sessionId: string
-  readonly boardSize?: BoardSize
-  readonly selectPieceKey?: () => LegacyPieceKey
+  readonly id: string
+  readonly game: PentixGame
 }
 
-function chooseRandomPieceKey(): LegacyPieceKey {
-  const index = Math.floor(Math.random() * PIECE_CATALOG.length)
-  return PIECE_CATALOG[index].key as LegacyPieceKey
+export interface AdvancePentixGameSessionResult {
+  readonly game: PentixGame
+  readonly session: PentixGameSession
 }
 
-function createBoardSnapshot(board: Board): BoardSnapshot {
-  return Object.freeze({
-    width: board.width,
-    height: board.height,
-    rows: board.toRows(),
-  })
-}
-
-function assertSessionId(sessionId: string): string {
-  const normalizedSessionId = sessionId.trim()
-  if (normalizedSessionId.length === 0) {
-    throw new Error('PentixGameSession sessionId must not be empty.')
+function assertSessionId(id: string): string {
+  const normalizedId = id.trim()
+  if (normalizedId.length === 0) {
+    throw new Error('PentixGameSession id must not be empty.')
   }
 
-  return normalizedSessionId
+  return normalizedId
+}
+
+function createBoardFromSnapshot(snapshot: BoardSnapshot): Board {
+  const board = createBoard({
+    width: snapshot.width,
+    height: snapshot.height,
+  })
+
+  for (const row of snapshot.rows) {
+    for (const cell of row) {
+      if (cell.isOccupied) {
+        if (cell.pieceKey === undefined) {
+          throw new Error('An occupied board cell must have a piece key.')
+        }
+
+        board.setCell(cell.row, cell.column, cell.pieceKey)
+      }
+    }
+  }
+
+  return board
+}
+
+function getGamePieceKey(game: PentixGame, pieceIndex: number): PieceKey {
+  const pieceId = game.pieceIds[pieceIndex]
+  if (pieceId === undefined) {
+    throw new RangeError(
+      `PentixGame ${game.id} does not have a piece at index ${pieceIndex}.`,
+    )
+  }
+
+  return getPieceDefinitionById(pieceId).key
+}
+
+function createActivePieceState(
+  key: PieceKey,
+  boardWidth: number,
+): ActivePieceState {
+  return Object.freeze({
+    key,
+    angle: 0 as RotationAngle,
+    origin: Object.freeze({
+      row: 1,
+      column: Math.floor(boardWidth / 2),
+    }),
+  })
 }
 
 export function createPentixGameSession(
   options: CreatePentixGameSessionOptions,
 ): PentixGameSession {
-  const sessionId = assertSessionId(options.sessionId)
-  const board = createBoard(options.boardSize ?? DEFAULT_BOARD_SIZE)
-  const selectPieceKey = options.selectPieceKey ?? chooseRandomPieceKey
-  const activePieceKey = selectPieceKey()
-  const nextPieceKey = selectPieceKey()
-  const origin = Object.freeze({
-    row: 1,
-    column: Math.floor(board.width / 2),
-  })
+  const id = assertSessionId(options.id)
+  const board = createBoardFromSnapshot(options.game.board)
+  const activePieceKey = getGamePieceKey(options.game, 0)
+  const nextPieceKey = getGamePieceKey(options.game, 1)
 
   return Object.freeze({
-    sessionId,
+    id,
+    userId: null,
+    gameId: options.game.id,
     status: 'active' as const,
     board: createBoardSnapshot(board),
     statistics: Object.freeze({
@@ -92,11 +130,42 @@ export function createPentixGameSession(
       level: 1,
       clearedLines: 0,
     }),
-    activePiece: Object.freeze({
-      key: activePieceKey,
-      angle: 0 as RotationAngle,
-      origin,
-    }),
+    activePiece: createActivePieceState(activePieceKey, board.width),
     nextPieceKey,
+    nextPieceIndex: 1,
+  })
+}
+
+export function advancePentixGameSession(
+  session: PentixGameSession,
+  game: PentixGame,
+  selectPieceId?: PieceIdSelector,
+): AdvancePentixGameSessionResult {
+  if (session.gameId !== game.id) {
+    throw new Error(
+      `PentixGameSession ${session.id} does not belong to PentixGame ${game.id}.`,
+    )
+  }
+
+  const activePieceKey = getGamePieceKey(game, session.nextPieceIndex)
+  const nextPieceIndex = session.nextPieceIndex + 1
+  const nextGame = ensurePentixGamePieceAtIndex(
+    game,
+    nextPieceIndex,
+    selectPieceId,
+  )
+  const nextPieceKey = getGamePieceKey(nextGame, nextPieceIndex)
+
+  return Object.freeze({
+    game: nextGame,
+    session: Object.freeze({
+      ...session,
+      activePiece: createActivePieceState(
+        activePieceKey,
+        session.board.width,
+      ),
+      nextPieceKey,
+      nextPieceIndex,
+    }),
   })
 }

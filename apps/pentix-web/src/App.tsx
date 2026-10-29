@@ -37,8 +37,8 @@ function App() {
         </article>
         <article className="card">
           <p className="label">Server</p>
-          <strong>Bootstrap ready</strong>
-          <span>The empty PentixServer starts, but gameplay APIs are still ahead.</span>
+          <strong>Lifecycle ready</strong>
+          <span>PentixServer can create games, start sessions, and advance pieces.</span>
         </article>
       </section>
 
@@ -56,7 +56,7 @@ function App() {
           {previewPieces.map((piece) => (
             <article className="piece-card" key={piece.key}>
               <header>
-                <strong>{piece.name}</strong>
+                <strong>{piece.key}</strong>
                 <span>{piece.colorName}</span>
               </header>
               <p>{piece.minoCount} minos</p>
