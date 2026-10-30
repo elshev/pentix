@@ -31,6 +31,12 @@ async function post(url, path, body) {
   return fetch(`${url}${path}`, options)
 }
 
+async function createTestUser(handle, name = 'Ada') {
+  const response = await post(handle.url, '/users', { name })
+  assert.equal(response.status, 201)
+  return response.json()
+}
+
 function assertValidPieceIds(pieceIds) {
   assert.equal(Array.isArray(pieceIds), true)
   assert.ok(pieceIds.length >= 2)
@@ -43,9 +49,9 @@ function assertValidPieceIds(pieceIds) {
   )
 }
 
-function assertOpeningSession(session, gameId) {
+function assertOpeningSession(session, gameId, userId) {
   assertUuidV7(session.id)
-  assert.equal(session.userId, null)
+  assert.equal(session.userId, userId)
   assert.equal(session.gameId, gameId)
   assert.equal(session.status, 'active')
   assert.equal('sessionId' in session, false)
@@ -173,7 +179,10 @@ test('POST /game-sessions creates a session with a new game by default', async (
   const handle = await startTestServer()
 
   try {
-    const response = await post(handle.url, '/game-sessions')
+    const user = await createTestUser(handle)
+    const response = await post(handle.url, '/game-sessions', {
+      userId: user.id,
+    })
     const session = await response.json()
 
     assert.equal(response.status, 201)
@@ -181,7 +190,7 @@ test('POST /game-sessions creates a session with a new game by default', async (
       response.headers.get('content-type'),
       'application/json; charset=utf-8',
     )
-    assertOpeningSession(session, session.gameId)
+    assertOpeningSession(session, session.gameId, user.id)
     assertUuidV7(session.gameId)
   } finally {
     await handle.close()
@@ -192,15 +201,17 @@ test('POST /game-sessions reuses an existing game', async () => {
   const handle = await startTestServer()
 
   try {
+    const user = await createTestUser(handle)
     const gameResponse = await post(handle.url, '/games')
     const game = await gameResponse.json()
     const sessionResponse = await post(handle.url, '/game-sessions', {
+      userId: user.id,
       gameId: game.id,
     })
     const session = await sessionResponse.json()
 
     assert.equal(sessionResponse.status, 201)
-    assertOpeningSession(session, game.id)
+    assertOpeningSession(session, game.id, user.id)
     assert.equal(
       session.activePiece.key,
       PIECE_CATALOG.find((piece) => piece.id === game.pieceIds[0]).key,
@@ -218,12 +229,16 @@ test('POST /game-sessions treats null and empty game IDs as absent', async () =>
   const handle = await startTestServer()
 
   try {
-    for (const body of [{ gameId: null }, { gameId: '   ' }]) {
+    const user = await createTestUser(handle)
+    for (const body of [
+      { userId: user.id, gameId: null },
+      { userId: user.id, gameId: '   ' },
+    ]) {
       const response = await post(handle.url, '/game-sessions', body)
       const session = await response.json()
 
       assert.equal(response.status, 201)
-      assertOpeningSession(session, session.gameId)
+      assertOpeningSession(session, session.gameId, user.id)
       assertUuidV7(session.gameId)
     }
   } finally {
@@ -235,8 +250,13 @@ test('POST /game-sessions creates distinct independent sessions', async () => {
   const handle = await startTestServer()
 
   try {
-    const firstResponse = await post(handle.url, '/game-sessions')
-    const secondResponse = await post(handle.url, '/game-sessions')
+    const user = await createTestUser(handle)
+    const firstResponse = await post(handle.url, '/game-sessions', {
+      userId: user.id,
+    })
+    const secondResponse = await post(handle.url, '/game-sessions', {
+      userId: user.id,
+    })
     const firstSession = await firstResponse.json()
     const secondSession = await secondResponse.json()
 
@@ -255,7 +275,7 @@ test('POST /game-sessions creates distinct independent sessions', async () => {
   }
 })
 
-test('POST /game-sessions validates body and game identity', async () => {
+test('POST /game-sessions validates body, user, and game identity', async () => {
   const handle = await startTestServer()
 
   try {
@@ -265,6 +285,10 @@ test('POST /game-sessions validates body and game identity', async () => {
       JSON.stringify({ gameId: 42 }),
       JSON.stringify({ gameId: 'not-a-uuid' }),
       JSON.stringify({ gameId: '018cc251-f400-4000-8000-000000000000' }),
+      JSON.stringify({}),
+      JSON.stringify({ userId: null }),
+      JSON.stringify({ userId: 42 }),
+      JSON.stringify({ userId: 'not-a-uuid' }),
     ]
 
     for (const body of invalidBodies) {
@@ -272,10 +296,18 @@ test('POST /game-sessions validates body and game identity', async () => {
       assert.equal(response.status, 400)
     }
 
-    const unknownResponse = await post(handle.url, '/game-sessions', {
+    const user = await createTestUser(handle)
+
+    const unknownUserResponse = await post(handle.url, '/game-sessions', {
+      userId: UNKNOWN_UUID_V7,
+    })
+    assert.equal(unknownUserResponse.status, 404)
+
+    const unknownGameResponse = await post(handle.url, '/game-sessions', {
+      userId: user.id,
       gameId: UNKNOWN_UUID_V7,
     })
-    assert.equal(unknownResponse.status, 404)
+    assert.equal(unknownGameResponse.status, 404)
   } finally {
     await handle.close()
   }
@@ -285,7 +317,10 @@ test('POST next-piece promotes the preview and advances retained state', async (
   const handle = await startTestServer()
 
   try {
-    const sessionResponse = await post(handle.url, '/game-sessions')
+    const user = await createTestUser(handle)
+    const sessionResponse = await post(handle.url, '/game-sessions', {
+      userId: user.id,
+    })
     const session = await sessionResponse.json()
 
     const firstResponse = await post(
@@ -297,7 +332,7 @@ test('POST next-piece promotes the preview and advances retained state', async (
     assert.equal(firstResponse.status, 200)
     assert.equal(firstAdvance.id, session.id)
     assert.equal(firstAdvance.gameId, session.gameId)
-    assert.equal(firstAdvance.userId, null)
+    assert.equal(firstAdvance.userId, user.id)
     assert.equal(firstAdvance.activePiece.key, session.nextPieceKey)
     assert.equal(firstAdvance.activePiece.angle, 0)
     assert.deepEqual(firstAdvance.activePiece.origin, {
@@ -351,12 +386,19 @@ test('sessions sharing one game advance independently', async () => {
   const handle = await startTestServer()
 
   try {
+    const user = await createTestUser(handle)
     const game = await (await post(handle.url, '/games')).json()
     const firstSession = await (
-      await post(handle.url, '/game-sessions', { gameId: game.id })
+      await post(handle.url, '/game-sessions', {
+        userId: user.id,
+        gameId: game.id,
+      })
     ).json()
     const secondSession = await (
-      await post(handle.url, '/game-sessions', { gameId: game.id })
+      await post(handle.url, '/game-sessions', {
+        userId: user.id,
+        gameId: game.id,
+      })
     ).json()
 
     assert.equal(firstSession.gameId, game.id)
@@ -387,6 +429,7 @@ test('server context makes identities and piece selection deterministic', async 
     '018cc251-f400-7000-8000-000000000002',
     '018cc251-f400-7000-8000-000000000003',
     '018cc251-f400-7000-8000-000000000004',
+    '018cc251-f400-7000-8000-000000000005',
   ]
   const handle = await startPentixServer({
     host: '127.0.0.1',
@@ -398,20 +441,27 @@ test('server context makes identities and piece selection deterministic', async 
   })
 
   try {
+    const user = await (await post(handle.url, '/users', { name: 'Ada' })).json()
     const game = await (await post(handle.url, '/games')).json()
     const newGameSession = await (
-      await post(handle.url, '/game-sessions')
+      await post(handle.url, '/game-sessions', { userId: user.id })
     ).json()
     const reusedGameSession = await (
-      await post(handle.url, '/game-sessions', { gameId: game.id })
+      await post(handle.url, '/game-sessions', {
+        userId: user.id,
+        gameId: game.id,
+      })
     ).json()
 
-    assert.equal(game.id, '018cc251-f400-7000-8000-000000000001')
+    assert.equal(user.id, '018cc251-f400-7000-8000-000000000001')
+    assert.equal(game.id, '018cc251-f400-7000-8000-000000000002')
     assert.deepEqual(game.pieceIds, [3, 3])
-    assert.equal(newGameSession.id, '018cc251-f400-7000-8000-000000000003')
-    assert.equal(newGameSession.gameId, '018cc251-f400-7000-8000-000000000002')
-    assert.equal(reusedGameSession.id, '018cc251-f400-7000-8000-000000000004')
+    assert.equal(newGameSession.id, '018cc251-f400-7000-8000-000000000004')
+    assert.equal(newGameSession.gameId, '018cc251-f400-7000-8000-000000000003')
+    assert.equal(newGameSession.userId, user.id)
+    assert.equal(reusedGameSession.id, '018cc251-f400-7000-8000-000000000005')
     assert.equal(reusedGameSession.gameId, game.id)
+    assert.equal(reusedGameSession.userId, user.id)
     assert.equal(reusedGameSession.activePiece.key, '3Corner')
     assert.equal(reusedGameSession.nextPieceKey, '3Corner')
 
@@ -434,7 +484,9 @@ test('games and sessions are scoped to their server instance', async () => {
   try {
     const gameResponse = await post(firstHandle.url, '/games')
     const game = await gameResponse.json()
+    const user = await createTestUser(secondHandle)
     const sessionResponse = await post(secondHandle.url, '/game-sessions', {
+      userId: user.id,
       gameId: game.id,
     })
 
@@ -445,15 +497,104 @@ test('games and sessions are scoped to their server instance', async () => {
   }
 })
 
-test('PentixServer still does not expose player endpoints', async () => {
+test('POST /users creates and retains a user', async () => {
   const handle = await startTestServer()
 
   try {
-    const response = await fetch(`${handle.url}/players`)
-    const payload = await response.json()
+    const response = await post(handle.url, '/users', { name: '  Ada  ' })
+    const user = await response.json()
 
-    assert.equal(response.status, 404)
-    assert.match(payload.message, /not implemented yet/i)
+    assert.equal(response.status, 201)
+    assert.equal(
+      response.headers.get('content-type'),
+      'application/json; charset=utf-8',
+    )
+    assertUuidV7(user.id)
+    assert.equal(user.name, 'Ada')
+  } finally {
+    await handle.close()
+  }
+})
+
+test('POST /users validates its name', async () => {
+  const handle = await startTestServer()
+
+  try {
+    for (const body of [
+      '{invalid-json',
+      JSON.stringify([]),
+      JSON.stringify({}),
+      JSON.stringify({ name: 42 }),
+      JSON.stringify({ name: '' }),
+      JSON.stringify({ name: '   ' }),
+    ]) {
+      const response = await post(handle.url, '/users', body)
+      assert.equal(response.status, 400)
+    }
+  } finally {
+    await handle.close()
+  }
+})
+
+test('POST /users rejects duplicate names case-insensitively', async () => {
+  const handle = await startTestServer()
+
+  try {
+    await createTestUser(handle, 'Ada')
+    const duplicateResponse = await post(handle.url, '/users', {
+      name: '  ada  ',
+    })
+
+    assert.equal(duplicateResponse.status, 409)
+
+    const listResponse = await fetch(`${handle.url}/users`)
+    const payload = await listResponse.json()
+    assert.equal(payload.users.length, 1)
+  } finally {
+    await handle.close()
+  }
+})
+
+test('GET /users lists retained users', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const emptyResponse = await fetch(`${handle.url}/users`)
+    const emptyPayload = await emptyResponse.json()
+    assert.equal(emptyResponse.status, 200)
+    assert.deepEqual(emptyPayload, { users: [] })
+
+    await createTestUser(handle, 'Ada')
+    await createTestUser(handle, 'Grace')
+
+    const listResponse = await fetch(`${handle.url}/users`)
+    const payload = await listResponse.json()
+    assert.equal(listResponse.status, 200)
+    assert.equal(payload.users.length, 2)
+    assert.deepEqual(
+      payload.users.map((user) => user.name).sort(),
+      ['Ada', 'Grace'],
+    )
+  } finally {
+    await handle.close()
+  }
+})
+
+test('GET /users/{id} returns a user or rejects invalid ids', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const user = await createTestUser(handle, 'Ada')
+
+    const foundResponse = await fetch(`${handle.url}/users/${user.id}`)
+    assert.equal(foundResponse.status, 200)
+    assert.deepEqual(await foundResponse.json(), user)
+
+    const malformedResponse = await fetch(`${handle.url}/users/not-a-uuid`)
+    assert.equal(malformedResponse.status, 400)
+
+    const unknownResponse = await fetch(`${handle.url}/users/${UNKNOWN_UUID_V7}`)
+    assert.equal(unknownResponse.status, 404)
   } finally {
     await handle.close()
   }
