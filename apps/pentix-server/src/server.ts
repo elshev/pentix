@@ -9,9 +9,11 @@ import {
   advancePentixGameSession,
   createPentixGame,
   createPentixGameSession,
+  createUser,
   type PentixGame,
   type PentixGameSession,
   type PieceIdSelector,
+  type User,
 } from '../../../packages/pentix-core/dist/index.js'
 import { v7 as uuidv7, validate, version } from 'uuid'
 
@@ -50,6 +52,7 @@ class HttpError extends Error {
 class PentixGameLifecycle {
   private readonly games = new Map<string, PentixGame>()
   private readonly sessions = new Map<string, PentixGameSession>()
+  private readonly users = new Map<string, User>()
   private readonly createId: () => string
   private readonly selectPieceId?: PieceIdSelector
 
@@ -72,7 +75,35 @@ class PentixGameLifecycle {
     return this.games.get(gameId)
   }
 
-  createSession(gameId?: string): PentixGameSession {
+  createUser(name: string): User {
+    const normalizedName = name.trim()
+    for (const existingUser of this.users.values()) {
+      if (existingUser.name.toLowerCase() === normalizedName.toLowerCase()) {
+        throw new HttpError(409, `User with name "${normalizedName}" already exists.`)
+      }
+    }
+
+    const user = createUser({
+      id: this.createId(),
+      name: normalizedName,
+    })
+    this.users.set(user.id, user)
+    return user
+  }
+
+  getUser(userId: string): User | undefined {
+    return this.users.get(userId)
+  }
+
+  listUsers(): User[] {
+    return [...this.users.values()]
+  }
+
+  createSession(userId: string, gameId?: string): PentixGameSession {
+    if (this.getUser(userId) === undefined) {
+      throw new HttpError(404, `User ${userId} was not found.`)
+    }
+
     const game = gameId === undefined ? this.createGame() : this.getGame(gameId)
     if (game === undefined) {
       throw new HttpError(404, `PentixGame ${gameId} was not found.`)
@@ -80,6 +111,7 @@ class PentixGameLifecycle {
 
     const session = createPentixGameSession({
       id: this.createId(),
+      userId,
       game,
     })
     this.sessions.set(session.id, session)
@@ -238,6 +270,48 @@ function readOptionalGameId(body: unknown): string | undefined {
   return gameId
 }
 
+function readRequiredName(body: unknown): string {
+  if (!isJsonRecord(body)) {
+    throw new HttpError(400, 'User request body must be a JSON object.')
+  }
+
+  if (body.name === undefined) {
+    throw new HttpError(400, 'User name is required.')
+  }
+
+  if (typeof body.name !== 'string') {
+    throw new HttpError(400, 'User name must be a string.')
+  }
+
+  const name = body.name.trim()
+  if (name.length === 0) {
+    throw new HttpError(400, 'User name must not be empty.')
+  }
+
+  return name
+}
+
+function readRequiredUserId(body: unknown): string {
+  if (!isJsonRecord(body)) {
+    throw new HttpError(400, 'Game session request body must be a JSON object.')
+  }
+
+  if (body.userId === undefined || body.userId === null) {
+    throw new HttpError(400, 'Game session userId is required.')
+  }
+
+  if (typeof body.userId !== 'string') {
+    throw new HttpError(400, 'Game session userId must be a string.')
+  }
+
+  const userId = body.userId.trim()
+  if (!isUuidV7(userId)) {
+    throw new HttpError(400, 'Game session userId must be a UUIDv7 value.')
+  }
+
+  return userId
+}
+
 function isUuidV7(value: string): boolean {
   return validate(value) && version(value) === 7
 }
@@ -275,8 +349,37 @@ async function handleRequest(
   }
 
   if (request.method === 'POST' && pathname === '/game-sessions') {
-    const gameId = readOptionalGameId(await readJsonBody(request))
-    writeJson(response, 201, lifecycle.createSession(gameId))
+    const body = await readJsonBody(request)
+    const gameId = readOptionalGameId(body)
+    const userId = readRequiredUserId(body)
+    writeJson(response, 201, lifecycle.createSession(userId, gameId))
+    return
+  }
+
+  if (request.method === 'POST' && pathname === '/users') {
+    const name = readRequiredName(await readJsonBody(request))
+    writeJson(response, 201, lifecycle.createUser(name))
+    return
+  }
+
+  if (request.method === 'GET' && pathname === '/users') {
+    writeJson(response, 200, { users: lifecycle.listUsers() })
+    return
+  }
+
+  const userMatch = /^\/users\/([^/]+)$/.exec(pathname)
+  if (request.method === 'GET' && userMatch !== null) {
+    const userId = userMatch[1]
+    if (!isUuidV7(userId)) {
+      throw new HttpError(400, 'User id must be a UUIDv7 value.')
+    }
+
+    const user = lifecycle.getUser(userId)
+    if (user === undefined) {
+      throw new HttpError(404, `User ${userId} was not found.`)
+    }
+
+    writeJson(response, 200, user)
     return
   }
 
@@ -298,7 +401,7 @@ async function handleRequest(
     method: request.method ?? 'UNKNOWN',
     path: pathname,
     message:
-      'PentixServer is running. Supported endpoints are POST /games, POST /game-sessions, and POST /game-sessions/{id}/next-piece. Player and history endpoints are not implemented yet.',
+      'PentixServer is running. Supported endpoints are POST /games, POST /game-sessions, POST /game-sessions/{id}/next-piece, POST /users, GET /users, and GET /users/{id}.',
   })
 }
 

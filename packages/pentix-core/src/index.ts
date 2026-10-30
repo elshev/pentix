@@ -47,3 +47,5 @@ export type {
   RotationAngle,
   RotationMode,
 } from './piece.js'
+export { createUser } from './user.js'
+export type { CreateUserOptions, User } from './user.js'

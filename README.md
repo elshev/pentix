@@ -2,7 +2,7 @@
 
 Pentix is a modern TypeScript reboot of a legacy Delphi Pentix/Tetris project. The repository is being prepared for two applications that share the same game-domain code:
 
-- `PentixServer`: the future backend responsible for players, Pentix games, and Pentix game history
+- `PentixServer`: the future backend responsible for users, Pentix games, and Pentix game history
 - `Pentix` web browser application: the future client that will render boards, statistics, menus, and game flow in the browser
 
 This implementation increment does not build the full game yet. It establishes the repository layout, adds narrow `PentixServer` game and session lifecycle endpoints, and shares the legacy piece, board, game, and session primitives across TypeScript code.
@@ -17,6 +17,7 @@ This implementation increment does not build the full game yet. It establishes t
 - `Tick`: unit of internal game time
 - `PentixGame`: one game for many players
 - `PentixGameSession`: one game for one player
+- `User`: a registered user assigned to a `PentixGameSession`
 
 ## Repository Layout
 
@@ -36,19 +37,18 @@ docs/
 
 The codebase currently includes:
 
-- a `PentixServer` implemented with Node.js and TypeScript, including game creation, session start, and next-piece lifecycle endpoints
+- a `PentixServer` implemented with Node.js and TypeScript, including user management, game creation, session start, and next-piece lifecycle endpoints
 - a shared `pentix-core` package with:
   - `Piece`
   - `Offset`
   - Delphi-compatible rotation behavior
   - the full legacy piece catalog with stable numeric IDs and simplified keys
   - `Board` and `BoardCell`
-  - serializable `PentixGame` and `PentixGameSession` snapshots
+  - serializable `User`, `PentixGame`, and `PentixGameSession` snapshots
 - a lightweight browser placeholder that imports the shared piece catalog
 
 The following are intentionally not implemented yet:
 
-- player management and user-assignment endpoints
 - durable persistence, restart-safe resume, and history endpoints
 - multiplayer orchestration beyond sharing one game's piece sequence
 - gameplay movement, scoring, ticks, and line-clearing endpoints
@@ -56,11 +56,14 @@ The following are intentionally not implemented yet:
 
 ## Server API
 
+- `POST /users` creates a `User` with a UUIDv7 `id` and a required non-empty `name`; a duplicate name (compared case-insensitively after trimming) is rejected with `409 Conflict`.
+- `GET /users` lists retained users as `{ "users": [...] }`.
+- `GET /users/{id}` returns a single retained user.
 - `POST /games` initializes a `PentixGame` with a UUIDv7 ID, an optional name, an empty default board, and at least two catalog piece IDs.
-- `POST /game-sessions` starts a `PentixGameSession`. An omitted, null, or empty `gameId` creates a game; a supplied UUIDv7 reuses an existing game. Sessions use `id`, `gameId`, `userId: null`, and a zero-based `nextPieceIndex`.
+- `POST /game-sessions` starts a `PentixGameSession` for a required `userId` that references a retained user. An omitted, null, or empty `gameId` creates a game; a supplied UUIDv7 reuses an existing game. Sessions use `id`, `gameId`, `userId`, and a zero-based `nextPieceIndex`.
 - `POST /game-sessions/{id}/next-piece` promotes the preview to the active piece, advances the cursor, extends the parent game's piece sequence when needed, and returns the updated session.
 
-Games and sessions are retained only in the memory of the server process that created them. Restarting the server clears them. A next-piece request is state-changing and is not idempotent, so clients must not blindly retry a successful-looking request after an uncertain network failure.
+Games, sessions, and users are retained only in the memory of the server process that created them. Restarting the server clears them. A next-piece request is state-changing and is not idempotent, so clients must not blindly retry a successful-looking request after an uncertain network failure.
 
 ## Commands
 

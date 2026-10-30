@@ -36,7 +36,7 @@ export interface ActivePieceState {
 
 export interface PentixGameSession {
   readonly id: string
-  readonly userId: string | null
+  readonly userId: string
   readonly gameId: string
   readonly status: GameSessionStatus
   readonly board: BoardSnapshot
@@ -48,6 +48,7 @@ export interface PentixGameSession {
 
 export interface CreatePentixGameSessionOptions {
   readonly id: string
+  readonly userId: string
   readonly game: PentixGame
 }
 
@@ -63,6 +64,15 @@ function assertSessionId(id: string): string {
   }
 
   return normalizedId
+}
+
+function assertUserId(userId: string): string {
+  const normalizedUserId = userId.trim()
+  if (normalizedUserId.length === 0) {
+    throw new Error('PentixGameSession userId must not be empty.')
+  }
+
+  return normalizedUserId
 }
 
 function createBoardFromSnapshot(snapshot: BoardSnapshot): Board {
@@ -121,7 +131,7 @@ export function createPentixGameSession(
 
   return Object.freeze({
     id,
-    userId: null,
+    userId: assertUserId(options.userId),
     gameId: options.game.id,
     status: 'active' as const,
     board: createBoardSnapshot(board),

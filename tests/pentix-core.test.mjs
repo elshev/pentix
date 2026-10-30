@@ -5,6 +5,7 @@ import {
   advancePentixGameSession,
   createPentixGame,
   createPentixGameSession,
+  createUser,
   Board,
   DEFAULT_BOARD_SIZE,
   PIECE_CATALOG,
@@ -202,11 +203,12 @@ test('game session initializer starts from its parent game', () => {
   })
   const session = createPentixGameSession({
     id: 'session-1',
+    userId: 'user-1',
     game,
   })
 
   assert.equal(session.id, 'session-1')
-  assert.equal(session.userId, null)
+  assert.equal(session.userId, 'user-1')
   assert.equal(session.gameId, 'game-1')
   assert.equal(session.status, 'active')
   assert.equal('sessionId' in session, false)
@@ -234,6 +236,7 @@ test('next-piece advancement extends the game and preserves session fields', () 
   })
   let session = createPentixGameSession({
     id: 'session-1',
+    userId: 'user-1',
     game,
   })
 
@@ -251,7 +254,7 @@ test('next-piece advancement extends the game and preserves session fields', () 
   assert.deepEqual(session.activePiece.origin, { row: 1, column: 6 })
   assert.equal(session.nextPieceKey, '4T')
   assert.equal(session.nextPieceIndex, 2)
-  assert.equal(session.userId, null)
+  assert.equal(session.userId, 'user-1')
   assert.equal(session.gameId, 'game-1')
   assert.deepEqual(session.statistics, {
     score: 0,
@@ -277,10 +280,12 @@ test('sessions using one game share sequence values without sharing state', () =
   })
   const firstSession = createPentixGameSession({
     id: 'session-1',
+    userId: 'user-1',
     game,
   })
   const secondSession = createPentixGameSession({
     id: 'session-2',
+    userId: 'user-1',
     game,
   })
 
@@ -299,4 +304,43 @@ test('sessions using one game share sequence values without sharing state', () =
   assert.equal(advanced.session.activePiece.key, '5T')
   assert.equal(secondSession.nextPieceIndex, 1)
   assert.equal(secondSession.activePiece.key, '3Corner')
+})
+
+test('user initializer creates a frozen snapshot with a trimmed name', () => {
+  const user = createUser({
+    id: 'user-1',
+    name: '  Ada  ',
+  })
+
+  assert.deepEqual(user, { id: 'user-1', name: 'Ada' })
+  assert.equal(Object.isFrozen(user), true)
+  assert.doesNotThrow(() => JSON.stringify(user))
+})
+
+test('user initializer rejects empty ids and names', () => {
+  assert.throws(
+    () => createUser({ id: '   ', name: 'Ada' }),
+    /User id must not be empty/,
+  )
+  assert.throws(
+    () => createUser({ id: 'user-1', name: '   ' }),
+    /User name must not be empty/,
+  )
+})
+
+test('game session creation requires a non-empty userId', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14]),
+  })
+
+  assert.throws(
+    () =>
+      createPentixGameSession({
+        id: 'session-1',
+        userId: '   ',
+        game,
+      }),
+    /userId must not be empty/,
+  )
 })
