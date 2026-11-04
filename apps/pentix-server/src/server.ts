@@ -21,7 +21,9 @@ import {
   type RotateDirection,
   type User,
 } from '../../../packages/pentix-core/dist/index.js'
-import { v7 as uuidv7, validate, version } from 'uuid'
+import { v7 as uuidv7 } from 'uuid'
+
+import { checkUuid, HttpError, HttpStatus } from './http.js'
 
 export interface PentixServerContext {
   readonly createId?: () => string
@@ -44,16 +46,6 @@ const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 3100
 const REQUEST_URL_BASE = 'http://localhost'
 const MAX_JSON_BODY_BYTES = 1024 * 1024
-
-class HttpError extends Error {
-  readonly statusCode: number
-
-  constructor(statusCode: number, message: string) {
-    super(message)
-    this.name = 'HttpError'
-    this.statusCode = statusCode
-  }
-}
 
 class PentixGameLifecycle {
   private readonly games = new Map<string, PentixGame>()
@@ -85,7 +77,7 @@ class PentixGameLifecycle {
     const normalizedName = name.trim()
     for (const existingUser of this.users.values()) {
       if (existingUser.name.toLowerCase() === normalizedName.toLowerCase()) {
-        throw new HttpError(409, `User with name "${normalizedName}" already exists.`)
+        throw new HttpError(HttpStatus.conflict409, `User with name "${normalizedName}" already exists.`)
       }
     }
 
@@ -107,12 +99,12 @@ class PentixGameLifecycle {
 
   createSession(userId: string, gameId?: string): PentixGameSession {
     if (this.getUser(userId) === undefined) {
-      throw new HttpError(404, `User ${userId} was not found.`)
+      throw new HttpError(HttpStatus.notFound404, `User ${userId} was not found.`)
     }
 
     const game = gameId === undefined ? this.createGame() : this.getGame(gameId)
     if (game === undefined) {
-      throw new HttpError(404, `PentixGame ${gameId} was not found.`)
+      throw new HttpError(HttpStatus.notFound404, `PentixGame ${gameId} was not found.`)
     }
 
     const session = createPentixGameSession({
@@ -127,12 +119,12 @@ class PentixGameLifecycle {
   advanceSession(sessionId: string): PentixGameSession {
     const session = this.sessions.get(sessionId)
     if (session === undefined) {
-      throw new HttpError(404, `PentixGameSession ${sessionId} was not found.`)
+      throw new HttpError(HttpStatus.notFound404, `PentixGameSession ${sessionId} was not found.`)
     }
 
     const game = this.games.get(session.gameId)
     if (game === undefined) {
-      throw new HttpError(404, `PentixGame ${session.gameId} was not found.`)
+      throw new HttpError(HttpStatus.notFound404, `PentixGame ${session.gameId} was not found.`)
     }
 
     const result = advancePentixGameSession(
@@ -151,12 +143,12 @@ class PentixGameLifecycle {
   } {
     const session = this.sessions.get(sessionId)
     if (session === undefined) {
-      throw new HttpError(404, `PentixGameSession ${sessionId} was not found.`)
+      throw new HttpError(HttpStatus.notFound404, `PentixGameSession ${sessionId} was not found.`)
     }
 
     const game = this.games.get(session.gameId)
     if (game === undefined) {
-      throw new HttpError(404, `PentixGame ${session.gameId} was not found.`)
+      throw new HttpError(HttpStatus.notFound404, `PentixGame ${session.gameId} was not found.`)
     }
 
     return { session, game }
@@ -228,7 +220,7 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
         isSettled = true
         cleanup()
         request.resume()
-        reject(new HttpError(400, 'Request JSON body is too large.'))
+        reject(new HttpError(HttpStatus.badRequest400, 'Request JSON body is too large.'))
         return
       }
 
@@ -272,7 +264,7 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   try {
     return JSON.parse(body) as unknown
   } catch {
-    throw new HttpError(400, 'Request body must be valid JSON.')
+    throw new HttpError(HttpStatus.badRequest400, 'Request body must be valid JSON.')
   }
 }
 
@@ -286,7 +278,7 @@ function readOptionalName(body: unknown): string {
   }
 
   if (!isJsonRecord(body)) {
-    throw new HttpError(400, 'Game request body must be a JSON object.')
+    throw new HttpError(HttpStatus.badRequest400, 'Game request body must be a JSON object.')
   }
 
   if (body.name === undefined) {
@@ -294,7 +286,7 @@ function readOptionalName(body: unknown): string {
   }
 
   if (typeof body.name !== 'string') {
-    throw new HttpError(400, 'Game name must be a string when supplied.')
+    throw new HttpError(HttpStatus.badRequest400, 'Game name must be a string when supplied.')
   }
 
   return body.name.trim()
@@ -306,7 +298,7 @@ function readOptionalGameId(body: unknown): string | undefined {
   }
 
   if (!isJsonRecord(body)) {
-    throw new HttpError(400, 'Game session request body must be a JSON object.')
+    throw new HttpError(HttpStatus.badRequest400, 'Game session request body must be a JSON object.')
   }
 
   if (body.gameId === undefined || body.gameId === null) {
@@ -314,7 +306,7 @@ function readOptionalGameId(body: unknown): string | undefined {
   }
 
   if (typeof body.gameId !== 'string') {
-    throw new HttpError(400, 'Game session gameId must be a string, null, or omitted.')
+    throw new HttpError(HttpStatus.badRequest400, 'Game session gameId must be a string, null, or omitted.')
   }
 
   const gameId = body.gameId.trim()
@@ -322,9 +314,7 @@ function readOptionalGameId(body: unknown): string | undefined {
     return undefined
   }
 
-  if (!isUuidV7(gameId)) {
-    throw new HttpError(400, 'Game session gameId must be a UUIDv7 value.')
-  }
+  checkUuid(gameId, 'Game session gameId')
 
   return gameId
 }
@@ -335,22 +325,19 @@ function readDirection<T extends string>(
   label: string,
 ): T {
   if (!isJsonRecord(body)) {
-    throw new HttpError(400, 'Game session request body must be a JSON object.')
+    throw new HttpError(HttpStatus.badRequest400, 'Game session request body must be a JSON object.')
   }
 
   if (body.direction === undefined) {
-    throw new HttpError(400, `${label} direction is required.`)
+    throw new HttpError(HttpStatus.badRequest400, `${label} direction is required.`)
   }
 
   if (typeof body.direction !== 'string') {
-    throw new HttpError(400, `${label} direction must be a string.`)
+    throw new HttpError(HttpStatus.badRequest400, `${label} direction must be a string.`)
   }
 
   if (!(allowed as readonly string[]).includes(body.direction)) {
-    throw new HttpError(
-      400,
-      `${label} direction must be one of: ${allowed.join(', ')}.`,
-    )
+    throw new HttpError(HttpStatus.badRequest400, `${label} direction must be one of: ${allowed.join(', ')}.`)
   }
 
   return body.direction as T
@@ -358,20 +345,20 @@ function readDirection<T extends string>(
 
 function readRequiredName(body: unknown): string {
   if (!isJsonRecord(body)) {
-    throw new HttpError(400, 'User request body must be a JSON object.')
+    throw new HttpError(HttpStatus.badRequest400, 'User request body must be a JSON object.')
   }
 
   if (body.name === undefined) {
-    throw new HttpError(400, 'User name is required.')
+    throw new HttpError(HttpStatus.badRequest400, 'User name is required.')
   }
 
   if (typeof body.name !== 'string') {
-    throw new HttpError(400, 'User name must be a string.')
+    throw new HttpError(HttpStatus.badRequest400, 'User name must be a string.')
   }
 
   const name = body.name.trim()
   if (name.length === 0) {
-    throw new HttpError(400, 'User name must not be empty.')
+    throw new HttpError(HttpStatus.badRequest400, 'User name must not be empty.')
   }
 
   return name
@@ -379,27 +366,21 @@ function readRequiredName(body: unknown): string {
 
 function readRequiredUserId(body: unknown): string {
   if (!isJsonRecord(body)) {
-    throw new HttpError(400, 'Game session request body must be a JSON object.')
+    throw new HttpError(HttpStatus.badRequest400, 'Game session request body must be a JSON object.')
   }
 
   if (body.userId === undefined || body.userId === null) {
-    throw new HttpError(400, 'Game session userId is required.')
+    throw new HttpError(HttpStatus.badRequest400, 'Game session userId is required.')
   }
 
   if (typeof body.userId !== 'string') {
-    throw new HttpError(400, 'Game session userId must be a string.')
+    throw new HttpError(HttpStatus.badRequest400, 'Game session userId must be a string.')
   }
 
   const userId = body.userId.trim()
-  if (!isUuidV7(userId)) {
-    throw new HttpError(400, 'Game session userId must be a UUIDv7 value.')
-  }
+  checkUuid(userId, 'Game session userId')
 
   return userId
-}
-
-function isUuidV7(value: string): boolean {
-  return validate(value) && version(value) === 7
 }
 
 function formatHostForUrl(host: string): string {
@@ -417,7 +398,7 @@ function writeError(response: ServerResponse, error: unknown): void {
   }
 
   console.error(error)
-  writeJson(response, 500, { message: 'Internal server error.' })
+  writeJson(response, HttpStatus.internalServerError500, { message: 'Internal server error.', })
 }
 
 async function handleRequest(
@@ -430,7 +411,7 @@ async function handleRequest(
 
   if (request.method === 'POST' && pathname === '/games') {
     const name = readOptionalName(await readJsonBody(request))
-    writeJson(response, 201, lifecycle.createGame(name))
+    writeJson(response, HttpStatus.created201, lifecycle.createGame(name))
     return
   }
 
@@ -438,34 +419,32 @@ async function handleRequest(
     const body = await readJsonBody(request)
     const gameId = readOptionalGameId(body)
     const userId = readRequiredUserId(body)
-    writeJson(response, 201, lifecycle.createSession(userId, gameId))
+    writeJson(response, HttpStatus.created201, lifecycle.createSession(userId, gameId))
     return
   }
 
   if (request.method === 'POST' && pathname === '/users') {
     const name = readRequiredName(await readJsonBody(request))
-    writeJson(response, 201, lifecycle.createUser(name))
+    writeJson(response, HttpStatus.created201, lifecycle.createUser(name))
     return
   }
 
   if (request.method === 'GET' && pathname === '/users') {
-    writeJson(response, 200, { users: lifecycle.listUsers() })
+    writeJson(response, HttpStatus.ok200, { users: lifecycle.listUsers() })
     return
   }
 
   const userMatch = /^\/users\/([^/]+)$/.exec(pathname)
   if (request.method === 'GET' && userMatch !== null) {
     const userId = userMatch[1]
-    if (!isUuidV7(userId)) {
-      throw new HttpError(400, 'User id must be a UUIDv7 value.')
-    }
+    checkUuid(userId, 'User id')
 
     const user = lifecycle.getUser(userId)
     if (user === undefined) {
-      throw new HttpError(404, `User ${userId} was not found.`)
+      throw new HttpError(HttpStatus.notFound404, `User ${userId} was not found.`)
     }
 
-    writeJson(response, 200, user)
+    writeJson(response, HttpStatus.ok200, user)
     return
   }
 
@@ -474,69 +453,59 @@ async function handleRequest(
   )
   if (request.method === 'POST' && nextPieceMatch !== null) {
     const sessionId = nextPieceMatch[1]
-    if (!isUuidV7(sessionId)) {
-      throw new HttpError(400, 'Game session id must be a UUIDv7 value.')
-    }
+    checkUuid(sessionId, 'Game session id')
 
-    writeJson(response, 200, lifecycle.advanceSession(sessionId))
+    writeJson(response, HttpStatus.ok200, lifecycle.advanceSession(sessionId))
     return
   }
 
   const moveMatch = /^\/game-sessions\/([^/]+)\/move$/.exec(pathname)
   if (request.method === 'POST' && moveMatch !== null) {
     const sessionId = moveMatch[1]
-    if (!isUuidV7(sessionId)) {
-      throw new HttpError(400, 'Game session id must be a UUIDv7 value.')
-    }
+    checkUuid(sessionId, 'Game session id')
 
     const direction = readDirection<MoveDirection>(
       await readJsonBody(request),
       ['left', 'right'],
       'Move',
     )
-    writeJson(response, 200, lifecycle.moveSession(sessionId, direction))
+    writeJson(response, HttpStatus.ok200, lifecycle.moveSession(sessionId, direction))
     return
   }
 
   const rotateMatch = /^\/game-sessions\/([^/]+)\/rotate$/.exec(pathname)
   if (request.method === 'POST' && rotateMatch !== null) {
     const sessionId = rotateMatch[1]
-    if (!isUuidV7(sessionId)) {
-      throw new HttpError(400, 'Game session id must be a UUIDv7 value.')
-    }
+    checkUuid(sessionId, 'Game session id')
 
     const direction = readDirection<RotateDirection>(
       await readJsonBody(request),
       ['clockwise', 'counterclockwise'],
       'Rotate',
     )
-    writeJson(response, 200, lifecycle.rotateSession(sessionId, direction))
+    writeJson(response, HttpStatus.ok200, lifecycle.rotateSession(sessionId, direction))
     return
   }
 
   const tickMatch = /^\/game-sessions\/([^/]+)\/tick$/.exec(pathname)
   if (request.method === 'POST' && tickMatch !== null) {
     const sessionId = tickMatch[1]
-    if (!isUuidV7(sessionId)) {
-      throw new HttpError(400, 'Game session id must be a UUIDv7 value.')
-    }
+    checkUuid(sessionId, 'Game session id')
 
-    writeJson(response, 200, lifecycle.tickSession(sessionId))
+    writeJson(response, HttpStatus.ok200, lifecycle.tickSession(sessionId))
     return
   }
 
   const dropMatch = /^\/game-sessions\/([^/]+)\/drop$/.exec(pathname)
   if (request.method === 'POST' && dropMatch !== null) {
     const sessionId = dropMatch[1]
-    if (!isUuidV7(sessionId)) {
-      throw new HttpError(400, 'Game session id must be a UUIDv7 value.')
-    }
+    checkUuid(sessionId, 'Game session id')
 
-    writeJson(response, 200, lifecycle.dropSession(sessionId))
+    writeJson(response, HttpStatus.ok200, lifecycle.dropSession(sessionId))
     return
   }
 
-  writeJson(response, 404, {
+  writeJson(response, HttpStatus.notFound404, {
     service: 'PentixServer',
     method: request.method ?? 'UNKNOWN',
     path: pathname,
