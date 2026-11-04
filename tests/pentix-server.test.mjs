@@ -61,6 +61,7 @@ function assertOpeningSession(session, gameId, userId) {
     score: 0,
     level: 1,
     clearedLines: 0,
+    blocks: 0,
   })
   assert.deepEqual(session.activePiece.origin, { row: 1, column: 6 })
   assert.equal(session.activePiece.angle, 0)
@@ -622,6 +623,153 @@ test('PentixServer returns valid IPv6 URLs', async (t) => {
 
     const response = await fetch(handle.url)
     assert.equal(response.status, 404)
+  } finally {
+    await handle.close()
+  }
+})
+
+test('POST /game-sessions/{id}/move shifts the active piece', async () => {
+  const handle = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: { selectPieceId: () => 3 },
+  })
+
+  try {
+    const user = await createTestUser(handle)
+    const session = await (
+      await post(handle.url, '/game-sessions', { userId: user.id })
+    ).json()
+
+    const response = await post(handle.url, `/game-sessions/${session.id}/move`, {
+      direction: 'right',
+    })
+    const moved = await response.json()
+
+    assert.equal(response.status, 200)
+    assert.equal(moved.id, session.id)
+    assert.equal(
+      moved.activePiece.origin.column,
+      session.activePiece.origin.column + 1,
+    )
+  } finally {
+    await handle.close()
+  }
+})
+
+test('POST /game-sessions/{id}/rotate rotates a full-rotation piece', async () => {
+  const handle = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: { selectPieceId: () => 3 },
+  })
+
+  try {
+    const user = await createTestUser(handle)
+    const session = await (
+      await post(handle.url, '/game-sessions', { userId: user.id })
+    ).json()
+    assert.equal(session.activePiece.key, '3Corner')
+
+    const response = await post(
+      handle.url,
+      `/game-sessions/${session.id}/rotate`,
+      { direction: 'clockwise' },
+    )
+    const rotated = await response.json()
+
+    assert.equal(response.status, 200)
+    assert.equal(rotated.activePiece.angle, 270)
+  } finally {
+    await handle.close()
+  }
+})
+
+test('POST /game-sessions/{id}/tick moves the piece down', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const user = await createTestUser(handle)
+    const session = await (
+      await post(handle.url, '/game-sessions', { userId: user.id })
+    ).json()
+
+    const response = await post(handle.url, `/game-sessions/${session.id}/tick`)
+    const ticked = await response.json()
+
+    assert.equal(response.status, 200)
+    assert.equal(ticked.activePiece.origin.row, session.activePiece.origin.row + 1)
+  } finally {
+    await handle.close()
+  }
+})
+
+test('POST /game-sessions/{id}/drop defers locking until the next tick', async () => {
+  const handle = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: { selectPieceId: () => 3 },
+  })
+
+  try {
+    const user = await createTestUser(handle)
+    const session = await (
+      await post(handle.url, '/game-sessions', { userId: user.id })
+    ).json()
+
+    const dropResponse = await post(handle.url, `/game-sessions/${session.id}/drop`)
+    const dropped = await dropResponse.json()
+
+    assert.equal(dropResponse.status, 200)
+    assert.equal(dropped.status, 'active')
+    assert.equal(dropped.activePiece.origin.row, 21)
+    assert.equal(
+      dropped.board.rows.flat().some((cell) => cell.isOccupied),
+      false,
+    )
+    assert.ok(dropped.statistics.score > 0)
+
+    const tickResponse = await post(handle.url, `/game-sessions/${session.id}/tick`)
+    const settled = await tickResponse.json()
+
+    assert.equal(tickResponse.status, 200)
+    assert.equal(settled.status, 'active')
+    assert.equal(settled.statistics.blocks, 1)
+    assert.equal(
+      settled.board.rows.flat().some((cell) => cell.isOccupied),
+      true,
+    )
+  } finally {
+    await handle.close()
+  }
+})
+
+test('gameplay endpoints validate direction and unknown sessions', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const user = await createTestUser(handle)
+    const session = await (
+      await post(handle.url, '/game-sessions', { userId: user.id })
+    ).json()
+
+    const badMove = await post(handle.url, `/game-sessions/${session.id}/move`, {
+      direction: 'up',
+    })
+    assert.equal(badMove.status, 400)
+
+    const missingDirection = await post(
+      handle.url,
+      `/game-sessions/${session.id}/rotate`,
+      {},
+    )
+    assert.equal(missingDirection.status, 400)
+
+    const unknownTick = await post(
+      handle.url,
+      `/game-sessions/${UNKNOWN_UUID_V7}/tick`,
+    )
+    assert.equal(unknownTick.status, 404)
   } finally {
     await handle.close()
   }

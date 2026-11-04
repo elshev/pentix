@@ -37,7 +37,7 @@ docs/
 
 The codebase currently includes:
 
-- a `PentixServer` implemented with Node.js and TypeScript, including user management, game creation, session start, and next-piece lifecycle endpoints
+- a `PentixServer` implemented with Node.js and TypeScript, including user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints
 - a shared `pentix-core` package with:
   - `Piece`
   - `Offset`
@@ -45,13 +45,13 @@ The codebase currently includes:
   - the full legacy piece catalog with stable numeric IDs and simplified keys
   - `Board` and `BoardCell`
   - serializable `User`, `PentixGame`, and `PentixGameSession` snapshots
+  - a shared gameplay engine for movement, rotation, gravity ticks, hard drop, line clearing, scoring, and leveling
 - a lightweight browser placeholder that imports the shared piece catalog
 
 The following are intentionally not implemented yet:
 
 - durable persistence, restart-safe resume, and history endpoints
 - multiplayer orchestration beyond sharing one game's piece sequence
-- gameplay movement, scoring, ticks, and line-clearing endpoints
 - browser gameplay, scoring, ticks, and UI behavior from the final product goals
 
 ## Server API
@@ -62,8 +62,14 @@ The following are intentionally not implemented yet:
 - `POST /games` initializes a `PentixGame` with a UUIDv7 ID, an optional name, an empty default board, and at least two catalog piece IDs.
 - `POST /game-sessions` starts a `PentixGameSession` for a required `userId` that references a retained user. An omitted, null, or empty `gameId` creates a game; a supplied UUIDv7 reuses an existing game. Sessions use `id`, `gameId`, `userId`, and a zero-based `nextPieceIndex`.
 - `POST /game-sessions/{id}/next-piece` promotes the preview to the active piece, advances the cursor, extends the parent game's piece sequence when needed, and returns the updated session.
+- `POST /game-sessions/{id}/move` shifts the active piece left or right (`{ "direction": "left" | "right" }`).
+- `POST /game-sessions/{id}/rotate` rotates the active piece with Delphi near-wall kicks (`{ "direction": "clockwise" | "counterclockwise" }`).
+- `POST /game-sessions/{id}/tick` steps gravity; when the piece cannot move down it locks, clears lines, scores, levels, and spawns the next piece.
+- `POST /game-sessions/{id}/drop` scores by fall distance and moves the piece to its lowest position without locking; the following tick locks it.
 
-Games, sessions, and users are retained only in the memory of the server process that created them. Restarting the server clears them. A next-piece request is state-changing and is not idempotent, so clients must not blindly retry a successful-looking request after an uncertain network failure.
+Scoring follows [Demo/Pentix/Main.pas](./delphi/Demo/Pentix/Main.pas): a lock scores `points × level`, a drop scores `points × (height − row) × level ÷ 10`, a cleared line scores `lineIndex × (10 + (height − row)) × level`, and emptying the field awards a `1000`-point bonus. Level increases every 30 locked pieces up to level 9.
+
+Games, sessions, and users are retained only in the memory of the server process that created them. Restarting the server clears them. Gameplay and next-piece requests are state-changing and not idempotent, so clients must not blindly retry a successful-looking request after an uncertain network failure.
 
 ## Commands
 
