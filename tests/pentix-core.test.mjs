@@ -3,9 +3,10 @@ import test from 'node:test'
 
 import {
   advancePentixGameSession,
+  createBoardSnapshot,
   createPentixGame,
   createPentixGameSession,
-  createBoardSnapshot,
+  createUser,
   dropSession,
   moveActivePiece,
   rotateActivePiece,
@@ -207,11 +208,12 @@ test('game session initializer starts from its parent game', () => {
   })
   const session = createPentixGameSession({
     id: 'session-1',
+    userId: 'user-1',
     game,
   })
 
   assert.equal(session.id, 'session-1')
-  assert.equal(session.userId, null)
+  assert.equal(session.userId, 'user-1')
   assert.equal(session.gameId, 'game-1')
   assert.equal(session.status, 'active')
   assert.equal('sessionId' in session, false)
@@ -240,6 +242,7 @@ test('next-piece advancement extends the game and preserves session fields', () 
   })
   let session = createPentixGameSession({
     id: 'session-1',
+    userId: 'user-1',
     game,
   })
 
@@ -257,7 +260,7 @@ test('next-piece advancement extends the game and preserves session fields', () 
   assert.deepEqual(session.activePiece.origin, { row: 1, column: 6 })
   assert.equal(session.nextPieceKey, '4T')
   assert.equal(session.nextPieceIndex, 2)
-  assert.equal(session.userId, null)
+  assert.equal(session.userId, 'user-1')
   assert.equal(session.gameId, 'game-1')
   assert.deepEqual(session.statistics, {
     score: 0,
@@ -284,10 +287,12 @@ test('sessions using one game share sequence values without sharing state', () =
   })
   const firstSession = createPentixGameSession({
     id: 'session-1',
+    userId: 'user-1',
     game,
   })
   const secondSession = createPentixGameSession({
     id: 'session-2',
+    userId: 'user-1',
     game,
   })
 
@@ -308,12 +313,55 @@ test('sessions using one game share sequence values without sharing state', () =
   assert.equal(secondSession.activePiece.key, '3Corner')
 })
 
+test('user initializer creates a frozen snapshot with a trimmed name', () => {
+  const user = createUser({
+    id: 'user-1',
+    name: '  Ada  ',
+  })
+
+  assert.deepEqual(user, { id: 'user-1', name: 'Ada' })
+  assert.equal(Object.isFrozen(user), true)
+  assert.doesNotThrow(() => JSON.stringify(user))
+})
+
+test('user initializer rejects empty ids and names', () => {
+  assert.throws(
+    () => createUser({ id: '   ', name: 'Ada' }),
+    /User id must not be empty/,
+  )
+  assert.throws(
+    () => createUser({ id: 'user-1', name: '   ' }),
+    /User name must not be empty/,
+  )
+})
+
+test('game session creation requires a non-empty userId', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14]),
+  })
+
+  assert.throws(
+    () =>
+      createPentixGameSession({
+        id: 'session-1',
+        userId: '   ',
+        game,
+      }),
+    /userId must not be empty/,
+  )
+})
+
 test('movement shifts the active piece and respects walls', () => {
   const game = createPentixGame({
     id: 'game-1',
     selectPieceId: createSelector([3, 14]),
   })
-  const session = createPentixGameSession({ id: 'session-1', game })
+  const session = createPentixGameSession({
+    id: 'session-1',
+    userId: 'user-1',
+    game,
+  })
 
   const movedRight = moveActivePiece(session, 'right')
   assert.equal(movedRight.activePiece.origin.column, 7)
@@ -335,7 +383,11 @@ test('rotation advances the angle in open space', () => {
     id: 'game-1',
     selectPieceId: createSelector([3, 14]),
   })
-  const session = createPentixGameSession({ id: 'session-1', game })
+  const session = createPentixGameSession({
+    id: 'session-1',
+    userId: 'user-1',
+    game,
+  })
 
   const clockwise = rotateActivePiece(session, 'clockwise')
   assert.equal(clockwise.activePiece.angle, 270)
@@ -348,7 +400,11 @@ test('a tick moves the active piece down one row', () => {
     id: 'game-1',
     selectPieceId: createSelector([3, 14]),
   })
-  const session = createPentixGameSession({ id: 'session-1', game })
+  const session = createPentixGameSession({
+    id: 'session-1',
+    userId: 'user-1',
+    game,
+  })
 
   const ticked = tickSession(session, game)
   assert.equal(ticked.session.activePiece.origin.row, 2)
@@ -363,7 +419,11 @@ test('a drop scores and moves to the bottom without locking', () => {
     id: 'game-1',
     selectPieceId: createSelector([3, 14, 6]),
   })
-  const session = createPentixGameSession({ id: 'session-1', game })
+  const session = createPentixGameSession({
+    id: 'session-1',
+    userId: 'user-1',
+    game,
+  })
 
   const dropped = dropSession(session, game)
   assert.equal(dropped.session.status, 'active')
@@ -380,7 +440,11 @@ test('a tick after a drop locks, scores, and spawns the next piece', () => {
     id: 'game-1',
     selectPieceId: createSelector([3, 14, 6]),
   })
-  const session = createPentixGameSession({ id: 'session-1', game })
+  const session = createPentixGameSession({
+    id: 'session-1',
+    userId: 'user-1',
+    game,
+  })
 
   const dropped = dropSession(session, game)
   const settled = tickSession(dropped.session, dropped.game, () => 6)
@@ -412,7 +476,7 @@ test('settling clears a full line and awards line and empty-field bonuses', () =
   }
   const session = Object.freeze({
     id: 'session-1',
-    userId: null,
+    userId: 'user-1',
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
@@ -449,7 +513,7 @@ test('a blocked spawn sets game-over', () => {
   }
   const session = Object.freeze({
     id: 'session-1',
-    userId: null,
+    userId: 'user-1',
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
@@ -479,7 +543,7 @@ test('a piece cannot move into a buried cell', () => {
   })
   const session = Object.freeze({
     id: 'session-1',
-    userId: null,
+    userId: 'user-1',
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
@@ -504,7 +568,7 @@ test('rotation kicks away from the right wall', () => {
   })
   const session = Object.freeze({
     id: 'session-1',
-    userId: null,
+    userId: 'user-1',
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
@@ -532,7 +596,7 @@ test('a blocked rotation leaves the session unchanged', () => {
   })
   const session = Object.freeze({
     id: 'session-1',
-    userId: null,
+    userId: 'user-1',
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
@@ -557,7 +621,7 @@ test('level advances after thirty locked pieces', () => {
   const board = new Board(12, 22)
   const session = Object.freeze({
     id: 'session-1',
-    userId: null,
+    userId: 'user-1',
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
@@ -584,7 +648,7 @@ test('finished sessions ignore gameplay commands', () => {
   const board = new Board(12, 22)
   const session = Object.freeze({
     id: 'session-1',
-    userId: null,
+    userId: 'user-1',
     gameId: game.id,
     status: 'game-over',
     board: createBoardSnapshot(board),

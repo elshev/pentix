@@ -54,3 +54,5 @@ export {
   tickSession,
 } from './engine.js'
 export type { MoveDirection, RotateDirection } from './engine.js'
+export { createUser } from './user.js'
+export type { CreateUserOptions, User } from './user.js'
