@@ -26,7 +26,7 @@ Sessions can start and advance a piece preview, but they cannot actually be play
 ## Impact
 
 - Affected code: a new `packages/pentix-core/src/engine.ts` and its exports, a `status` union extension in `session.ts`, gameplay routes and validation in `apps/pentix-server`, and core/server tests plus README/foundation documentation.
-- Affected APIs: new `POST /game-sessions/{id}/move`, `/rotate`, `/tick`, and `/drop` endpoints; existing game/session/user endpoints are unchanged.
+- Affected APIs: new `POST /game-sessions/{id}/move`, `/rotate`, `/tick`, and `/drop` endpoints; existing game/session endpoints are unchanged.
 - Dependencies: none beyond the existing shared piece/board primitives and the `uuid` generator.
 - Compatibility: **BREAKING** — `PentixGameSession.status` may now be `'game-over'` and `statistics` gains a `blocks` field; consumers of those fields must handle the new values. Board and piece fields are unchanged in shape.
 - State: gameplay state remains in process memory and is lost on restart, matching games, sessions, and users.

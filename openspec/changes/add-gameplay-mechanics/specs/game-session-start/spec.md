@@ -1,12 +1,12 @@
 ## MODIFIED Requirements
 
 ### Requirement: Shared game-session snapshots define the opening session contract
-The shared `pentix-core` package SHALL define a JSON-serializable `PentixGameSession` snapshot contract for a newly started single-player session associated with a `PentixGame` and an assigned `User`.
+The shared `pentix-core` package SHALL define a JSON-serializable `PentixGameSession` snapshot contract for a newly started single-player session associated with a `PentixGame`.
 
 The shared snapshot SHALL include:
 
 - a UUIDv7 session `id` and parent `gameId`,
-- a required `userId` referencing the assigned user,
+- a nullable `userId`, initially `null`,
 - a session status value that is `active` for a playable session and becomes `game-over` when a spawn is blocked,
 - board dimensions and current board occupancy initialized independently from the game's board,
 - opening statistics including score, level, cleared-line count, and locked-block count,
@@ -17,9 +17,9 @@ The shared snapshot SHALL include:
 The legacy `sessionId` field SHALL NOT be exposed.
 
 #### Scenario: A started session exposes the shared opening fields
-- **GIVEN** a caller starts a new `PentixGameSession` for a retained user
+- **GIVEN** a caller starts a new `PentixGameSession`
 - **WHEN** the returned session snapshot is inspected
-- **THEN** it includes `id`, `gameId`, `userId` equal to the user id, a status of `active`, independent board state, opening statistics, active piece state, next-piece preview, and `nextPieceIndex`
+- **THEN** it includes `id`, `gameId`, `userId: null`, a status of `active`, independent board state, opening statistics, active piece state, next-piece preview, and `nextPieceIndex`
 - **AND** the board and piece references use the shared Pentix domain vocabulary rather than server-local names
 - **AND** the snapshot has no `sessionId` field
 

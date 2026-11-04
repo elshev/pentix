@@ -5,8 +5,8 @@ This repository now uses an `apps/` and `packages/` layout so the browser client
 ## What Exists Today
 
 - `apps/pentix-web`: a lightweight browser placeholder
-- `apps/pentix-server`: a Node.js server with game creation, session start, and next-piece endpoints
-- `packages/pentix-core`: shared piece, board, game, and game-session primitives
+- `apps/pentix-server`: a Node.js server with game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints
+- `packages/pentix-core`: shared piece, board, game, game-session, and gameplay-engine primitives
 
 ## Shared Piece Model
 
@@ -34,10 +34,20 @@ That means:
 
 `POST /game-sessions/{id}/next-piece` is intentionally a state-changing `POST`. It promotes the previous preview, extends the game's piece sequence on demand, advances the cursor, and returns the full updated session. Games and sessions live only in the owning server process and are lost on restart.
 
+## Gameplay
+
+The shared engine ports the Delphi playfield rules from [Tetris.pas](C:/ai/pentix/delphi/Tetris.pas) and the scoring from [Demo/Pentix/Main.pas](C:/ai/pentix/delphi/Demo/Pentix/Main.pas):
+
+- `move` and `rotate` (with near-wall kicks) only change the active piece when the target placement is valid.
+- `tick` steps gravity; a resting piece locks, clears full lines, scores, and spawns the next piece.
+- `drop` moves the piece to its lowest position without locking; the next `tick` locks it (the Delphi `toMoveAfterDropDown` grace).
+- Scoring: a lock scores `points × level`, a drop scores `points × (height − row) × level ÷ 10`, a cleared line scores `lineIndex × (10 + (height − row)) × level`, plus a `1000`-point empty-field bonus. Level rises every 30 locked pieces up to level 9.
+
+A session's `status` becomes `game-over` when a spawn is blocked.
+
 ## Next Likely Steps
 
 - add explicit player and user-assignment contracts
 - add durable persistence and PentixGame history models
-- define movement, ticking, scoring, and line-clearing behavior
 - introduce browser gameplay state and rendering
 - connect the web app to `PentixServer`

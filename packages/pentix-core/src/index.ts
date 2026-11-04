@@ -47,3 +47,10 @@ export type {
   RotationAngle,
   RotationMode,
 } from './piece.js'
+export {
+  dropSession,
+  moveActivePiece,
+  rotateActivePiece,
+  tickSession,
+} from './engine.js'
+export type { MoveDirection, RotateDirection } from './engine.js'

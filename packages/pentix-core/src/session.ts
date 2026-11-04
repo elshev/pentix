@@ -15,12 +15,13 @@ import {
 } from './game.js'
 import type { RotationAngle } from './piece.js'
 
-export type GameSessionStatus = 'active'
+export type GameSessionStatus = 'active' | 'game-over'
 
 export interface GameSessionStatistics {
   readonly score: number
   readonly level: number
   readonly clearedLines: number
+  readonly blocks: number
 }
 
 export interface BoardPosition {
@@ -129,6 +130,7 @@ export function createPentixGameSession(
       score: 0,
       level: 1,
       clearedLines: 0,
+      blocks: 0,
     }),
     activePiece: createActivePieceState(activePieceKey, board.width),
     nextPieceKey,

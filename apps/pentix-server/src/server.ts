@@ -9,9 +9,15 @@ import {
   advancePentixGameSession,
   createPentixGame,
   createPentixGameSession,
+  dropSession,
+  moveActivePiece,
+  rotateActivePiece,
+  tickSession,
+  type MoveDirection,
   type PentixGame,
   type PentixGameSession,
   type PieceIdSelector,
+  type RotateDirection,
 } from '../../../packages/pentix-core/dist/index.js'
 import { v7 as uuidv7, validate, version } from 'uuid'
 
@@ -105,6 +111,59 @@ class PentixGameLifecycle {
     this.games.set(result.game.id, result.game)
     this.sessions.set(result.session.id, result.session)
     return result.session
+  }
+
+  private resolveSession(sessionId: string): {
+    session: PentixGameSession
+    game: PentixGame
+  } {
+    const session = this.sessions.get(sessionId)
+    if (session === undefined) {
+      throw new HttpError(404, `PentixGameSession ${sessionId} was not found.`)
+    }
+
+    const game = this.games.get(session.gameId)
+    if (game === undefined) {
+      throw new HttpError(404, `PentixGame ${session.gameId} was not found.`)
+    }
+
+    return { session, game }
+  }
+
+  private persist(result: {
+    game: PentixGame
+    session: PentixGameSession
+  }): PentixGameSession {
+    this.games.set(result.game.id, result.game)
+    this.sessions.set(result.session.id, result.session)
+    return result.session
+  }
+
+  moveSession(sessionId: string, direction: MoveDirection): PentixGameSession {
+    const { session } = this.resolveSession(sessionId)
+    const updated = moveActivePiece(session, direction)
+    this.sessions.set(updated.id, updated)
+    return updated
+  }
+
+  rotateSession(
+    sessionId: string,
+    direction: RotateDirection,
+  ): PentixGameSession {
+    const { session } = this.resolveSession(sessionId)
+    const updated = rotateActivePiece(session, direction)
+    this.sessions.set(updated.id, updated)
+    return updated
+  }
+
+  tickSession(sessionId: string): PentixGameSession {
+    const { session, game } = this.resolveSession(sessionId)
+    return this.persist(tickSession(session, game, this.selectPieceId))
+  }
+
+  dropSession(sessionId: string): PentixGameSession {
+    const { session, game } = this.resolveSession(sessionId)
+    return this.persist(dropSession(session, game))
   }
 }
 
@@ -238,6 +297,33 @@ function readOptionalGameId(body: unknown): string | undefined {
   return gameId
 }
 
+function readDirection<T extends string>(
+  body: unknown,
+  allowed: readonly T[],
+  label: string,
+): T {
+  if (!isJsonRecord(body)) {
+    throw new HttpError(400, 'Game session request body must be a JSON object.')
+  }
+
+  if (body.direction === undefined) {
+    throw new HttpError(400, `${label} direction is required.`)
+  }
+
+  if (typeof body.direction !== 'string') {
+    throw new HttpError(400, `${label} direction must be a string.`)
+  }
+
+  if (!(allowed as readonly string[]).includes(body.direction)) {
+    throw new HttpError(
+      400,
+      `${label} direction must be one of: ${allowed.join(', ')}.`,
+    )
+  }
+
+  return body.direction as T
+}
+
 function isUuidV7(value: string): boolean {
   return validate(value) && version(value) === 7
 }
@@ -293,12 +379,66 @@ async function handleRequest(
     return
   }
 
+  const moveMatch = /^\/game-sessions\/([^/]+)\/move$/.exec(pathname)
+  if (request.method === 'POST' && moveMatch !== null) {
+    const sessionId = moveMatch[1]
+    if (!isUuidV7(sessionId)) {
+      throw new HttpError(400, 'Game session id must be a UUIDv7 value.')
+    }
+
+    const direction = readDirection<MoveDirection>(
+      await readJsonBody(request),
+      ['left', 'right'],
+      'Move',
+    )
+    writeJson(response, 200, lifecycle.moveSession(sessionId, direction))
+    return
+  }
+
+  const rotateMatch = /^\/game-sessions\/([^/]+)\/rotate$/.exec(pathname)
+  if (request.method === 'POST' && rotateMatch !== null) {
+    const sessionId = rotateMatch[1]
+    if (!isUuidV7(sessionId)) {
+      throw new HttpError(400, 'Game session id must be a UUIDv7 value.')
+    }
+
+    const direction = readDirection<RotateDirection>(
+      await readJsonBody(request),
+      ['clockwise', 'counterclockwise'],
+      'Rotate',
+    )
+    writeJson(response, 200, lifecycle.rotateSession(sessionId, direction))
+    return
+  }
+
+  const tickMatch = /^\/game-sessions\/([^/]+)\/tick$/.exec(pathname)
+  if (request.method === 'POST' && tickMatch !== null) {
+    const sessionId = tickMatch[1]
+    if (!isUuidV7(sessionId)) {
+      throw new HttpError(400, 'Game session id must be a UUIDv7 value.')
+    }
+
+    writeJson(response, 200, lifecycle.tickSession(sessionId))
+    return
+  }
+
+  const dropMatch = /^\/game-sessions\/([^/]+)\/drop$/.exec(pathname)
+  if (request.method === 'POST' && dropMatch !== null) {
+    const sessionId = dropMatch[1]
+    if (!isUuidV7(sessionId)) {
+      throw new HttpError(400, 'Game session id must be a UUIDv7 value.')
+    }
+
+    writeJson(response, 200, lifecycle.dropSession(sessionId))
+    return
+  }
+
   writeJson(response, 404, {
     service: 'PentixServer',
     method: request.method ?? 'UNKNOWN',
     path: pathname,
     message:
-      'PentixServer is running. Supported endpoints are POST /games, POST /game-sessions, and POST /game-sessions/{id}/next-piece. Player and history endpoints are not implemented yet.',
+      'PentixServer is running. Supported endpoints are POST /games, POST /game-sessions, POST /game-sessions/{id}/next-piece, POST /game-sessions/{id}/move, POST /game-sessions/{id}/rotate, POST /game-sessions/{id}/tick, and POST /game-sessions/{id}/drop.',
   })
 }
 

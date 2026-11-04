@@ -88,7 +88,7 @@ When locking completes one or more rows, the shared engine SHALL remove those ro
 - **AND** `statistics.clearedLines` increases by one
 
 ### Requirement: Clearing lines scores by row distance with an empty-field bonus
-For each cleared line in a single settle, the shared engine SHALL add `lineIndex × (10 + (height − row)) × level` to the score, where `lineIndex` is the 1-based position of the line within the settle, `row` is the cleared row's index, and `height` is the board height. If clearing lines leaves the board empty, the engine SHALL add an additional `1000` points.
+For each cleared line in a single settle, the shared engine SHALL add `lineIndex × (10 + (height − row)) × level` to the score, where `lineIndex` is the 1-based position of the line within the settle, `row` is the cleared row's index, and `height` is the board height. If a settle clears the bottom row and leaves the board empty, the engine SHALL add an additional `1000` points.
 
 #### Scenario: Clearing a line scores by its row
 - **GIVEN** a session at level `1` whose settle clears one line at row `21` of a `22`-row board
@@ -97,7 +97,7 @@ For each cleared line in a single settle, the shared engine SHALL add `lineIndex
 - **AND** `statistics.clearedLines` increases by `1`
 
 #### Scenario: Emptying the field awards a bonus
-- **GIVEN** a session whose settle clears the last occupied row, leaving the board empty
+- **GIVEN** a session whose settle clears the bottom row and leaves the board empty
 - **WHEN** the engine settles the piece
 - **THEN** `statistics.score` increases by an additional `1000`
 

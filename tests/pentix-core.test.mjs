@@ -5,6 +5,11 @@ import {
   advancePentixGameSession,
   createPentixGame,
   createPentixGameSession,
+  createBoardSnapshot,
+  dropSession,
+  moveActivePiece,
+  rotateActivePiece,
+  tickSession,
   Board,
   DEFAULT_BOARD_SIZE,
   PIECE_CATALOG,
@@ -217,6 +222,7 @@ test('game session initializer starts from its parent game', () => {
     score: 0,
     level: 1,
     clearedLines: 0,
+    blocks: 0,
   })
   assert.deepEqual(session.activePiece.origin, { row: 1, column: 6 })
   assert.equal(session.activePiece.angle, 0)
@@ -257,6 +263,7 @@ test('next-piece advancement extends the game and preserves session fields', () 
     score: 0,
     level: 1,
     clearedLines: 0,
+    blocks: 0,
   })
 
   const secondAdvance = advancePentixGameSession(
@@ -299,4 +306,300 @@ test('sessions using one game share sequence values without sharing state', () =
   assert.equal(advanced.session.activePiece.key, '5T')
   assert.equal(secondSession.nextPieceIndex, 1)
   assert.equal(secondSession.activePiece.key, '3Corner')
+})
+
+test('movement shifts the active piece and respects walls', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14]),
+  })
+  const session = createPentixGameSession({ id: 'session-1', game })
+
+  const movedRight = moveActivePiece(session, 'right')
+  assert.equal(movedRight.activePiece.origin.column, 7)
+  assert.equal(movedRight.activePiece.origin.row, 1)
+
+  const movedLeft = moveActivePiece(session, 'left')
+  assert.equal(movedLeft.activePiece.origin.column, 5)
+
+  let atWall = session
+  for (let i = 0; i < 10; i++) {
+    atWall = moveActivePiece(atWall, 'left')
+  }
+  assert.equal(atWall.activePiece.origin.column, 0)
+  assert.equal(moveActivePiece(atWall, 'left'), atWall)
+})
+
+test('rotation advances the angle in open space', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14]),
+  })
+  const session = createPentixGameSession({ id: 'session-1', game })
+
+  const clockwise = rotateActivePiece(session, 'clockwise')
+  assert.equal(clockwise.activePiece.angle, 270)
+  assert.deepEqual(clockwise.activePiece.origin, { row: 1, column: 6 })
+  assert.equal(clockwise.board, session.board)
+})
+
+test('a tick moves the active piece down one row', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14]),
+  })
+  const session = createPentixGameSession({ id: 'session-1', game })
+
+  const ticked = tickSession(session, game)
+  assert.equal(ticked.session.activePiece.origin.row, 2)
+  assert.equal(
+    ticked.session.board.rows.flat().some((cell) => cell.isOccupied),
+    false,
+  )
+})
+
+test('a drop scores and moves to the bottom without locking', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14, 6]),
+  })
+  const session = createPentixGameSession({ id: 'session-1', game })
+
+  const dropped = dropSession(session, game)
+  assert.equal(dropped.session.status, 'active')
+  assert.equal(dropped.session.activePiece.origin.row, 21)
+  assert.equal(
+    dropped.session.board.rows.flat().some((cell) => cell.isOccupied),
+    false,
+  )
+  assert.equal(dropped.session.statistics.score, 6)
+})
+
+test('a tick after a drop locks, scores, and spawns the next piece', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14, 6]),
+  })
+  const session = createPentixGameSession({ id: 'session-1', game })
+
+  const dropped = dropSession(session, game)
+  const settled = tickSession(dropped.session, dropped.game, () => 6)
+
+  assert.equal(settled.session.status, 'active')
+  assert.equal(settled.session.statistics.score, 9)
+  assert.equal(settled.session.statistics.blocks, 1)
+  assert.equal(settled.session.statistics.clearedLines, 0)
+  assert.equal(settled.session.activePiece.key, '5T')
+  assert.deepEqual(settled.session.activePiece.origin, { row: 1, column: 6 })
+  assert.equal(settled.session.nextPieceKey, '4T')
+  assert.equal(settled.session.nextPieceIndex, 2)
+  assert.equal(
+    settled.session.board.rows.flat().filter((cell) => cell.isOccupied).length,
+    3,
+  )
+})
+
+test('settling clears a full line and awards line and empty-field bonuses', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14, 6]),
+  })
+  const board = new Board(12, 22)
+  for (let column = 0; column < 12; column++) {
+    if (column !== 6) {
+      board.setCell(21, column, '4Square')
+    }
+  }
+  const session = Object.freeze({
+    id: 'session-1',
+    userId: null,
+    gameId: game.id,
+    status: 'active',
+    board: createBoardSnapshot(board),
+    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 0 }),
+    activePiece: Object.freeze({
+      key: '1Line',
+      angle: 0,
+      origin: Object.freeze({ row: 21, column: 6 }),
+    }),
+    nextPieceKey: '5T',
+    nextPieceIndex: 1,
+  })
+
+  const settled = tickSession(session, game, () => 6)
+
+  assert.equal(settled.session.status, 'active')
+  assert.equal(settled.session.statistics.score, 1012)
+  assert.equal(settled.session.statistics.clearedLines, 1)
+  assert.equal(settled.session.statistics.blocks, 1)
+  assert.equal(
+    settled.session.board.rows.flat().every((cell) => !cell.isOccupied),
+    true,
+  )
+})
+
+test('a blocked spawn sets game-over', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14, 6]),
+  })
+  const board = new Board(12, 22)
+  for (let column = 4; column <= 8; column++) {
+    board.setCell(1, column, '4Square')
+  }
+  const session = Object.freeze({
+    id: 'session-1',
+    userId: null,
+    gameId: game.id,
+    status: 'active',
+    board: createBoardSnapshot(board),
+    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 0 }),
+    activePiece: Object.freeze({
+      key: '1Line',
+      angle: 0,
+      origin: Object.freeze({ row: 21, column: 6 }),
+    }),
+    nextPieceKey: '5T',
+    nextPieceIndex: 1,
+  })
+
+  const settled = tickSession(session, game, () => 6)
+
+  assert.equal(settled.session.status, 'game-over')
+  assert.equal(settled.session.statistics.blocks, 1)
+  assert.equal(settled.session.activePiece.key, '5T')
+})
+
+test('a piece cannot move into a buried cell', () => {
+  const board = new Board(12, 22)
+  board.setCell(1, 6, '4Square')
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([1, 3]),
+  })
+  const session = Object.freeze({
+    id: 'session-1',
+    userId: null,
+    gameId: game.id,
+    status: 'active',
+    board: createBoardSnapshot(board),
+    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 0 }),
+    activePiece: Object.freeze({
+      key: '2Line',
+      angle: 0,
+      origin: Object.freeze({ row: 1, column: 5 }),
+    }),
+    nextPieceKey: '3Corner',
+    nextPieceIndex: 1,
+  })
+
+  assert.equal(moveActivePiece(session, 'right'), session)
+})
+
+test('rotation kicks away from the right wall', () => {
+  const board = new Board(12, 22)
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([1, 3]),
+  })
+  const session = Object.freeze({
+    id: 'session-1',
+    userId: null,
+    gameId: game.id,
+    status: 'active',
+    board: createBoardSnapshot(board),
+    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 0 }),
+    activePiece: Object.freeze({
+      key: '2Line',
+      angle: 0,
+      origin: Object.freeze({ row: 1, column: 11 }),
+    }),
+    nextPieceKey: '3Corner',
+    nextPieceIndex: 1,
+  })
+
+  const rotated = rotateActivePiece(session, 'clockwise')
+  assert.equal(rotated.activePiece.angle, 90)
+  assert.equal(rotated.activePiece.origin.column, 10)
+})
+
+test('a blocked rotation leaves the session unchanged', () => {
+  const board = new Board(12, 22)
+  board.setCell(1, 6, '4Square')
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([1, 3]),
+  })
+  const session = Object.freeze({
+    id: 'session-1',
+    userId: null,
+    gameId: game.id,
+    status: 'active',
+    board: createBoardSnapshot(board),
+    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 0 }),
+    activePiece: Object.freeze({
+      key: '2Line',
+      angle: 0,
+      origin: Object.freeze({ row: 1, column: 5 }),
+    }),
+    nextPieceKey: '3Corner',
+    nextPieceIndex: 1,
+  })
+
+  assert.equal(rotateActivePiece(session, 'clockwise'), session)
+})
+
+test('level advances after thirty locked pieces', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14, 6]),
+  })
+  const board = new Board(12, 22)
+  const session = Object.freeze({
+    id: 'session-1',
+    userId: null,
+    gameId: game.id,
+    status: 'active',
+    board: createBoardSnapshot(board),
+    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 29 }),
+    activePiece: Object.freeze({
+      key: '1Line',
+      angle: 0,
+      origin: Object.freeze({ row: 21, column: 5 }),
+    }),
+    nextPieceKey: '5T',
+    nextPieceIndex: 1,
+  })
+
+  const settled = tickSession(session, game, () => 6)
+  assert.equal(settled.session.statistics.blocks, 30)
+  assert.equal(settled.session.statistics.level, 2)
+})
+
+test('finished sessions ignore gameplay commands', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14]),
+  })
+  const board = new Board(12, 22)
+  const session = Object.freeze({
+    id: 'session-1',
+    userId: null,
+    gameId: game.id,
+    status: 'game-over',
+    board: createBoardSnapshot(board),
+    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 0 }),
+    activePiece: Object.freeze({
+      key: '3Corner',
+      angle: 0,
+      origin: Object.freeze({ row: 1, column: 6 }),
+    }),
+    nextPieceKey: '5T',
+    nextPieceIndex: 1,
+  })
+
+  assert.equal(moveActivePiece(session, 'left'), session)
+  assert.equal(rotateActivePiece(session, 'clockwise'), session)
+  assert.equal(tickSession(session, game).session, session)
+  assert.equal(dropSession(session, game).session, session)
 })
