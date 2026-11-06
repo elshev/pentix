@@ -8,6 +8,10 @@ This repository now uses an `apps/` and `packages/` layout so the browser client
 - `apps/pentix-server`: a Node.js server with user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints
 - `packages/pentix-core`: shared user, piece, board, game, game-session, and gameplay-engine primitives
 
+## HTTP Transport
+
+`PentixServer` serves its REST endpoints through a Hono application mounted on a Node.js HTTP server via `@hono/node-server`. Routing, JSON body parsing (with a 1 MiB limit), JSON responses (`application/json; charset=utf-8`), the not-found fallback, and the centralized error handler live in `apps/pentix-server/src/app.ts`, while the in-memory lifecycle and process start/stop remain in `server.ts`.
+
 ## Shared Piece Model
 
 The shared piece model intentionally uses readable TypeScript names:
