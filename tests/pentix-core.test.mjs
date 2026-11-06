@@ -7,10 +7,7 @@ import {
   createPentixGame,
   createPentixGameSession,
   createUser,
-  dropSession,
-  moveActivePiece,
-  rotateActivePiece,
-  tickSession,
+  gameSessionEngine,
   Board,
   DEFAULT_BOARD_SIZE,
   PIECE_CATALOG,
@@ -363,19 +360,19 @@ test('movement shifts the active piece and respects walls', () => {
     game,
   })
 
-  const movedRight = moveActivePiece(session, 'right')
+  const movedRight = gameSessionEngine.move(session, 'right')
   assert.equal(movedRight.activePiece.origin.column, 7)
   assert.equal(movedRight.activePiece.origin.row, 1)
 
-  const movedLeft = moveActivePiece(session, 'left')
+  const movedLeft = gameSessionEngine.move(session, 'left')
   assert.equal(movedLeft.activePiece.origin.column, 5)
 
   let atWall = session
   for (let i = 0; i < 10; i++) {
-    atWall = moveActivePiece(atWall, 'left')
+    atWall = gameSessionEngine.move(atWall, 'left')
   }
   assert.equal(atWall.activePiece.origin.column, 0)
-  assert.equal(moveActivePiece(atWall, 'left'), atWall)
+  assert.equal(gameSessionEngine.move(atWall, 'left'), atWall)
 })
 
 test('rotation advances the angle in open space', () => {
@@ -389,7 +386,7 @@ test('rotation advances the angle in open space', () => {
     game,
   })
 
-  const clockwise = rotateActivePiece(session, 'clockwise')
+  const clockwise = gameSessionEngine.rotate(session, 'clockwise')
   assert.equal(clockwise.activePiece.angle, 270)
   assert.deepEqual(clockwise.activePiece.origin, { row: 1, column: 6 })
   assert.equal(clockwise.board, session.board)
@@ -406,7 +403,7 @@ test('a tick moves the active piece down one row', () => {
     game,
   })
 
-  const ticked = tickSession(session, game)
+  const ticked = gameSessionEngine.tick(session, game)
   assert.equal(ticked.session.activePiece.origin.row, 2)
   assert.equal(
     ticked.session.board.rows.flat().some((cell) => cell.isOccupied),
@@ -425,7 +422,7 @@ test('a drop scores and moves to the bottom without locking', () => {
     game,
   })
 
-  const dropped = dropSession(session, game)
+  const dropped = gameSessionEngine.drop(session, game)
   assert.equal(dropped.session.status, 'active')
   assert.equal(dropped.session.activePiece.origin.row, 21)
   assert.equal(
@@ -446,8 +443,8 @@ test('a tick after a drop locks, scores, and spawns the next piece', () => {
     game,
   })
 
-  const dropped = dropSession(session, game)
-  const settled = tickSession(dropped.session, dropped.game, () => 6)
+  const dropped = gameSessionEngine.drop(session, game)
+  const settled = gameSessionEngine.tick(dropped.session, dropped.game, () => 6)
 
   assert.equal(settled.session.status, 'active')
   assert.equal(settled.session.statistics.score, 9)
@@ -490,7 +487,7 @@ test('settling clears a full line and awards line and empty-field bonuses', () =
     nextPieceIndex: 1,
   })
 
-  const settled = tickSession(session, game, () => 6)
+  const settled = gameSessionEngine.tick(session, game, () => 6)
 
   assert.equal(settled.session.status, 'active')
   assert.equal(settled.session.statistics.score, 1012)
@@ -527,7 +524,7 @@ test('a blocked spawn sets game-over', () => {
     nextPieceIndex: 1,
   })
 
-  const settled = tickSession(session, game, () => 6)
+  const settled = gameSessionEngine.tick(session, game, () => 6)
 
   assert.equal(settled.session.status, 'game-over')
   assert.equal(settled.session.statistics.blocks, 1)
@@ -557,7 +554,7 @@ test('a piece cannot move into a buried cell', () => {
     nextPieceIndex: 1,
   })
 
-  assert.equal(moveActivePiece(session, 'right'), session)
+  assert.equal(gameSessionEngine.move(session, 'right'), session)
 })
 
 test('rotation kicks away from the right wall', () => {
@@ -582,7 +579,7 @@ test('rotation kicks away from the right wall', () => {
     nextPieceIndex: 1,
   })
 
-  const rotated = rotateActivePiece(session, 'clockwise')
+  const rotated = gameSessionEngine.rotate(session, 'clockwise')
   assert.equal(rotated.activePiece.angle, 90)
   assert.equal(rotated.activePiece.origin.column, 10)
 })
@@ -610,7 +607,7 @@ test('a blocked rotation leaves the session unchanged', () => {
     nextPieceIndex: 1,
   })
 
-  assert.equal(rotateActivePiece(session, 'clockwise'), session)
+  assert.equal(gameSessionEngine.rotate(session, 'clockwise'), session)
 })
 
 test('level advances after thirty locked pieces', () => {
@@ -635,7 +632,7 @@ test('level advances after thirty locked pieces', () => {
     nextPieceIndex: 1,
   })
 
-  const settled = tickSession(session, game, () => 6)
+  const settled = gameSessionEngine.tick(session, game, () => 6)
   assert.equal(settled.session.statistics.blocks, 30)
   assert.equal(settled.session.statistics.level, 2)
 })
@@ -662,8 +659,8 @@ test('finished sessions ignore gameplay commands', () => {
     nextPieceIndex: 1,
   })
 
-  assert.equal(moveActivePiece(session, 'left'), session)
-  assert.equal(rotateActivePiece(session, 'clockwise'), session)
-  assert.equal(tickSession(session, game).session, session)
-  assert.equal(dropSession(session, game).session, session)
+  assert.equal(gameSessionEngine.move(session, 'left'), session)
+  assert.equal(gameSessionEngine.rotate(session, 'clockwise'), session)
+  assert.equal(gameSessionEngine.tick(session, game).session, session)
+  assert.equal(gameSessionEngine.drop(session, game).session, session)
 })

@@ -48,11 +48,9 @@ export type {
   RotationMode,
 } from './piece.js'
 export {
-  dropSession,
-  moveActivePiece,
-  rotateActivePiece,
-  tickSession,
-} from './engine.js'
-export type { MoveDirection, RotateDirection } from './engine.js'
+  GameSessionEngine,
+  gameSessionEngine,
+} from './session-engine.js'
+export type { MoveDirection, RotateDirection } from './session-engine.js'
 export { createUser } from './user.js'
 export type { CreateUserOptions, User } from './user.js'

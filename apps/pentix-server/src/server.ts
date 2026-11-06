@@ -6,10 +6,7 @@ import {
   createPentixGame,
   createPentixGameSession,
   createUser,
-  dropSession,
-  moveActivePiece,
-  rotateActivePiece,
-  tickSession,
+  gameSessionEngine,
   type MoveDirection,
   type PentixGame,
   type PentixGameSession,
@@ -158,31 +155,31 @@ export class PentixGameLifecycle {
     return result.session
   }
 
-  moveSession(sessionId: string, direction: MoveDirection): PentixGameSession {
+  move(sessionId: string, direction: MoveDirection): PentixGameSession {
     const { session } = this.resolveSession(sessionId)
-    const updated = moveActivePiece(session, direction)
+    const updated = gameSessionEngine.move(session, direction)
     this.sessions.set(updated.id, updated)
     return updated
   }
 
-  rotateSession(
+  rotate(
     sessionId: string,
     direction: RotateDirection,
   ): PentixGameSession {
     const { session } = this.resolveSession(sessionId)
-    const updated = rotateActivePiece(session, direction)
+    const updated = gameSessionEngine.rotate(session, direction)
     this.sessions.set(updated.id, updated)
     return updated
   }
 
-  tickSession(sessionId: string): PentixGameSession {
+  tick(sessionId: string): PentixGameSession {
     const { session, game } = this.resolveSession(sessionId)
-    return this.persist(tickSession(session, game, this.selectPieceId))
+    return this.persist(gameSessionEngine.tick(session, game, this.selectPieceId))
   }
 
-  dropSession(sessionId: string): PentixGameSession {
+  drop(sessionId: string): PentixGameSession {
     const { session, game } = this.resolveSession(sessionId)
-    return this.persist(dropSession(session, game))
+    return this.persist(gameSessionEngine.drop(session, game))
   }
 }
 
