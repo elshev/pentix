@@ -10,7 +10,7 @@ This repository now uses an `apps/` and `packages/` layout so the browser client
 
 ## HTTP Transport
 
-`PentixServer` serves its REST endpoints through a Hono application mounted on a Node.js HTTP server via `@hono/node-server`. Routing, JSON body parsing (with a 1 MiB limit), JSON responses (`application/json; charset=utf-8`), the not-found fallback, and the centralized error handler live in `apps/pentix-server/src/app.ts`, while the in-memory lifecycle and process start/stop remain in `server.ts`.
+`PentixServer` serves its REST endpoints through a Hono application mounted on a Node.js HTTP server via `@hono/node-server`. Routing, JSON body parsing (with a 1 MiB limit), JSON responses (`application/json; charset=utf-8`), the not-found fallback, and the centralized error handler live in `apps/pentix-server/src/app.ts`, while the in-memory lifecycle and process start/stop remain in `server.ts`. `apps/pentix-server/src/http.ts` holds only the Pentix-agnostic HTTP primitives (`HttpError`, `HttpStatus`, `throwHttpErrorIf`); the request-body parsers and UUID/JSON validation helpers live in `apps/pentix-server/src/request.ts`.
 
 ## Shared Piece Model
 
@@ -44,7 +44,7 @@ That means:
 
 ## Gameplay
 
-The shared engine ports the Delphi playfield rules from [Tetris.pas](C:/ai/pentix/delphi/Tetris.pas) and the scoring from [Demo/Pentix/Main.pas](C:/ai/pentix/delphi/Demo/Pentix/Main.pas):
+The shared engine ports the Delphi playfield rules from [Tetris.pas](C:/ai/pentix/delphi/Tetris.pas) and the scoring from [Demo/Pentix/Main.pas](C:/ai/pentix/delphi/Demo/Pentix/Main.pas). These operations are encapsulated by the stateless `GameSessionEngine` class in `packages/pentix-core/src/session-engine.ts`, which exposes `move`, `rotate`, `tick`, and `drop` (plus a shared `gameSessionEngine` instance):
 
 - `move` and `rotate` (with near-wall kicks) only change the active piece when the target placement is valid.
 - `tick` steps gravity; a resting piece locks, clears full lines, scores, and spawns the next piece.

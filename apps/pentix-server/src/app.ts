@@ -6,16 +6,15 @@ import type {
   MoveDirection,
   RotateDirection,
 } from '../../../packages/pentix-core/dist/index.js'
+import { HttpError, HttpStatus } from './http.js'
 import {
-  HttpError,
-  HttpStatus,
   checkUuid,
   readDirection,
   readOptionalGameId,
   readOptionalName,
   readRequiredName,
   readRequiredUserId,
-} from './http.js'
+} from './request.js'
 import type { PentixGameLifecycle } from './server.js'
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024
@@ -74,7 +73,7 @@ export function createPentixApp(lifecycle: PentixGameLifecycle): Hono {
       ['left', 'right'],
       'Move',
     )
-    return writeJson(c, HttpStatus.ok200, lifecycle.moveSession(sessionId, direction))
+    return writeJson(c, HttpStatus.ok200, lifecycle.move(sessionId, direction))
   })
 
   app.post('/game-sessions/:id/rotate', async (c) => {
@@ -86,19 +85,19 @@ export function createPentixApp(lifecycle: PentixGameLifecycle): Hono {
       ['clockwise', 'counterclockwise'],
       'Rotate',
     )
-    return writeJson(c, HttpStatus.ok200, lifecycle.rotateSession(sessionId, direction))
+    return writeJson(c, HttpStatus.ok200, lifecycle.rotate(sessionId, direction))
   })
 
   app.post('/game-sessions/:id/tick', (c) => {
     const sessionId = c.req.param('id')
     checkUuid(sessionId, 'Game session id')
-    return writeJson(c, HttpStatus.ok200, lifecycle.tickSession(sessionId))
+    return writeJson(c, HttpStatus.ok200, lifecycle.tick(sessionId))
   })
 
   app.post('/game-sessions/:id/drop', (c) => {
     const sessionId = c.req.param('id')
     checkUuid(sessionId, 'Game session id')
-    return writeJson(c, HttpStatus.ok200, lifecycle.dropSession(sessionId))
+    return writeJson(c, HttpStatus.ok200, lifecycle.drop(sessionId))
   })
 
   app.notFound((c) => {

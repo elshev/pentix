@@ -294,134 +294,144 @@ function settle(
   return spawn(session, game, board, statistics, selectPieceId)
 }
 
-export function moveActivePiece(
-  session: PentixGameSession,
-  direction: MoveDirection,
-): PentixGameSession {
-  if (session.status !== 'active') {
-    return session
+/**
+ * Encapsulates the active-piece operations of a {@link PentixGameSession}.
+ * The methods are stateless and pure: they never mutate their arguments.
+ */
+export class GameSessionEngine {
+  move(
+    session: PentixGameSession,
+    direction: MoveDirection,
+  ): PentixGameSession {
+    if (session.status !== 'active') {
+      return session
+    }
+
+    const piece = getActivePiece(session)
+    const delta = direction === 'left' ? -1 : 1
+    const origin = {
+      row: session.activePiece.origin.row,
+      column: session.activePiece.origin.column + delta,
+    }
+
+    if (!canPlace(session.board, getOccupiedCells(piece, origin))) {
+      return session
+    }
+
+    return withActivePiece(session, session.activePiece.angle, origin)
   }
 
-  const piece = getActivePiece(session)
-  const delta = direction === 'left' ? -1 : 1
-  const origin = {
-    row: session.activePiece.origin.row,
-    column: session.activePiece.origin.column + delta,
-  }
+  rotate(
+    session: PentixGameSession,
+    direction: RotateDirection,
+  ): PentixGameSession {
+    if (session.status !== 'active') {
+      return session
+    }
 
-  if (!canPlace(session.board, getOccupiedCells(piece, origin))) {
-    return session
-  }
-
-  return withActivePiece(session, session.activePiece.angle, origin)
-}
-
-export function rotateActivePiece(
-  session: PentixGameSession,
-  direction: RotateDirection,
-): PentixGameSession {
-  if (session.status !== 'active') {
-    return session
-  }
-
-  const piece = getActivePiece(session)
-  const step = direction === 'clockwise' ? -90 : 90
-  const nextAngle = normalizeAngle(
-    session.activePiece.angle + step,
-    piece.rotationMode,
-  )
-  if (nextAngle === session.activePiece.angle) {
-    return session
-  }
-
-  const nextPiece = piece.withAngle(nextAngle)
-  const origin = session.activePiece.origin
-  if (canPlace(session.board, getOccupiedCells(nextPiece, origin))) {
-    return withActivePiece(session, nextAngle, origin)
-  }
-
-  const { minX, maxX, minY } = rotatedExtremes(nextPiece.occupiedOffsets)
-  const width = session.board.width
-  const kick: Partial<Record<PlacementError, BoardPosition>> = {
-    right: { row: origin.row, column: width - maxX - 1 },
-    left: { row: origin.row, column: -minX },
-    top: { row: -minY, column: origin.column },
-  }
-  const error = checkPlacement(
-    session.board,
-    getOccupiedCells(nextPiece, origin),
-  )
-  const kickOrigin = kick[error]
-  if (
-    kickOrigin !== undefined &&
-    canPlace(session.board, getOccupiedCells(nextPiece, kickOrigin))
-  ) {
-    return withActivePiece(session, nextAngle, kickOrigin)
-  }
-
-  return session
-}
-
-export function tickSession(
-  session: PentixGameSession,
-  game: PentixGame,
-  selectPieceId?: PieceIdSelector,
-): AdvancePentixGameSessionResult {
-  if (session.status !== 'active') {
-    return { game, session }
-  }
-
-  const piece = getActivePiece(session)
-  const down = {
-    row: session.activePiece.origin.row + 1,
-    column: session.activePiece.origin.column,
-  }
-
-  if (canPlace(session.board, getOccupiedCells(piece, down))) {
-    return { game, session: withActivePiece(session, session.activePiece.angle, down) }
-  }
-
-  return settle(session, game, selectPieceId)
-}
-
-export function dropSession(
-  session: PentixGameSession,
-  game: PentixGame,
-): AdvancePentixGameSessionResult {
-  if (session.status !== 'active') {
-    return { game, session }
-  }
-
-  const piece = getActivePiece(session)
-  const dropScore = Math.floor(
-    (piece.points *
-      (session.board.height - session.activePiece.origin.row) *
-      session.statistics.level) /
-      DROP_SCORE_DIVISOR,
-  )
-
-  let row = session.activePiece.origin.row
-  while (
-    canPlace(
-      session.board,
-      getOccupiedCells(piece, {
-        row: row + 1,
-        column: session.activePiece.origin.column,
-      }),
+    const piece = getActivePiece(session)
+    const step = direction === 'clockwise' ? -90 : 90
+    const nextAngle = normalizeAngle(
+      session.activePiece.angle + step,
+      piece.rotationMode,
     )
-  ) {
-    row += 1
+    if (nextAngle === session.activePiece.angle) {
+      return session
+    }
+
+    const nextPiece = piece.withAngle(nextAngle)
+    const origin = session.activePiece.origin
+    if (canPlace(session.board, getOccupiedCells(nextPiece, origin))) {
+      return withActivePiece(session, nextAngle, origin)
+    }
+
+    const { minX, maxX, minY } = rotatedExtremes(nextPiece.occupiedOffsets)
+    const width = session.board.width
+    const kick: Partial<Record<PlacementError, BoardPosition>> = {
+      right: { row: origin.row, column: width - maxX - 1 },
+      left: { row: origin.row, column: -minX },
+      top: { row: -minY, column: origin.column },
+    }
+    const error = checkPlacement(
+      session.board,
+      getOccupiedCells(nextPiece, origin),
+    )
+    const kickOrigin = kick[error]
+    if (
+      kickOrigin !== undefined &&
+      canPlace(session.board, getOccupiedCells(nextPiece, kickOrigin))
+    ) {
+      return withActivePiece(session, nextAngle, kickOrigin)
+    }
+
+    return session
   }
 
-  const moved = withActivePiece(session, session.activePiece.angle, {
-    row,
-    column: session.activePiece.origin.column,
-  })
-  const scored = withStatistics(moved, {
-    ...moved.statistics,
-    score: moved.statistics.score + dropScore,
-  })
+  tick(
+    session: PentixGameSession,
+    game: PentixGame,
+    selectPieceId?: PieceIdSelector,
+  ): AdvancePentixGameSessionResult {
+    if (session.status !== 'active') {
+      return { game, session }
+    }
 
-  return { game, session: scored }
+    const piece = getActivePiece(session)
+    const down = {
+      row: session.activePiece.origin.row + 1,
+      column: session.activePiece.origin.column,
+    }
+
+    if (canPlace(session.board, getOccupiedCells(piece, down))) {
+      return {
+        game,
+        session: withActivePiece(session, session.activePiece.angle, down),
+      }
+    }
+
+    return settle(session, game, selectPieceId)
+  }
+
+  drop(
+    session: PentixGameSession,
+    game: PentixGame,
+  ): AdvancePentixGameSessionResult {
+    if (session.status !== 'active') {
+      return { game, session }
+    }
+
+    const piece = getActivePiece(session)
+    const dropScore = Math.floor(
+      (piece.points *
+        (session.board.height - session.activePiece.origin.row) *
+        session.statistics.level) /
+        DROP_SCORE_DIVISOR,
+    )
+
+    let row = session.activePiece.origin.row
+    while (
+      canPlace(
+        session.board,
+        getOccupiedCells(piece, {
+          row: row + 1,
+          column: session.activePiece.origin.column,
+        }),
+      )
+    ) {
+      row += 1
+    }
+
+    const moved = withActivePiece(session, session.activePiece.angle, {
+      row,
+      column: session.activePiece.origin.column,
+    })
+    const scored = withStatistics(moved, {
+      ...moved.statistics,
+      score: moved.statistics.score + dropScore,
+    })
+
+    return { game, session: scored }
+  }
 }
 
+export const gameSessionEngine = new GameSessionEngine()
