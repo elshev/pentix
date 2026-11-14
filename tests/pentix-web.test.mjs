@@ -220,7 +220,7 @@ test('arrows map to movement and rotate keys to rotation', () => {
   assert.deepEqual(mapKeyToAction('ArrowLeft', 'playing'), { type: 'move', direction: 'left' })
   assert.deepEqual(mapKeyToAction('ArrowRight', 'playing'), { type: 'move', direction: 'right' })
   assert.deepEqual(mapKeyToAction('ArrowUp', 'playing'), { type: 'rotate' })
-  assert.deepEqual(mapKeyToAction('ArrowDown', 'playing'), { type: 'tick' })
+  assert.equal(mapKeyToAction('ArrowDown', 'playing'), undefined)
   assert.deepEqual(mapKeyToAction('z', 'playing'), { type: 'rotate' })
 })
 

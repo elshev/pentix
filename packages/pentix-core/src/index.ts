@@ -29,6 +29,16 @@ export type {
   PentixGameSession,
 } from './session.js'
 export {
+  replayPentixGameSession,
+  SESSION_ACTION_CODES,
+  SESSION_ACTIONS,
+} from './session-log.js'
+export type {
+  PieceActionLog,
+  SessionAction,
+  SessionActionLog,
+} from './session-log.js'
+export {
   getPieceDefinition,
   getPieceDefinitionById,
   PIECE_CATALOG,

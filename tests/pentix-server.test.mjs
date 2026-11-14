@@ -814,7 +814,7 @@ test('in-memory storage keeps nothing across instances', async () => {
   }
 })
 
-test('SQLite repositories round-trip users, games, and sessions', async () => {
+test('SQLite repositories round-trip users, games, and session logs', async () => {
   const temp = await createTempDataFile()
   const game = createPentixGame({
     id: uuidv7(),
@@ -826,17 +826,18 @@ test('SQLite repositories round-trip users, games, and sessions', async () => {
     pieceIds: [...game.pieceIds, 5],
   }
   const user = createUser({ id: uuidv7(), name: 'Ada' })
-  const session = createPentixGameSession({
-    id: uuidv7(),
+  const log = {
+    sessionId: uuidv7(),
     userId: user.id,
-    game,
-  })
+    gameId: game.id,
+    pieces: [{ pieceId: 3, actions: 'RC' }],
+  }
 
   const storage = createSqliteStorage({ dataFile: temp.dataFile })
   try {
     await storage.users.create(user)
     await storage.games.create(game)
-    await storage.sessions.create(session)
+    await storage.sessions.create(log)
     await storage.games.save(extendedGame)
   } finally {
     storage.close()
@@ -854,10 +855,9 @@ test('SQLite repositories round-trip users, games, and sessions', async () => {
     // the piece sequence survives as one ordered field
     assert.deepEqual(games.games[0].pieceIds, extendedGame.pieceIds)
 
+    // sessions are stored as piece ID + ordered actions (not a full snapshot)
     const sessions = await reopened.sessions.load()
-    assert.deepEqual(sessions, { sessions: [session] })
-    assert.deepEqual(await reopened.sessions.findById(session.id), session)
-    assert.deepEqual(await reopened.sessions.list(), [session])
+    assert.deepEqual(sessions, { sessions: [log] })
   } finally {
     reopened.close()
     await temp.cleanup()
@@ -875,16 +875,19 @@ test('a created user, game, and session survive a server restart with SQLite sto
 
   let user
   let session
+  let moved
   try {
     user = await createTestUser(first, 'Grace')
     session = await (
       await post(first.url, '/game-sessions', { userId: user.id })
     ).json()
 
-    const advanced = await (
-      await post(first.url, `/game-sessions/${session.id}/next-piece`)
+    moved = await (
+      await post(first.url, `/game-sessions/${session.id}/move`, {
+        direction: 'right',
+      })
     ).json()
-    assert.equal(advanced.nextPieceIndex, 2)
+    assert.equal(moved.activePiece.origin.column, session.activePiece.origin.column + 1)
   } finally {
     await first.close()
     storage.close()
@@ -905,12 +908,16 @@ test('a created user, game, and session survive a server restart with SQLite sto
     const userResponse = await fetch(`${second.url}/users/${user.id}`)
     assert.deepEqual(await userResponse.json(), user)
 
-    const advancedAgain = await (
-      await post(second.url, `/game-sessions/${session.id}/next-piece`)
+    // The recorded move is recovered by replaying the action log after restart.
+    const movedAgain = await (
+      await post(second.url, `/game-sessions/${session.id}/move`, {
+        direction: 'right',
+      })
     ).json()
-    assert.equal(advancedAgain.nextPieceIndex, 3)
-    assert.equal(advancedAgain.id, session.id)
-    assert.equal(advancedAgain.gameId, session.gameId)
+    assert.equal(
+      movedAgain.activePiece.origin.column,
+      moved.activePiece.origin.column + 1,
+    )
   } finally {
     await second.close()
     reopenedStorage.close()
@@ -954,3 +961,26 @@ test('a corrupt database file fails startup with a clear error', async () => {
   }
 })
 
+test('SQLite session storage rejects actions outside the alphabet', async () => {
+  const temp = await createTempDataFile()
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+
+  try {
+    await storage.sessions.create({
+      sessionId: uuidv7(),
+      userId: 'user-1',
+      gameId: 'game-1',
+      pieces: [{ pieceId: 3, actions: 'RS' }],
+    })
+  } finally {
+    storage.close()
+  }
+
+  const reopened = createSqliteStorage({ dataFile: temp.dataFile })
+  try {
+    await assert.rejects(reopened.sessions.load(), /invalid/)
+  } finally {
+    reopened.close()
+    await temp.cleanup()
+  }
+})

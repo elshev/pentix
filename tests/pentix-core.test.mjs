@@ -17,6 +17,7 @@ import {
   Piece,
   getOccupiedOffsets,
   normalizeAngle,
+  replayPentixGameSession,
 } from '../packages/pentix-core/dist/index.js'
 
 const expectedCatalog = [
@@ -713,4 +714,120 @@ test('the arbitrary game builder is not part of the public API', async () => {
 
   assert.equal('createPentixGameWithPieces' in publicApi, false)
   assert.equal(typeof publicApi.createTetrisGame, 'function')
+})
+test('replay reconstructs moves and rotations like live play', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14]),
+  })
+  let live = createPentixGameSession({ id: 'session-1', userId: 'user-1', game })
+  live = gameSessionEngine.move(live, 'right')
+  live = gameSessionEngine.move(live, 'right')
+  live = gameSessionEngine.rotate(live, 'clockwise')
+
+  const log = {
+    sessionId: 'session-1',
+    userId: 'user-1',
+    gameId: 'game-1',
+    pieces: [{ pieceId: 3, actions: 'RRC' }],
+  }
+
+  assert.deepEqual(replayPentixGameSession(log, game), live)
+
+  let anticlockwise = createPentixGameSession({
+    id: 'session-2',
+    userId: 'user-1',
+    game,
+  })
+  anticlockwise = gameSessionEngine.move(anticlockwise, 'left')
+  anticlockwise = gameSessionEngine.rotate(anticlockwise, 'counterclockwise')
+
+  const anticlockwiseLog = {
+    sessionId: 'session-2',
+    userId: 'user-1',
+    gameId: 'game-1',
+    pieces: [{ pieceId: 3, actions: 'LA' }],
+  }
+
+  assert.deepEqual(replayPentixGameSession(anticlockwiseLog, game), anticlockwise)
+})
+
+test('replay folds a gravity tick like live play', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14]),
+  })
+  const live = createPentixGameSession({ id: 'session-1', userId: 'user-1', game })
+  const ticked = gameSessionEngine.tick(live, game)
+
+  const log = {
+    sessionId: 'session-1',
+    userId: 'user-1',
+    gameId: 'game-1',
+    pieces: [{ pieceId: 3, actions: 'T' }],
+  }
+
+  assert.deepEqual(replayPentixGameSession(log, game), ticked.session)
+})
+
+test('replay folds a hard drop like live play', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14]),
+  })
+  const live = createPentixGameSession({ id: 'session-1', userId: 'user-1', game })
+  const dropped = gameSessionEngine.drop(live, game)
+
+  const log = {
+    sessionId: 'session-1',
+    userId: 'user-1',
+    gameId: 'game-1',
+    pieces: [{ pieceId: 3, actions: 'H' }],
+  }
+
+  assert.deepEqual(replayPentixGameSession(log, game), dropped.session)
+})
+test('a hard drop with no space below settles immediately without drop score', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([5, 6]),
+  })
+  const board = new Board(12, 22)
+  const session = Object.freeze({
+    id: 'session-1',
+    userId: 'user-1',
+    gameId: game.id,
+    status: 'active',
+    board: createBoardSnapshot(board),
+    statistics: Object.freeze({ score: 0, level: 2, clearedLines: 0, blocks: 0 }),
+    activePiece: Object.freeze({
+      key: '4Square',
+      angle: 0,
+      origin: Object.freeze({ row: 20, column: 5 }),
+    }),
+    nextPieceKey: '4T',
+    nextPieceIndex: 1,
+  })
+
+  const result = gameSessionEngine.drop(session, game)
+
+  // The piece is already resting on the bottom, so the drop locks it instead
+  // of awarding fall-distance score for no movement.
+  assert.equal(result.session.statistics.blocks, 1)
+  assert.equal(result.session.activePiece.key, '4T')
+  assert.equal(result.session.statistics.score, 8)
+})
+
+test('a hard drop with space below still awards fall-distance score', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([5, 6]),
+  })
+  const live = createPentixGameSession({ id: 'session-1', userId: 'user-1', game })
+
+  const result = gameSessionEngine.drop(live, game)
+
+  assert.equal(result.session.statistics.blocks, 0)
+  assert.ok(result.session.statistics.score > 0)
+  assert.equal(result.session.status, 'active')
 })

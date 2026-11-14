@@ -218,7 +218,10 @@ export function createGameReducer(deps: GameDependencies) {
           return state
         }
         return {
-          ...withResult(state, gameSessionEngine.drop(state.session, state.game)),
+          ...withResult(
+            state,
+            gameSessionEngine.drop(state.session, state.game, deps.selectPieceId),
+          ),
           // Restart the gravity clock so the dropped piece gets a full tick
           // before it locks, giving the player time to adjust it.
           gravityEpoch: state.gravityEpoch + 1,

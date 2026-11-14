@@ -1,6 +1,6 @@
 import type {
   PentixGame,
-  PentixGameSession,
+  SessionActionLog,
   User,
 } from '../../../../packages/pentix-core/dist/index.js'
 import type {
@@ -40,17 +40,16 @@ export interface GameRepository {
 }
 
 /**
- * Persistence contract for `PentixGameSession` entities.
+ * Persistence contract for `PentixGameSession` entities, stored as their
+ * replayable action logs (piece ID + ordered actions) rather than full state.
  */
 export interface GameSessionRepository {
-  /** Returns every retained session; an empty collection when nothing is stored. */
+  /** Returns every retained session log; an empty collection when nothing is stored. */
   load(): Promise<GameSessionCollection>
-  /** Persists a newly created session. */
-  create(session: PentixGameSession): Promise<void>
-  /** Persists changes to an existing session, inserting it when absent. */
-  save(session: PentixGameSession): Promise<void>
-  findById(sessionId: string): Promise<PentixGameSession | undefined>
-  list(): Promise<readonly PentixGameSession[]>
+  /** Persists a newly created session log. */
+  create(log: SessionActionLog): Promise<void>
+  /** Persists changes to an existing session log, inserting it when absent. */
+  save(log: SessionActionLog): Promise<void>
 }
 
 /**

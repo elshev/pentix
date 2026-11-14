@@ -395,12 +395,24 @@ export class GameSessionEngine {
   drop(
     session: PentixGameSession,
     game: PentixGame,
+    selectPieceId?: PieceIdSelector,
   ): AdvancePentixGameSessionResult {
     if (session.status !== 'active') {
       return { game, session }
     }
 
     const piece = getActivePiece(session)
+    const down = {
+      row: session.activePiece.origin.row + 1,
+      column: session.activePiece.origin.column,
+    }
+
+    // A hard drop with no space below settles the piece immediately and
+    // awards no fall-distance score.
+    if (!canPlace(session.board, getOccupiedCells(piece, down))) {
+      return settle(session, game, selectPieceId)
+    }
+
     const dropScore = Math.floor(
       (piece.points *
         (session.board.height - session.activePiece.origin.row) *

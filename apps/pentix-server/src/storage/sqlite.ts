@@ -2,16 +2,15 @@ import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 
-import type {
-  ActivePieceState,
-  BoardCell,
-  BoardSnapshot,
-  GameSessionStatistics,
-  GameSessionStatus,
-  PentixGame,
-  PentixGameSession,
-  PieceKey,
-  User,
+import {
+  SESSION_ACTION_CODES,
+  type BoardCell,
+  type BoardSnapshot,
+  type PentixGame,
+  type PieceActionLog,
+  type PieceKey,
+  type SessionActionLog,
+  type User,
 } from '../../../../packages/pentix-core/dist/index.js'
 import type {
   GameCollection,
@@ -49,12 +48,7 @@ CREATE TABLE IF NOT EXISTS game_sessions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   game_id TEXT NOT NULL,
-  status TEXT NOT NULL,
-  board TEXT NOT NULL,
-  statistics TEXT NOT NULL,
-  active_piece TEXT NOT NULL,
-  next_piece_key TEXT NOT NULL,
-  next_piece_index INTEGER NOT NULL
+  pieces TEXT NOT NULL
 );
 `
 
@@ -75,12 +69,7 @@ interface GameSessionRow {
   readonly id: string
   readonly user_id: string
   readonly game_id: string
-  readonly status: string
-  readonly board: string
-  readonly statistics: string
-  readonly active_piece: string
-  readonly next_piece_key: string
-  readonly next_piece_index: number
+  readonly pieces: string
 }
 
 function describeError(error: unknown): string {
@@ -279,44 +268,45 @@ function readGameRow(row: GameRow): PentixGame {
   })
 }
 
-function readSessionStatus(
-  value: string,
-  sessionId: string,
-): GameSessionStatus {
-  if (value !== 'active' && value !== 'game-over') {
-    throw new StorageError(
-      `Pentix storage contains an invalid status for game session ${sessionId}.`,
-    )
+const SESSION_ACTION_SET: ReadonlySet<string> = new Set(SESSION_ACTION_CODES)
+
+function readPieceLog(value: unknown, label: string): PieceActionLog {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new StorageError(`Pentix storage contains an invalid ${label}.`)
   }
 
-  return value
-}
+  const record = value as { readonly pieceId?: unknown; readonly actions?: unknown }
+  const pieceId = record.pieceId
+  const actions = record.actions
 
-function readSessionRow(row: GameSessionRow): PentixGameSession {
-  const label = `game session ${row.id}`
-
-  if (!Number.isInteger(row.next_piece_index) || row.next_piece_index < 0) {
-    throw new StorageError(
-      `Pentix storage contains an invalid ${label} next piece index.`,
-    )
+  if (
+    !Number.isInteger(pieceId) ||
+    typeof actions !== 'string' ||
+    ![...actions].every((action) => SESSION_ACTION_SET.has(action))
+  ) {
+    throw new StorageError(`Pentix storage contains an invalid ${label}.`)
   }
 
   return Object.freeze({
-    id: row.id,
+    pieceId: pieceId as number,
+    actions,
+  })
+}
+
+function readSessionLog(row: GameSessionRow): SessionActionLog {
+  const label = `game session ${row.id}`
+  const decoded = decodeJson(row.pieces, `${label} pieces`)
+  if (!Array.isArray(decoded)) {
+    throw new StorageError(`Pentix storage contains an invalid ${label} pieces.`)
+  }
+
+  return Object.freeze({
+    sessionId: row.id,
     userId: row.user_id,
     gameId: row.game_id,
-    status: readSessionStatus(row.status, row.id),
-    board: decodeBoard(row.board, `${label} board`),
-    statistics: decodeObject<GameSessionStatistics>(
-      row.statistics,
-      `${label} statistics`,
+    pieces: Object.freeze(
+      decoded.map((piece) => readPieceLog(piece, `${label} piece`)),
     ),
-    activePiece: decodeObject<ActivePieceState>(
-      row.active_piece,
-      `${label} active piece`,
-    ),
-    nextPieceKey: row.next_piece_key as PentixGameSession['nextPieceKey'],
-    nextPieceIndex: row.next_piece_index,
   })
 }
 
@@ -355,20 +345,12 @@ function writeGameRow(statement: StatementSync, game: PentixGame): void {
   )
 }
 
-function writeSessionRow(
-  statement: StatementSync,
-  session: PentixGameSession,
-): void {
+function writeSessionLog(statement: StatementSync, log: SessionActionLog): void {
   statement.run(
-    session.id,
-    session.userId,
-    session.gameId,
-    session.status,
-    JSON.stringify(session.board),
-    JSON.stringify(session.statistics),
-    JSON.stringify(session.activePiece),
-    session.nextPieceKey,
-    session.nextPieceIndex,
+    log.sessionId,
+    log.userId,
+    log.gameId,
+    JSON.stringify(log.pieces),
   )
 }
 
@@ -400,25 +382,15 @@ function createRepositories(database: DatabaseSync): PentixStorage {
   )
 
   const selectSessions = database.prepare(
-    `SELECT id, user_id, game_id, status, board, statistics, active_piece, next_piece_key, next_piece_index
-     FROM game_sessions ORDER BY rowid`,
-  )
-  const selectSessionById = database.prepare(
-    `SELECT id, user_id, game_id, status, board, statistics, active_piece, next_piece_key, next_piece_index
-     FROM game_sessions WHERE id = ?`,
+    'SELECT id, user_id, game_id, pieces FROM game_sessions ORDER BY rowid',
   )
   const upsertSession = database.prepare(
-    `INSERT INTO game_sessions (id, user_id, game_id, status, board, statistics, active_piece, next_piece_key, next_piece_index)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO game_sessions (id, user_id, game_id, pieces)
+     VALUES (?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        user_id = excluded.user_id,
        game_id = excluded.game_id,
-       status = excluded.status,
-       board = excluded.board,
-       statistics = excluded.statistics,
-       active_piece = excluded.active_piece,
-       next_piece_key = excluded.next_piece_key,
-       next_piece_index = excluded.next_piece_index`,
+       pieces = excluded.pieces`,
   )
 
   const users: UserRepository = {
@@ -466,25 +438,13 @@ function createRepositories(database: DatabaseSync): PentixStorage {
   const sessions: GameSessionRepository = {
     async load(): Promise<GameSessionCollection> {
       const rows = selectSessions.all() as unknown as readonly GameSessionRow[]
-      return { sessions: rows.map(readSessionRow) }
+      return { sessions: rows.map(readSessionLog) }
     },
-    async create(session: PentixGameSession): Promise<void> {
-      writeSessionRow(upsertSession, session)
+    async create(log: SessionActionLog): Promise<void> {
+      writeSessionLog(upsertSession, log)
     },
-    async save(session: PentixGameSession): Promise<void> {
-      writeSessionRow(upsertSession, session)
-    },
-    async findById(
-      sessionId: string,
-    ): Promise<PentixGameSession | undefined> {
-      const row = selectSessionById.get(sessionId) as unknown as
-        | GameSessionRow
-        | undefined
-      return row === undefined ? undefined : readSessionRow(row)
-    },
-    async list(): Promise<readonly PentixGameSession[]> {
-      const rows = selectSessions.all() as unknown as readonly GameSessionRow[]
-      return rows.map(readSessionRow)
+    async save(log: SessionActionLog): Promise<void> {
+      writeSessionLog(upsertSession, log)
     },
   }
 
