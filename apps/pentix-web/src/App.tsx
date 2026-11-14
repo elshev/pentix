@@ -1,3 +1,4 @@
+/** Root shell rendering the page hero and the Pentix game. */
 import { DEFAULT_BOARD_SIZE, PIECE_CATALOG } from '#pentix/core'
 
 import { Game } from './games/pentix/Game.tsx'
@@ -13,8 +14,9 @@ function App() {
         <p className="lede">
           A {DEFAULT_BOARD_SIZE.width}×{DEFAULT_BOARD_SIZE.height} board and{' '}
           {PIECE_CATALOG.length} legacy pieces from the shared <code>pentix-core</code>, now
-          playable in the browser. Arrow keys move, <code>Up</code>/<code>Z</code> rotates,{' '}
-          <code>Space</code> hard-drops, and <code>P</code> pauses.
+          playable in the browser. A demo plays itself on load — press{' '}
+          <code>Space</code> to take over, and press it again after a game over to
+          bring the demo back.
         </p>
       </header>
       <Game />

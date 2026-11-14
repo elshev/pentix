@@ -1,3 +1,4 @@
+/** Pure keyboard-key-to-action mapping per game phase (framework-free). */
 import type { GameAction, GamePhase } from './gameReducer.ts'
 
 const DIGIT_PATTERN = /^[0-9]$/
@@ -10,11 +11,22 @@ export function mapKeyToAction(
   key: string,
   phase: GamePhase,
 ): GameAction | undefined {
-  const canStart = phase === 'ready' || phase === 'game-over'
+  const canStart = phase === 'demo' || phase === 'game-over'
   const playing = phase === 'playing'
 
-  if (canStart && (key === 'Enter' || key === ' ')) {
+  if (key === 'Enter' && canStart) {
     return { type: 'start' }
+  }
+
+  // Space starts a player game from the demo, re-enters the demo after a game
+  // over, and hard-drops while playing.
+  if (key === ' ' || key === 'Spacebar') {
+    if (phase === 'demo') {
+      return { type: 'start' }
+    }
+    if (phase === 'game-over') {
+      return { type: 'demo' }
+    }
   }
 
   // Digits pick the starting level before a game; while playing, numeric keys

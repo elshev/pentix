@@ -1,3 +1,4 @@
+/** Player settings — rotation direction, next-piece toggle, and starting level. */
 import type { Dispatch } from 'react'
 
 import type { GameAction, GameSettings } from '../../engine/gameReducer.ts'
@@ -64,7 +65,7 @@ export function Settings({ settings, dispatch }: SettingsProps) {
       <p className="settings__hint">
         Keys: ←/→ or 7/9 move · ↑/Z/5/8 rotate · ↓ soft drop · Space hard drop ·
         Q rotation direction · N next piece · +/- level · 0-9 start level · P
-        pause · R restart
+        pause · R restart · Space after game over replays the demo
       </p>
     </div>
   )

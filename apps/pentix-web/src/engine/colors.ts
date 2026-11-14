@@ -1,3 +1,4 @@
+/** Maps catalog piece keys to their rendered colors. */
 import { PIECE_CATALOG, type PieceKey } from '#pentix/core'
 
 const FALLBACK_COLOR = '#8891a5'

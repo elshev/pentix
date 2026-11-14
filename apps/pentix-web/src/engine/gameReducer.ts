@@ -1,3 +1,4 @@
+/** Game state reducer — phase, settings, and the local Pentix session. */
 import {
   createPentixGame,
   createPentixGameSession,
@@ -9,7 +10,7 @@ import {
   type RotateDirection,
 } from '#pentix/core'
 
-export type GamePhase = 'ready' | 'playing' | 'paused' | 'game-over'
+export type GamePhase = 'demo' | 'playing' | 'paused' | 'game-over'
 
 export const MIN_LEVEL = 0
 export const MAX_LEVEL = 9
@@ -36,6 +37,7 @@ export interface GameState {
 
 export type GameAction =
   | { type: 'start' }
+  | { type: 'demo' }
   | { type: 'restart' }
   | { type: 'pause' }
   | { type: 'resume' }
@@ -96,26 +98,51 @@ function createSessionBundle(
   return { game, session: applyStartingLevel(baseSession, startingLevel) }
 }
 
-function withResult(state: GameState, result: SessionBundle): GameState {
-  const phase: GamePhase =
-    result.session.status === 'game-over' ? 'game-over' : state.phase
-  return { ...state, phase, game: result.game, session: result.session }
+function isActivePhase(phase: GamePhase): boolean {
+  return phase === 'playing' || phase === 'demo'
 }
 
-function startGame(state: GameState, deps: GameDependencies): GameState {
+function startSession(
+  state: GameState,
+  deps: GameDependencies,
+  phase: 'demo' | 'playing',
+): GameState {
   const { game, session } = createSessionBundle(deps, state.settings.startingLevel)
   return {
     ...state,
-    phase: 'playing',
+    phase,
     gravityEpoch: state.gravityEpoch + 1,
     game,
     session,
   }
 }
 
+function startGame(state: GameState, deps: GameDependencies): GameState {
+  return startSession(state, deps, 'playing')
+}
+
+function startDemo(state: GameState, deps: GameDependencies): GameState {
+  return startSession(state, deps, 'demo')
+}
+
+function applyAdvance(
+  state: GameState,
+  deps: GameDependencies,
+  result: SessionBundle,
+): GameState {
+  // A demo session that ends starts the next demo instead of surfacing a
+  // player-facing game-over state, mirroring the Delphi attract loop.
+  if (result.session.status === 'game-over' && state.phase === 'demo') {
+    return startDemo(state, deps)
+  }
+  const phase: GamePhase =
+    result.session.status === 'game-over' ? 'game-over' : state.phase
+  return { ...state, phase, game: result.game, session: result.session }
+}
+
 export function createInitialState(
   deps: GameDependencies,
-  phase: GamePhase = 'ready',
+  phase: GamePhase = 'demo',
   settings: GameSettings = DEFAULT_SETTINGS,
 ): GameState {
   const { game, session } = createSessionBundle(deps, settings.startingLevel)
@@ -128,6 +155,9 @@ export function createGameReducer(deps: GameDependencies) {
       case 'start':
       case 'restart':
         return startGame(state, deps)
+
+      case 'demo':
+        return startDemo(state, deps)
 
       case 'pause':
         return state.phase === 'playing' ? { ...state, phase: 'paused' } : state
@@ -145,7 +175,7 @@ export function createGameReducer(deps: GameDependencies) {
         return state
 
       case 'move':
-        if (state.phase !== 'playing') {
+        if (!isActivePhase(state.phase)) {
           return state
         }
         return {
@@ -154,7 +184,7 @@ export function createGameReducer(deps: GameDependencies) {
         }
 
       case 'rotate':
-        if (state.phase !== 'playing') {
+        if (!isActivePhase(state.phase)) {
           return state
         }
         return {
@@ -204,28 +234,36 @@ export function createGameReducer(deps: GameDependencies) {
           },
         }
 
-      case 'tick':
-        if (state.phase !== 'playing') {
+      case 'tick': {
+        if (!isActivePhase(state.phase)) {
           return state
         }
-        return withResult(
+        return applyAdvance(
           state,
+          deps,
           gameSessionEngine.tick(state.session, state.game, deps.selectPieceId),
         )
+      }
 
-      case 'drop':
-        if (state.phase !== 'playing') {
+      case 'drop': {
+        if (!isActivePhase(state.phase)) {
           return state
         }
+        const result = gameSessionEngine.drop(
+          state.session,
+          state.game,
+          deps.selectPieceId,
+        )
+        if (result.session.status === 'game-over' && state.phase === 'demo') {
+          return startDemo(state, deps)
+        }
         return {
-          ...withResult(
-            state,
-            gameSessionEngine.drop(state.session, state.game, deps.selectPieceId),
-          ),
+          ...applyAdvance(state, deps, result),
           // Restart the gravity clock so the dropped piece gets a full tick
           // before it locks, giving the player time to adjust it.
           gravityEpoch: state.gravityEpoch + 1,
         }
+      }
 
       default:
         return state

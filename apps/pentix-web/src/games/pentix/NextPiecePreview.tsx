@@ -1,3 +1,4 @@
+/** Mini-board rendering the upcoming piece. */
 import { getPieceDefinition, type PieceKey } from '#pentix/core'
 
 import { getPieceColor } from '../../engine/colors.ts'

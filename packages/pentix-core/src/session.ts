@@ -1,3 +1,4 @@
+/** Session snapshot types and factories for a Pentix game session. */
 import {
   createBoard,
   createBoardSnapshot,

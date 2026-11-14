@@ -317,3 +317,45 @@
   line-height: 1.5;
   color: rgba(233, 239, 255, 0.55);
 }
+
+.overlay--soft {
+  place-items: end center;
+  background: rgba(5, 9, 18, 0.32);
+  backdrop-filter: none;
+  padding-bottom: 1rem;
+}
+
+.overlay__hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: rgba(233, 239, 255, 0.78);
+}
+
+.overlay__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.overlay__button--secondary {
+  background: rgba(26, 41, 74, 0.9);
+  color: #eef2ff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.demo-badge {
+  position: absolute;
+  left: 50%;
+  bottom: 0.75rem;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(9, 15, 28, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(233, 239, 255, 0.8);
+  white-space: nowrap;
+  pointer-events: none;
+}

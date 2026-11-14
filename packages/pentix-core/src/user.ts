@@ -1,3 +1,4 @@
+/** User value object and its factory. */
 export interface User {
   readonly id: string
   readonly name: string

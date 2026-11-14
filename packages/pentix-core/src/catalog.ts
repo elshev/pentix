@@ -1,3 +1,4 @@
+/** The Pentix piece catalog — ids, keys, colors, rotation modes, and offsets. */
 import type { Offset, PieceDefinition, RotationMode } from './piece.js'
 
 export type PieceKey =

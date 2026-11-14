@@ -1,3 +1,4 @@
+/** On-screen buttons that dispatch game actions. */
 import type { Dispatch } from 'react'
 
 import type { GameAction, GamePhase } from '../../engine/gameReducer.ts'

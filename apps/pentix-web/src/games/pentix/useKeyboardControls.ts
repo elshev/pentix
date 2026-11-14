@@ -1,3 +1,4 @@
+/** Global keydown listener that dispatches the mapped game action. */
 import { useEffect } from 'react'
 import type { Dispatch } from 'react'
 

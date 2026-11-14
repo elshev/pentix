@@ -1,3 +1,4 @@
+/** Compact, replayable session action log plus the function that replays it. */
 import type { PentixGame } from './game.js'
 import { createPentixGameSession, type PentixGameSession } from './session.js'
 import { gameSessionEngine } from './session-engine.js'

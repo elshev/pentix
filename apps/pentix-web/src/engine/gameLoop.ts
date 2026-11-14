@@ -1,3 +1,4 @@
+/** Gravity timing — the per-level tick interval and the animation-frame cap. */
 const BASE_INTERVAL_MS = 800
 const INTERVAL_STEP_MS = 70
 const MIN_INTERVAL_MS = 120

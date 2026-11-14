@@ -1,3 +1,4 @@
+/** Pure, stateless game-session operations — move, rotate, tick, and drop. */
 import {
   createBoard,
   createBoardSnapshot,
@@ -26,6 +27,13 @@ import type {
   GameSessionStatistics,
   PentixGameSession,
 } from './session.js'
+import {
+  canPlace,
+  checkPlacement,
+  getActivePiece,
+  getOccupiedCells,
+  type PlacementError,
+} from './placement.js'
 
 export type MoveDirection = 'left' | 'right'
 export type RotateDirection = 'clockwise' | 'counterclockwise'
@@ -36,53 +44,6 @@ const LINE_CLEAR_BASE = 10
 const LINE_CLEAR_BONUS = 1000
 const DROP_SCORE_DIVISOR = 10
 
-type PlacementError = 'none' | 'left' | 'right' | 'top' | 'bottom' | 'buried'
-
-function getActivePiece(session: PentixGameSession): Piece {
-  return new Piece(
-    getPieceDefinition(session.activePiece.key),
-    session.activePiece.angle,
-  )
-}
-
-function getOccupiedCells(
-  piece: Piece,
-  origin: BoardPosition,
-): BoardPosition[] {
-  return piece.occupiedOffsets.map((offset) => ({
-    row: origin.row + offset.y,
-    column: origin.column + offset.x,
-  }))
-}
-
-function checkPlacement(
-  board: BoardSnapshot,
-  cells: BoardPosition[],
-): PlacementError {
-  for (const cell of cells) {
-    if (cell.column < 0) {
-      return 'left'
-    }
-    if (cell.column >= board.width) {
-      return 'right'
-    }
-    if (cell.row < 0) {
-      return 'top'
-    }
-    if (cell.row >= board.height) {
-      return 'bottom'
-    }
-    if (board.rows[cell.row][cell.column].isOccupied) {
-      return 'buried'
-    }
-  }
-
-  return 'none'
-}
-
-function canPlace(board: BoardSnapshot, cells: BoardPosition[]): boolean {
-  return checkPlacement(board, cells) === 'none'
-}
 
 function rotatedExtremes(offsets: readonly Offset[]): {
   minX: number

@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: The lifecycle spans demo, playing, paused, and game-over
+### Requirement: The lifecycle spans ready, playing, paused, and game-over
 
 The UI SHALL present a demo state on first load, transition to playing when the player starts by creating a fresh `PentixGame` and `PentixGameSession`, support pause and resume, and enter a game-over state when `session.status` becomes `'game-over'`. On game-over the UI SHALL preserve the final locked board (drawing no active, failed spawn piece) and SHALL offer both a fresh player game and re-entry to the demo.
 

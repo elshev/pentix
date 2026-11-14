@@ -1,3 +1,4 @@
+/** Immutable board grid — cells, bounds, and JSON-safe board snapshots shared by the game, engine, and UI. */
 import type { PieceKey } from './catalog.js'
 
 export interface BoardCell {
