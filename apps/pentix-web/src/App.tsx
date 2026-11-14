@@ -1,70 +1,23 @@
-import { Board, DEFAULT_BOARD_SIZE, PIECE_CATALOG, Piece } from '#pentix/core'
+import { DEFAULT_BOARD_SIZE, PIECE_CATALOG } from '#pentix/core'
+
+import { Game } from './games/pentix/Game.tsx'
 
 import './App.css'
 
 function App() {
-  const previewPieces = PIECE_CATALOG.slice(0, 6).map(
-    (definition) => new Piece(definition),
-  )
-  const previewBoard = new Board(
-    DEFAULT_BOARD_SIZE.width,
-    DEFAULT_BOARD_SIZE.height,
-  )
-
   return (
     <main className="shell">
-      <section className="hero">
-        <p className="eyebrow">Pentix Foundation</p>
-        <h1>Shared game primitives are in place.</h1>
+      <header className="hero">
+        <p className="eyebrow">Pentix</p>
+        <h1>Play the rebuilt classic.</h1>
         <p className="lede">
-          The browser app and PentixServer now share the same TypeScript piece
-          and board model, ported from the legacy Delphi source.
+          A {DEFAULT_BOARD_SIZE.width}×{DEFAULT_BOARD_SIZE.height} board and{' '}
+          {PIECE_CATALOG.length} legacy pieces from the shared <code>pentix-core</code>, now
+          playable in the browser. Arrow keys move, <code>Up</code>/<code>Z</code> rotates,{' '}
+          <code>Space</code> hard-drops, and <code>P</code> pauses.
         </p>
-      </section>
-
-      <section className="summary">
-        <article className="card">
-          <p className="label">Board</p>
-          <strong>
-            {previewBoard.width} x {previewBoard.height}
-          </strong>
-          <span>Default Pentix playfield size from the shared core package.</span>
-        </article>
-        <article className="card">
-          <p className="label">Catalog</p>
-          <strong>{PIECE_CATALOG.length} legacy pieces</strong>
-          <span>All Delphi piece definitions are available to both apps.</span>
-        </article>
-        <article className="card">
-          <p className="label">Server</p>
-          <strong>Lifecycle ready</strong>
-          <span>PentixServer can create games, start sessions, and advance pieces.</span>
-        </article>
-      </section>
-
-      <section className="catalog">
-        <div className="catalog-copy">
-          <p className="eyebrow">Preview</p>
-          <h2>First pieces from the shared catalog</h2>
-          <p>
-            Each piece stores mino offsets relative to the rotation origin. The
-            legacy Delphi `5Corner` exception is preserved exactly.
-          </p>
-        </div>
-
-        <div className="catalog-grid">
-          {previewPieces.map((piece) => (
-            <article className="piece-card" key={piece.key}>
-              <header>
-                <strong>{piece.key}</strong>
-                <span>{piece.colorName}</span>
-              </header>
-              <p>{piece.minoCount} minos</p>
-              <code>{piece.offsets.map(({ x, y }) => `(${x},${y})`).join(' ')}</code>
-            </article>
-          ))}
-        </div>
-      </section>
+      </header>
+      <Game />
     </main>
   )
 }

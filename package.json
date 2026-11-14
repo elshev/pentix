@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "imports": {
+    "#pentix/core": "./packages/pentix-core/dist/index.js"
+  },
   "scripts": {
     "dev:web": "vite --config apps/pentix-web/vite.config.ts",
     "build:web": "tsc -p apps/pentix-web/tsconfig.json && vite build --config apps/pentix-web/vite.config.ts",
@@ -11,7 +14,8 @@
     "build:server": "tsc -p apps/pentix-server/tsconfig.json",
     "start:server": "npm run build:core && npm run build:server && node apps/pentix-server/dist/main.js",
     "build": "npm run build:core && npm run build:server && npm run build:web",
-    "test": "npm run build:core && npm run build:server && node --test tests/pentix-core.test.mjs tests/pentix-server.test.mjs",
+    "test": "npm run build:core && npm run build:server && node --test tests/pentix-core.test.mjs tests/pentix-server.test.mjs && node --experimental-strip-types --no-warnings --test tests/pentix-web.test.mjs",
+    "test:web": "npm run build:core && node --experimental-strip-types --no-warnings --test tests/pentix-web.test.mjs",
     "lint": "eslint .",
     "preview": "npm run preview:web"
   },

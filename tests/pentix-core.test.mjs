@@ -5,6 +5,8 @@ import {
   advancePentixGameSession,
   createBoardSnapshot,
   createPentixGame,
+  createTetrisGame,
+  ensurePentixGamePieceAtIndex,
   createPentixGameSession,
   createUser,
   gameSessionEngine,
@@ -663,4 +665,52 @@ test('finished sessions ignore gameplay commands', () => {
   assert.equal(gameSessionEngine.rotate(session, 'clockwise'), session)
   assert.equal(gameSessionEngine.tick(session, game).session, session)
   assert.equal(gameSessionEngine.drop(session, game).session, session)
+})
+
+test('createPentixGame exposes the full catalog as its available piece set', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14]),
+  })
+
+  assert.deepEqual(
+    [...game.availablePieceIds],
+    PIECE_CATALOG.map((piece) => piece.id),
+  )
+})
+
+test('createTetrisGame exposes the four-mino set and Tetris board size', () => {
+  const game = createTetrisGame({
+    id: 'game-tetris',
+    selectPieceId: createSelector([4, 5]),
+  })
+  const tetrominoIds = PIECE_CATALOG.filter(
+    (piece) => piece.offsets.length === 4,
+  ).map((piece) => piece.id)
+
+  assert.deepEqual([...game.availablePieceIds], tetrominoIds)
+  assert.deepEqual([game.board.width, game.board.height], [10, 20])
+  assert.equal(game.pieceIds.length, 2)
+  assert.ok(
+    game.pieceIds.every((pieceId) => tetrominoIds.includes(pieceId)),
+  )
+})
+
+test('a preset sequence is drawn only from its available piece set', () => {
+  const game = createTetrisGame({ id: 'game-tetris' })
+  const extended = ensurePentixGamePieceAtIndex(game, 40)
+
+  assert.ok(extended.pieceIds.length >= 41)
+  assert.ok(
+    extended.pieceIds.every((pieceId) =>
+      extended.availablePieceIds.includes(pieceId),
+    ),
+  )
+})
+
+test('the arbitrary game builder is not part of the public API', async () => {
+  const publicApi = await import('../packages/pentix-core/dist/index.js')
+
+  assert.equal('createPentixGameWithPieces' in publicApi, false)
+  assert.equal(typeof publicApi.createTetrisGame, 'function')
 })

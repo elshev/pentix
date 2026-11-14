@@ -34,13 +34,15 @@ That means:
 
 ## User Model
 
-`User` is a JSON-serializable shared primitive with a UUIDv7 `id` and a required non-empty `name`. `PentixServer` exposes `POST /users` (create, rejecting a duplicate name case-insensitively with `409 Conflict`), `GET /users` (list), and `GET /users/{id}` (fetch). Users are retained only in the owning server process and are lost on restart.
+`User` is a JSON-serializable shared primitive with a UUIDv7 `id` and a required non-empty `name`, which serves as the player's nick. Additional attributes (first name, surname, middle name, creation date, etc.) can be added later without changing the identity contract. `PentixServer` exposes `POST /users` (create, rejecting a duplicate name case-insensitively with `409 Conflict`), `GET /users` (list), and `GET /users/{id}` (fetch). Users are retained only in the owning server process and are lost on restart.
 
 ## Game And Session Lifecycle
 
+A `PentixGame` (Game) is a reusable playfield definition: a board of a defined size, a set of available pieces (each with an ID and a name), and a theoretically infinite sequence drawn from those pieces. A `PentixGameSession` (session) is one play of a Game by one User; different users can play the same Game in different places and at different times.
+
 `POST /users` creates a `User` with UUIDv7 identity and a required non-empty `name`, rejecting duplicate names case-insensitively. `POST /games` creates a `PentixGame` with UUIDv7 identity, an optional name, an empty board, and a server-owned sequence of catalog piece IDs. `POST /game-sessions` creates a session either with a new game or with a retained game selected by `gameId`, and always for a retained user selected by the required `userId`. Sessions use UUIDv7 `id`, `gameId`, `userId`, and `nextPieceIndex`; the old `sessionId` field is gone.
 
-`POST /game-sessions/{id}/next-piece` is intentionally a state-changing `POST`. It promotes the previous preview, extends the game's piece sequence on demand, advances the cursor, and returns the full updated session. Games, sessions, and users live only in the owning server process and are lost on restart.
+`POST /game-sessions/{id}/next-piece` is intentionally a state-changing `POST`. It promotes the previous preview, extends the game's piece sequence on demand, advances the cursor, and returns the full updated session. The preview shown to the player is the piece after the current active piece ("next after one"), drawn from the engine once the current piece settles and is persisted (or cached for later persistence); it is shown when the "show next piece" option is enabled. Games, sessions, and users live only in the owning server process and are lost on restart.
 
 ## Gameplay
 
