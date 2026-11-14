@@ -15,9 +15,10 @@ This implementation increment does not build the full game yet. It establishes t
 - `BoardCell`: one cell of the board
 - `GameLevel`: difficulty level; higher level means higher speed
 - `Tick`: unit of internal game time
-- `PentixGame`: one game for many players
-- `PentixGameSession`: one game for one player
-- `User`: a registered user assigned to a `PentixGameSession`
+- `PentixGame` (Game): a reusable playfield definition with a board of a defined size, a set of available pieces (each with an ID and a name), and a theoretically infinite sequence drawn from those pieces. In the future a game may restrict its pieces to a subset (for example, Tetris uses only 4-mino pieces).
+- `PentixGameSession` (session): one play of a `PentixGame` by one `User`. Different users can play the same `PentixGame` in different places and at different times, each through their own session.
+- `User`: a registered player with an Id and a Nick/Name; additional attributes (first name, surname, middle name, creation date, etc.) can be added in the future.
+- `Next piece`: the piece after the current active piece, shown as a preview when the "show next piece" option is on; it is drawn from the engine once the current piece settles and is persisted (or cached for later persistence).
 
 ## Repository Layout
 

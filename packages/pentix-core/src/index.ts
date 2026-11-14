@@ -7,6 +7,7 @@ export {
 export type { BoardCell, BoardSize, BoardSnapshot } from './board.js'
 export {
   createPentixGame,
+  createTetrisGame,
   ensurePentixGamePieceAtIndex,
 } from './game.js'
 export type {
