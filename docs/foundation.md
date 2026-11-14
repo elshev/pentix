@@ -10,7 +10,7 @@ This repository now uses an `apps/` and `packages/` layout so the browser client
 
 ## HTTP Transport
 
-`PentixServer` serves its REST endpoints through a Hono application mounted on a Node.js HTTP server via `@hono/node-server`. Routing, JSON body parsing (with a 1 MiB limit), JSON responses (`application/json; charset=utf-8`), the not-found fallback, and the centralized error handler live in `apps/pentix-server/src/app.ts`, while the in-memory lifecycle and process start/stop remain in `server.ts`. `apps/pentix-server/src/http.ts` holds only the Pentix-agnostic HTTP primitives (`HttpError`, `HttpStatus`, `throwHttpErrorIf`); the request-body parsers and UUID/JSON validation helpers live in `apps/pentix-server/src/request.ts`.
+`PentixServer` serves its REST endpoints through a Hono application mounted on a Node.js HTTP server via `@hono/node-server`. Routing, JSON body parsing (with a 1 MiB limit), JSON responses (`application/json; charset=utf-8`), the not-found fallback, and the centralized error handler live in `apps/pentix-server/src/app.ts`, while the repository-backed lifecycle and process start/stop remain in `server.ts`. `apps/pentix-server/src/http.ts` holds only the Pentix-agnostic HTTP primitives (`HttpError`, `HttpStatus`, `throwHttpErrorIf`); the request-body parsers and UUID/JSON validation helpers live in `apps/pentix-server/src/request.ts`.
 
 ## Shared Piece Model
 
@@ -34,7 +34,7 @@ That means:
 
 ## User Model
 
-`User` is a JSON-serializable shared primitive with a UUIDv7 `id` and a required non-empty `name`, which serves as the player's nick. Additional attributes (first name, surname, middle name, creation date, etc.) can be added later without changing the identity contract. `PentixServer` exposes `POST /users` (create, rejecting a duplicate name case-insensitively with `409 Conflict`), `GET /users` (list), and `GET /users/{id}` (fetch). Users are retained only in the owning server process and are lost on restart.
+`User` is a JSON-serializable shared primitive with a UUIDv7 `id` and a required non-empty `name`, which serves as the player's nick. Users are retained through the server's user repository and survive a restart; additional attributes (first name, surname, middle name, creation date, etc.) can be added later without changing the identity contract. `PentixServer` exposes `POST /users` (create, rejecting a duplicate name case-insensitively with `409 Conflict`), `GET /users` (list), and `GET /users/{id}` (fetch).
 
 ## Game And Session Lifecycle
 
@@ -42,7 +42,20 @@ A `PentixGame` (Game) is a reusable playfield definition: a board of a defined s
 
 `POST /users` creates a `User` with UUIDv7 identity and a required non-empty `name`, rejecting duplicate names case-insensitively. `POST /games` creates a `PentixGame` with UUIDv7 identity, an optional name, an empty board, and a server-owned sequence of catalog piece IDs. `POST /game-sessions` creates a session either with a new game or with a retained game selected by `gameId`, and always for a retained user selected by the required `userId`. Sessions use UUIDv7 `id`, `gameId`, `userId`, and `nextPieceIndex`; the old `sessionId` field is gone.
 
-`POST /game-sessions/{id}/next-piece` is intentionally a state-changing `POST`. It promotes the previous preview, extends the game's piece sequence on demand, advances the cursor, and returns the full updated session. The preview shown to the player is the piece after the current active piece ("next after one"), drawn from the engine once the current piece settles and is persisted (or cached for later persistence); it is shown when the "show next piece" option is enabled. Games, sessions, and users live only in the owning server process and are lost on restart.
+`POST /game-sessions/{id}/next-piece` is intentionally a state-changing `POST`. It promotes the previous preview, extends the game's piece sequence on demand, advances the cursor, and returns the full updated session. The preview shown to the player is the piece after the current active piece ("next after one"), drawn from the engine once the current piece settles and is persisted (or cached for later persistence); it is shown when the "show next piece" option is enabled. Games, sessions, and users are retained through repositories, so they survive a restart of the owning server process.
+
+## Persistence
+
+The lifecycle depends on engine-agnostic repository interfaces in `apps/pentix-server/src/storage/repositories.ts`:
+
+- `UserRepository`, `GameRepository`, and `GameSessionRepository` expose `load`, `create`, `save`, `findById`, and `list`
+- `PentixStorage` bundles the three repositories plus a `close()` handle release
+- `createInMemoryStorage()` provides the non-durable implementation used by tests
+- `createSqliteStorage({ dataFile })` persists to a SQLite file through the Node.js built-in `node:sqlite` module (no native dependency)
+
+Users, games, and sessions are stored in separate tables (`users`, `games`, `game_sessions`). A game's piece sequence is stored as one ordered JSON field, and game/session boards are stored as JSON snapshots. `PentixGameLifecycle` keeps its in-memory maps as the request-time working set: it hydrates them via `load()` once at startup and saves each successful mutation through the matching repository.
+
+`startPentixServer` defaults to in-memory repositories so tests are deterministic. `apps/pentix-server/src/main.ts` builds SQLite repositories for `PENTIX_DATA_FILE` (default `data/pentix.db`) and passes them through `PentixServerContext.storage`. A missing database file starts with empty collections; an unreadable or corrupt file fails startup with a `StorageError` naming the file.
 
 ## Gameplay
 
@@ -57,6 +70,6 @@ A session's `status` becomes `game-over` when a spawn is blocked.
 
 ## Next Likely Steps
 
-- add durable persistence and PentixGame history models
+- add PentixGame history models and durable history endpoints
 - introduce browser gameplay state and rendering
 - connect the web app to `PentixServer`

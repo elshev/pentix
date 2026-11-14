@@ -34,3 +34,6 @@ apps/pentix-server/**/*.d.ts
 apps/pentix-web/**/*.js
 apps/pentix-web/**/*.js.map
 apps/pentix-web/**/*.d.ts
+
+# Local PentixServer data (SQLite file created at runtime)
+data/

@@ -18,10 +18,17 @@ import { v7 as uuidv7 } from 'uuid'
 
 import { createPentixApp } from './app.js'
 import { HttpError, HttpStatus } from './http.js'
+import { createInMemoryStorage } from './storage/memory.js'
+import type { PentixStorage } from './storage/repositories.js'
 
 export interface PentixServerContext {
   readonly createId?: () => string
   readonly selectPieceId?: PieceIdSelector
+  /**
+   * Persistence used by the lifecycle. Defaults to in-memory storage so tests
+   * and non-durable runs stay deterministic.
+   */
+  readonly storage?: PentixStorage
 }
 
 export interface PentixServerStartOptions {
@@ -45,18 +52,52 @@ export class PentixGameLifecycle {
   private readonly users = new Map<string, User>()
   private readonly createId: () => string
   private readonly selectPieceId?: PieceIdSelector
+  private readonly storage: PentixStorage
 
-  constructor(createId: () => string, selectPieceId?: PieceIdSelector) {
+  constructor(
+    createId: () => string,
+    selectPieceId?: PieceIdSelector,
+    storage: PentixStorage = createInMemoryStorage(),
+  ) {
     this.createId = createId
     this.selectPieceId = selectPieceId
+    this.storage = storage
   }
 
-  createGame(name = ''): PentixGame {
+  /**
+   * Hydrates the working set from the repositories. Must run once before the
+   * lifecycle accepts requests; `createPentixServer` does it during startup.
+   */
+  async load(): Promise<void> {
+    const [users, games, sessions] = await Promise.all([
+      this.storage.users.load(),
+      this.storage.games.load(),
+      this.storage.sessions.load(),
+    ])
+
+    this.users.clear()
+    for (const user of users.users) {
+      this.users.set(user.id, user)
+    }
+
+    this.games.clear()
+    for (const game of games.games) {
+      this.games.set(game.id, game)
+    }
+
+    this.sessions.clear()
+    for (const session of sessions.sessions) {
+      this.sessions.set(session.id, session)
+    }
+  }
+
+  async createGame(name = ''): Promise<PentixGame> {
     const game = createPentixGame({
       id: this.createId(),
       name,
       selectPieceId: this.selectPieceId,
     })
+    await this.storage.games.create(game)
     this.games.set(game.id, game)
     return game
   }
@@ -65,7 +106,7 @@ export class PentixGameLifecycle {
     return this.games.get(gameId)
   }
 
-  createUser(name: string): User {
+  async createUser(name: string): Promise<User> {
     const normalizedName = name.trim()
     for (const existingUser of this.users.values()) {
       if (existingUser.name.toLowerCase() === normalizedName.toLowerCase()) {
@@ -77,6 +118,7 @@ export class PentixGameLifecycle {
       id: this.createId(),
       name: normalizedName,
     })
+    await this.storage.users.create(user)
     this.users.set(user.id, user)
     return user
   }
@@ -89,12 +131,13 @@ export class PentixGameLifecycle {
     return [...this.users.values()]
   }
 
-  createSession(userId: string, gameId?: string): PentixGameSession {
+  async createSession(userId: string, gameId?: string): Promise<PentixGameSession> {
     if (this.getUser(userId) === undefined) {
       throw new HttpError(HttpStatus.notFound404, `User ${userId} was not found.`)
     }
 
-    const game = gameId === undefined ? this.createGame() : this.getGame(gameId)
+    const game =
+      gameId === undefined ? await this.createGame() : this.getGame(gameId)
     if (game === undefined) {
       throw new HttpError(HttpStatus.notFound404, `PentixGame ${gameId} was not found.`)
     }
@@ -104,11 +147,12 @@ export class PentixGameLifecycle {
       userId,
       game,
     })
+    await this.storage.sessions.create(session)
     this.sessions.set(session.id, session)
     return session
   }
 
-  advanceSession(sessionId: string): PentixGameSession {
+  async advanceSession(sessionId: string): Promise<PentixGameSession> {
     const session = this.sessions.get(sessionId)
     if (session === undefined) {
       throw new HttpError(HttpStatus.notFound404, `PentixGameSession ${sessionId} was not found.`)
@@ -124,9 +168,7 @@ export class PentixGameLifecycle {
       game,
       this.selectPieceId,
     )
-    this.games.set(result.game.id, result.game)
-    this.sessions.set(result.session.id, result.session)
-    return result.session
+    return this.persist(result)
   }
 
   private resolveSession(sessionId: string): {
@@ -146,38 +188,45 @@ export class PentixGameLifecycle {
     return { session, game }
   }
 
-  private persist(result: {
+  private async persist(result: {
     game: PentixGame
     session: PentixGameSession
-  }): PentixGameSession {
+  }): Promise<PentixGameSession> {
+    await this.storage.games.save(result.game)
+    await this.storage.sessions.save(result.session)
     this.games.set(result.game.id, result.game)
     this.sessions.set(result.session.id, result.session)
     return result.session
   }
 
-  move(sessionId: string, direction: MoveDirection): PentixGameSession {
+  async move(
+    sessionId: string,
+    direction: MoveDirection,
+  ): Promise<PentixGameSession> {
     const { session } = this.resolveSession(sessionId)
     const updated = gameSessionEngine.move(session, direction)
+    await this.storage.sessions.save(updated)
     this.sessions.set(updated.id, updated)
     return updated
   }
 
-  rotate(
+  async rotate(
     sessionId: string,
     direction: RotateDirection,
-  ): PentixGameSession {
+  ): Promise<PentixGameSession> {
     const { session } = this.resolveSession(sessionId)
     const updated = gameSessionEngine.rotate(session, direction)
+    await this.storage.sessions.save(updated)
     this.sessions.set(updated.id, updated)
     return updated
   }
 
-  tick(sessionId: string): PentixGameSession {
+  async tick(sessionId: string): Promise<PentixGameSession> {
     const { session, game } = this.resolveSession(sessionId)
     return this.persist(gameSessionEngine.tick(session, game, this.selectPieceId))
   }
 
-  drop(sessionId: string): PentixGameSession {
+  async drop(sessionId: string): Promise<PentixGameSession> {
     const { session, game } = this.resolveSession(sessionId)
     return this.persist(gameSessionEngine.drop(session, game))
   }
@@ -191,13 +240,15 @@ function formatHostForUrl(host: string): string {
   return host.includes(':') ? `[${host}]` : host
 }
 
-export function createPentixServer(
+export async function createPentixServer(
   context: PentixServerContext = {},
-): Server {
+): Promise<Server> {
   const lifecycle = new PentixGameLifecycle(
     context.createId ?? uuidv7,
     context.selectPieceId,
+    context.storage ?? createInMemoryStorage(),
   )
+  await lifecycle.load()
   const app = createPentixApp(lifecycle)
 
   return createAdaptorServer({ fetch: app.fetch }) as Server
@@ -209,7 +260,7 @@ export async function startPentixServer(
   const host = options.host ?? process.env.PENTIX_SERVER_HOST ?? DEFAULT_HOST
   const configuredPort =
     options.port ?? Number(process.env.PENTIX_SERVER_PORT ?? DEFAULT_PORT)
-  const server = createPentixServer(options.context)
+  const server = await createPentixServer(options.context)
 
   await new Promise<void>((resolve, reject) => {
     const handleError = (error: Error) => {

@@ -12,7 +12,7 @@ The PentixServer scaffold SHALL:
 - integrate with repository-level scripts or workspace commands,
 - expose documented `POST /games`, `POST /game-sessions` (with a required `userId`), `POST /game-sessions/{id}/next-piece`, `POST /game-sessions/{id}/move`, `POST /game-sessions/{id}/rotate`, `POST /game-sessions/{id}/tick`, `POST /game-sessions/{id}/drop`, `POST /users`, `GET /users`, and `GET /users/{id}` endpoints,
 - serve its HTTP endpoints through a Hono application mounted on a Node.js HTTP server via `@hono/node-server`, delegating routing, JSON serialization, and error handling to Hono while retaining host and port as server settings,
-- and remain intentionally limited with respect to durable persistence, multiplayer orchestration, and history APIs.
+- and remain intentionally limited with respect to multiplayer orchestration and durable history APIs.
 
 #### Scenario: A dedicated server application exists
 - **GIVEN** the game lifecycle change has been implemented
@@ -32,7 +32,8 @@ The PentixServer scaffold SHALL:
 - **GIVEN** the PentixServer application exposes game, session, gameplay, and user endpoints
 - **WHEN** a developer reviews its implemented features
 - **THEN** it provides user create, list, and get endpoints, requires a `userId` when starting a session, and provides gameplay move, rotate, tick, and drop endpoints
-- **AND** it does not provide durable history, multiplayer orchestration, or restart-safe persistence
+- **AND** it durably persists users, games, and sessions through engine-agnostic repositories
+- **AND** it does not provide durable history or multiplayer orchestration
 
 ### Requirement: PentixServer depends on shared game primitives instead of duplicating them
 The PentixServer application SHALL consume the shared game-primitives package for `Piece` and `Board` concepts instead of defining its own independent piece catalog.

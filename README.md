@@ -25,6 +25,7 @@ This implementation increment does not build the full game yet. It establishes t
 ```text
 apps/
   pentix-server/   Server with game/session lifecycle APIs
+    src/storage/   Engine-agnostic repositories (in-memory and SQLite)
   pentix-web/      Browser application shell
 packages/
   pentix-core/     Shared Pentix domain primitives
@@ -38,7 +39,7 @@ docs/
 
 The codebase currently includes:
 
-- a `PentixServer` implemented with Node.js and TypeScript, including user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints
+- a `PentixServer` implemented with Node.js and TypeScript, including user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints, persisting users, games, and sessions through engine-agnostic repositories
 - a shared `pentix-core` package with:
   - `Piece`
   - `Offset`
@@ -51,7 +52,8 @@ The codebase currently includes:
 
 The following are intentionally not implemented yet:
 
-- durable persistence, restart-safe resume, and history endpoints
+- durable history endpoints
+- a PostgreSQL repository implementation (the interfaces make it a later drop-in)
 - multiplayer orchestration beyond sharing one game's piece sequence
 - browser gameplay, scoring, ticks, and UI behavior from the final product goals
 
@@ -70,12 +72,12 @@ The following are intentionally not implemented yet:
 
 Scoring follows [Demo/Pentix/Main.pas](./delphi/Demo/Pentix/Main.pas): a lock scores `points × level`, a drop scores `points × (height − row) × level ÷ 10`, a cleared line scores `lineIndex × (10 + (height − row)) × level`, and emptying the field awards a `1000`-point bonus. Level increases every 30 locked pieces up to level 9.
 
-Games, sessions, and users are retained only in the memory of the server process that created them. Restarting the server clears them. Gameplay and next-piece requests are state-changing and not idempotent, so clients must not blindly retry a successful-looking request after an uncertain network failure.
+`PentixServer` persists users, games, and sessions through repository interfaces in `apps/pentix-server/src/storage/`, so neither the HTTP layer nor the lifecycle references a storage engine. `startPentixServer` defaults to in-memory repositories for deterministic tests; `npm run start:server` builds SQLite repositories for the file named by `PENTIX_DATA_FILE` (default `data/pentix.db`). Users, games, and sessions live in separate tables, and a game's piece sequence is stored as a single ordered field. Retained state is loaded at startup, a missing database file starts empty, and a corrupt database file fails startup with a clear error. Gameplay and next-piece requests are state-changing and not idempotent, so clients must not blindly retry a successful-looking request after an uncertain network failure.
 
 ## Commands
 
 - `npm run build`: build the shared core, server, and web app
-- `npm run start:server`: build and start PentixServer
+- `npm run start:server`: build and start PentixServer (persists to `PENTIX_DATA_FILE`, default `data/pentix.db`)
 - `npm run dev:web`: run the browser app with Vite
 - `npm run test`: verify shared primitives, game/session lifecycle behavior, and server APIs
 - `npm run lint`: run ESLint across the repository

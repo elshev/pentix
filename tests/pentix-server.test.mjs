@@ -1,8 +1,20 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
+import { v7 as uuidv7 } from 'uuid'
 
 import { startPentixServer } from '../apps/pentix-server/dist/server.js'
-import { PIECE_CATALOG } from '../packages/pentix-core/dist/index.js'
+import { createInMemoryStorage } from '../apps/pentix-server/dist/storage/memory.js'
+import { createSqliteStorage } from '../apps/pentix-server/dist/storage/sqlite.js'
+import {
+  createPentixGame,
+  createPentixGameSession,
+  createUser,
+  PIECE_CATALOG,
+} from '../packages/pentix-core/dist/index.js'
 
 const UNKNOWN_UUID_V7 = '018cc251-f400-7000-8000-000000000000'
 
@@ -774,3 +786,171 @@ test('gameplay endpoints validate direction and unknown sessions', async () => {
     await handle.close()
   }
 })
+
+async function createTempDataFile() {
+  const directory = await mkdtemp(path.join(tmpdir(), 'pentix-storage-'))
+  return {
+    directory,
+    dataFile: path.join(directory, 'pentix.db'),
+    cleanup: () => rm(directory, { recursive: true, force: true }),
+  }
+}
+
+test('in-memory storage keeps nothing across instances', async () => {
+  const storage = createInMemoryStorage()
+  const user = createUser({ id: uuidv7(), name: 'Ada' })
+  await storage.users.create(user)
+
+  assert.deepEqual(await storage.users.load(), { users: [user] })
+
+  const other = createInMemoryStorage()
+  try {
+    assert.deepEqual(await other.users.load(), { users: [] })
+    assert.deepEqual(await other.games.load(), { games: [] })
+    assert.deepEqual(await other.sessions.load(), { sessions: [] })
+  } finally {
+    storage.close()
+    other.close()
+  }
+})
+
+test('SQLite repositories round-trip users, games, and sessions', async () => {
+  const temp = await createTempDataFile()
+  const game = createPentixGame({
+    id: uuidv7(),
+    name: 'Round trip',
+    selectPieceId: () => 3,
+  })
+  const extendedGame = {
+    ...game,
+    pieceIds: [...game.pieceIds, 5],
+  }
+  const user = createUser({ id: uuidv7(), name: 'Ada' })
+  const session = createPentixGameSession({
+    id: uuidv7(),
+    userId: user.id,
+    game,
+  })
+
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+  try {
+    await storage.users.create(user)
+    await storage.games.create(game)
+    await storage.sessions.create(session)
+    await storage.games.save(extendedGame)
+  } finally {
+    storage.close()
+  }
+
+  const reopened = createSqliteStorage({ dataFile: temp.dataFile })
+  try {
+    assert.deepEqual(await reopened.users.load(), { users: [user] })
+    assert.deepEqual(await reopened.users.findById(user.id), user)
+    assert.deepEqual(await reopened.users.list(), [user])
+
+    const games = await reopened.games.load()
+    assert.deepEqual(games, { games: [extendedGame] })
+    assert.deepEqual(await reopened.games.findById(game.id), extendedGame)
+    // the piece sequence survives as one ordered field
+    assert.deepEqual(games.games[0].pieceIds, extendedGame.pieceIds)
+
+    const sessions = await reopened.sessions.load()
+    assert.deepEqual(sessions, { sessions: [session] })
+    assert.deepEqual(await reopened.sessions.findById(session.id), session)
+    assert.deepEqual(await reopened.sessions.list(), [session])
+  } finally {
+    reopened.close()
+    await temp.cleanup()
+  }
+})
+
+test('a created user, game, and session survive a server restart with SQLite storage', async () => {
+  const temp = await createTempDataFile()
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+  const first = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: { storage, selectPieceId: () => 3 },
+  })
+
+  let user
+  let session
+  try {
+    user = await createTestUser(first, 'Grace')
+    session = await (
+      await post(first.url, '/game-sessions', { userId: user.id })
+    ).json()
+
+    const advanced = await (
+      await post(first.url, `/game-sessions/${session.id}/next-piece`)
+    ).json()
+    assert.equal(advanced.nextPieceIndex, 2)
+  } finally {
+    await first.close()
+    storage.close()
+  }
+
+  const reopenedStorage = createSqliteStorage({ dataFile: temp.dataFile })
+  const second = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: { storage: reopenedStorage, selectPieceId: () => 3 },
+  })
+
+  try {
+    const usersResponse = await fetch(`${second.url}/users`)
+    assert.equal(usersResponse.status, 200)
+    assert.deepEqual(await usersResponse.json(), { users: [user] })
+
+    const userResponse = await fetch(`${second.url}/users/${user.id}`)
+    assert.deepEqual(await userResponse.json(), user)
+
+    const advancedAgain = await (
+      await post(second.url, `/game-sessions/${session.id}/next-piece`)
+    ).json()
+    assert.equal(advancedAgain.nextPieceIndex, 3)
+    assert.equal(advancedAgain.id, session.id)
+    assert.equal(advancedAgain.gameId, session.gameId)
+  } finally {
+    await second.close()
+    reopenedStorage.close()
+    await temp.cleanup()
+  }
+})
+
+test('a missing database file starts empty', async () => {
+  const temp = await createTempDataFile()
+  const dataFile = path.join(temp.directory, 'nested', 'pentix.db')
+  const storage = createSqliteStorage({ dataFile })
+  const handle = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: { storage },
+  })
+
+  try {
+    const response = await fetch(`${handle.url}/users`)
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), { users: [] })
+  } finally {
+    await handle.close()
+    storage.close()
+    await temp.cleanup()
+  }
+})
+
+test('a corrupt database file fails startup with a clear error', async () => {
+  const temp = await createTempDataFile()
+
+  try {
+    await writeFile(temp.dataFile, 'this is not a SQLite database')
+    assert.throws(
+      () => createSqliteStorage({ dataFile: temp.dataFile }),
+      /is not a readable SQLite database/,
+    )
+    assert.equal(existsSync(temp.dataFile), true)
+  } finally {
+    await temp.cleanup()
+  }
+})
+
