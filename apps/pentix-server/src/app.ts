@@ -27,19 +27,23 @@ export function createPentixApp(lifecycle: PentixGameLifecycle): Hono {
 
   app.post('/games', async (c) => {
     const name = readOptionalName(await readJsonBody(c))
-    return writeJson(c, HttpStatus.created201, lifecycle.createGame(name))
+    return writeJson(c, HttpStatus.created201, await lifecycle.createGame(name))
   })
 
   app.post('/game-sessions', async (c) => {
     const body = await readJsonBody(c)
     const gameId = readOptionalGameId(body)
     const userId = readRequiredUserId(body)
-    return writeJson(c, HttpStatus.created201, lifecycle.createSession(userId, gameId))
+    return writeJson(
+      c,
+      HttpStatus.created201,
+      await lifecycle.createSession(userId, gameId),
+    )
   })
 
   app.post('/users', async (c) => {
     const name = readRequiredName(await readJsonBody(c))
-    return writeJson(c, HttpStatus.created201, lifecycle.createUser(name))
+    return writeJson(c, HttpStatus.created201, await lifecycle.createUser(name))
   })
 
   app.get('/users', (c) => {
@@ -58,10 +62,14 @@ export function createPentixApp(lifecycle: PentixGameLifecycle): Hono {
     return writeJson(c, HttpStatus.ok200, user)
   })
 
-  app.post('/game-sessions/:id/next-piece', (c) => {
+  app.post('/game-sessions/:id/next-piece', async (c) => {
     const sessionId = c.req.param('id')
     checkUuid(sessionId, 'Game session id')
-    return writeJson(c, HttpStatus.ok200, lifecycle.advanceSession(sessionId))
+    return writeJson(
+      c,
+      HttpStatus.ok200,
+      await lifecycle.advanceSession(sessionId),
+    )
   })
 
   app.post('/game-sessions/:id/move', async (c) => {
@@ -73,7 +81,11 @@ export function createPentixApp(lifecycle: PentixGameLifecycle): Hono {
       ['left', 'right'],
       'Move',
     )
-    return writeJson(c, HttpStatus.ok200, lifecycle.move(sessionId, direction))
+    return writeJson(
+      c,
+      HttpStatus.ok200,
+      await lifecycle.move(sessionId, direction),
+    )
   })
 
   app.post('/game-sessions/:id/rotate', async (c) => {
@@ -85,19 +97,23 @@ export function createPentixApp(lifecycle: PentixGameLifecycle): Hono {
       ['clockwise', 'counterclockwise'],
       'Rotate',
     )
-    return writeJson(c, HttpStatus.ok200, lifecycle.rotate(sessionId, direction))
+    return writeJson(
+      c,
+      HttpStatus.ok200,
+      await lifecycle.rotate(sessionId, direction),
+    )
   })
 
-  app.post('/game-sessions/:id/tick', (c) => {
+  app.post('/game-sessions/:id/tick', async (c) => {
     const sessionId = c.req.param('id')
     checkUuid(sessionId, 'Game session id')
-    return writeJson(c, HttpStatus.ok200, lifecycle.tick(sessionId))
+    return writeJson(c, HttpStatus.ok200, await lifecycle.tick(sessionId))
   })
 
-  app.post('/game-sessions/:id/drop', (c) => {
+  app.post('/game-sessions/:id/drop', async (c) => {
     const sessionId = c.req.param('id')
     checkUuid(sessionId, 'Game session id')
-    return writeJson(c, HttpStatus.ok200, lifecycle.drop(sessionId))
+    return writeJson(c, HttpStatus.ok200, await lifecycle.drop(sessionId))
   })
 
   app.notFound((c) => {
