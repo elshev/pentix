@@ -7,11 +7,15 @@ import {
   createPentixGameSession,
   createUser,
   gameSessionEngine,
+  getPieceDefinition,
+  replayPentixGameSession,
   type MoveDirection,
   type PentixGame,
   type PentixGameSession,
   type PieceIdSelector,
   type RotateDirection,
+  type SessionAction,
+  type SessionActionLog,
   type User,
 } from '../../../packages/pentix-core/dist/index.js'
 import { v7 as uuidv7 } from 'uuid'
@@ -49,6 +53,7 @@ const DEFAULT_PORT = 3100
 export class PentixGameLifecycle {
   private readonly games = new Map<string, PentixGame>()
   private readonly sessions = new Map<string, PentixGameSession>()
+  private readonly sessionLogs = new Map<string, SessionActionLog>()
   private readonly users = new Map<string, User>()
   private readonly createId: () => string
   private readonly selectPieceId?: PieceIdSelector
@@ -69,7 +74,7 @@ export class PentixGameLifecycle {
    * lifecycle accepts requests; `createPentixServer` does it during startup.
    */
   async load(): Promise<void> {
-    const [users, games, sessions] = await Promise.all([
+    const [users, games, sessionLogs] = await Promise.all([
       this.storage.users.load(),
       this.storage.games.load(),
       this.storage.sessions.load(),
@@ -86,8 +91,17 @@ export class PentixGameLifecycle {
     }
 
     this.sessions.clear()
-    for (const session of sessions.sessions) {
-      this.sessions.set(session.id, session)
+    this.sessionLogs.clear()
+    for (const log of sessionLogs.sessions) {
+      const game = this.games.get(log.gameId)
+      if (game === undefined) {
+        throw new Error(
+          `PentixGameSession ${log.sessionId} references missing PentixGame ${log.gameId}.`,
+        )
+      }
+
+      this.sessionLogs.set(log.sessionId, log)
+      this.sessions.set(log.sessionId, replayPentixGameSession(log, game))
     }
   }
 
@@ -147,7 +161,9 @@ export class PentixGameLifecycle {
       userId,
       game,
     })
-    await this.storage.sessions.create(session)
+    const log = this.createEmptyLog(session)
+    await this.storage.sessions.create(log)
+    this.sessionLogs.set(session.id, log)
     this.sessions.set(session.id, session)
     return session
   }
@@ -168,7 +184,10 @@ export class PentixGameLifecycle {
       game,
       this.selectPieceId,
     )
-    return this.persist(result)
+    await this.storage.games.save(result.game)
+    this.games.set(result.game.id, result.game)
+    this.sessions.set(result.session.id, result.session)
+    return result.session
   }
 
   private resolveSession(sessionId: string): {
@@ -188,15 +207,66 @@ export class PentixGameLifecycle {
     return { session, game }
   }
 
-  private async persist(result: {
-    game: PentixGame
-    session: PentixGameSession
-  }): Promise<PentixGameSession> {
-    await this.storage.games.save(result.game)
-    await this.storage.sessions.save(result.session)
-    this.games.set(result.game.id, result.game)
-    this.sessions.set(result.session.id, result.session)
-    return result.session
+  private createEmptyLog(session: PentixGameSession): SessionActionLog {
+    return Object.freeze({
+      sessionId: session.id,
+      userId: session.userId,
+      gameId: session.gameId,
+      pieces: Object.freeze([]),
+    })
+  }
+
+  private appendAction(
+    log: SessionActionLog,
+    session: PentixGameSession,
+    action: SessionAction,
+  ): SessionActionLog {
+    const pieceId = getPieceDefinition(session.activePiece.key).id
+    const pieces = log.pieces.map((piece) => ({
+      pieceId: piece.pieceId,
+      actions: piece.actions,
+    }))
+
+    const lastPiece = pieces[pieces.length - 1]
+    if (lastPiece === undefined || lastPiece.pieceId !== pieceId) {
+      pieces.push({ pieceId, actions: action })
+    } else {
+      lastPiece.actions += action
+    }
+
+    return Object.freeze({
+      sessionId: log.sessionId,
+      userId: log.userId,
+      gameId: log.gameId,
+      pieces: Object.freeze(
+        pieces.map((piece) =>
+          Object.freeze({ pieceId: piece.pieceId, actions: piece.actions }),
+        ),
+      ),
+    })
+  }
+
+  private async persistAction(
+    preOpSession: PentixGameSession,
+    action: SessionAction,
+    updatedSession: PentixGameSession,
+    updatedGame?: PentixGame,
+  ): Promise<PentixGameSession> {
+    const log =
+      this.sessionLogs.get(preOpSession.id) ??
+      this.createEmptyLog(preOpSession)
+    const nextLog = this.appendAction(log, preOpSession, action)
+
+    await this.storage.sessions.save(nextLog)
+    this.sessionLogs.set(preOpSession.id, nextLog)
+    this.sessions.set(updatedSession.id, updatedSession)
+
+    if (updatedGame !== undefined) {
+      await this.storage.games.save(updatedGame)
+      this.games.set(updatedGame.id, updatedGame)
+    }
+
+    return updatedSession
   }
 
   async move(
@@ -205,9 +275,7 @@ export class PentixGameLifecycle {
   ): Promise<PentixGameSession> {
     const { session } = this.resolveSession(sessionId)
     const updated = gameSessionEngine.move(session, direction)
-    await this.storage.sessions.save(updated)
-    this.sessions.set(updated.id, updated)
-    return updated
+    return this.persistAction(session, direction === 'left' ? 'L' : 'R', updated)
   }
 
   async rotate(
@@ -216,19 +284,23 @@ export class PentixGameLifecycle {
   ): Promise<PentixGameSession> {
     const { session } = this.resolveSession(sessionId)
     const updated = gameSessionEngine.rotate(session, direction)
-    await this.storage.sessions.save(updated)
-    this.sessions.set(updated.id, updated)
-    return updated
+    return this.persistAction(
+      session,
+      direction === 'clockwise' ? 'C' : 'A',
+      updated,
+    )
   }
 
   async tick(sessionId: string): Promise<PentixGameSession> {
     const { session, game } = this.resolveSession(sessionId)
-    return this.persist(gameSessionEngine.tick(session, game, this.selectPieceId))
+    const result = gameSessionEngine.tick(session, game, this.selectPieceId)
+    return this.persistAction(session, 'T', result.session, result.game)
   }
 
   async drop(sessionId: string): Promise<PentixGameSession> {
     const { session, game } = this.resolveSession(sessionId)
-    return this.persist(gameSessionEngine.drop(session, game))
+    const result = gameSessionEngine.drop(session, game, this.selectPieceId)
+    return this.persistAction(session, 'H', result.session, result.game)
   }
 }
 

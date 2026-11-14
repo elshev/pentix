@@ -1,6 +1,6 @@
 import type {
   PentixGame,
-  PentixGameSession,
+  SessionActionLog,
   User,
 } from '../../../../packages/pentix-core/dist/index.js'
 import type {
@@ -23,7 +23,7 @@ import type {
 export function createInMemoryStorage(): PentixStorage {
   const users = new Map<string, User>()
   const games = new Map<string, PentixGame>()
-  const sessions = new Map<string, PentixGameSession>()
+  const sessions = new Map<string, SessionActionLog>()
 
   const userRepository: UserRepository = {
     async load(): Promise<UserCollection> {
@@ -65,17 +65,11 @@ export function createInMemoryStorage(): PentixStorage {
     async load(): Promise<GameSessionCollection> {
       return { sessions: [...sessions.values()] }
     },
-    async create(session: PentixGameSession): Promise<void> {
-      sessions.set(session.id, session)
+    async create(log: SessionActionLog): Promise<void> {
+      sessions.set(log.sessionId, log)
     },
-    async save(session: PentixGameSession): Promise<void> {
-      sessions.set(session.id, session)
-    },
-    async findById(sessionId: string): Promise<PentixGameSession | undefined> {
-      return sessions.get(sessionId)
-    },
-    async list(): Promise<readonly PentixGameSession[]> {
-      return [...sessions.values()]
+    async save(log: SessionActionLog): Promise<void> {
+      sessions.set(log.sessionId, log)
     },
   }
 

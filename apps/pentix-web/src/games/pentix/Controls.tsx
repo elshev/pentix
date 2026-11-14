@@ -43,14 +43,6 @@ export function Controls({ phase, dispatch }: ControlsProps) {
         <button
           type="button"
           className="control-button control-button--wide"
-          onClick={() => dispatch({ type: 'tick' })}
-          disabled={playDisabled}
-        >
-          Soft drop
-        </button>
-        <button
-          type="button"
-          className="control-button control-button--wide"
           onClick={() => dispatch({ type: 'drop' })}
           disabled={playDisabled}
         >

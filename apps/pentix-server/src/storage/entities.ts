@@ -1,6 +1,6 @@
 import type {
   PentixGame,
-  PentixGameSession,
+  SessionActionLog,
   User,
 } from '../../../../packages/pentix-core/dist/index.js'
 
@@ -20,8 +20,9 @@ export interface GameCollection {
 }
 
 /**
- * Snapshot of every session retained by a `GameSessionRepository`.
+ * Snapshot of every session retained by a `GameSessionRepository`. Sessions
+ * are stored as action logs (piece ID + actions), not as full board snapshots.
  */
 export interface GameSessionCollection {
-  readonly sessions: readonly PentixGameSession[]
+  readonly sessions: readonly SessionActionLog[]
 }

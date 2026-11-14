@@ -45,8 +45,6 @@ export function mapKeyToAction(
     case 'z':
     case 'Z':
       return { type: 'rotate' }
-    case 'ArrowDown':
-      return { type: 'tick' }
     case ' ':
     case 'Spacebar':
       return { type: 'drop' }
