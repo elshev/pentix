@@ -1,3 +1,4 @@
+/** Projects a session into the render grid cells displayed by the board view. */
 import {
   getPieceDefinition,
   Piece,
@@ -37,9 +38,13 @@ export function buildRenderGrid(session: PentixGameSession): RenderCell[][] {
     })),
   )
 
-  for (const { row, column } of getActiveCells(session)) {
-    if (row >= 0 && row < board.height && column >= 0 && column < board.width) {
-      grid[row][column] = { pieceKey: session.activePiece.key, isActive: true }
+  // A game-over session keeps its final locked board; the failed spawn piece is
+  // not drawn so the last board state stays visible.
+  if (session.status !== 'game-over') {
+    for (const { row, column } of getActiveCells(session)) {
+      if (row >= 0 && row < board.height && column >= 0 && column < board.width) {
+        grid[row][column] = { pieceKey: session.activePiece.key, isActive: true }
+      }
     }
   }
 

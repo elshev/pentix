@@ -1,3 +1,4 @@
+/** Sidebar showing score, level, lines, and the optional next-piece preview. */
 import type { GameSessionStatistics, PieceKey } from '#pentix/core'
 
 import { NextPiecePreview } from './NextPiecePreview.tsx'

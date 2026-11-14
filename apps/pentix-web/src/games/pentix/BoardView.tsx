@@ -1,3 +1,4 @@
+/** Renders the board grid and active piece from a session snapshot. */
 import type { PentixGameSession } from '#pentix/core'
 
 import { getPieceColor } from '../../engine/colors.ts'

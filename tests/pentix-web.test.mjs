@@ -7,6 +7,7 @@ import {
   createGameReducer,
   createInitialState,
 } from '../apps/pentix-web/src/engine/gameReducer.ts'
+import { actionTowardDestination, nextDemoAction } from '../apps/pentix-web/src/engine/demo.ts'
 import { getTickInterval } from '../apps/pentix-web/src/engine/gameLoop.ts'
 import { mapKeyToAction } from '../apps/pentix-web/src/engine/keyMap.ts'
 
@@ -64,7 +65,7 @@ test('getActiveCells maps the origin plus rotated offsets', () => {
 test('default settings use anticlockwise rotation, hide next, start at level 1', () => {
   const state = createInitialState(createDeps([0]))
 
-  assert.equal(state.phase, 'ready')
+  assert.equal(state.phase, 'demo')
   assert.equal(state.settings.rotateDirection, 'counterclockwise')
   assert.equal(state.settings.showNextPiece, false)
   assert.equal(state.settings.startingLevel, 1)
@@ -148,8 +149,8 @@ test('move shifts the active piece and is ignored when not playing', () => {
   const moved = reducer(playing, { type: 'move', direction: 'right' })
   assert.equal(moved.session.activePiece.origin.column, startColumn + 1)
 
-  const ignored = reducer({ ...playing, phase: 'ready' }, { type: 'move', direction: 'right' })
-  assert.equal(ignored.phase, 'ready')
+  const ignored = reducer({ ...playing, phase: 'paused' }, { type: 'move', direction: 'right' })
+  assert.equal(ignored.phase, 'paused')
   assert.equal(ignored.session.activePiece.origin.column, startColumn)
 })
 
@@ -212,8 +213,8 @@ test('numeric keys move and rotate while playing', () => {
 })
 
 test('digits set the starting level before a game starts', () => {
-  assert.deepEqual(mapKeyToAction('3', 'ready'), { type: 'setStartingLevel', level: 3 })
-  assert.deepEqual(mapKeyToAction('8', 'ready'), { type: 'setStartingLevel', level: 8 })
+  assert.deepEqual(mapKeyToAction('3', 'demo'), { type: 'setStartingLevel', level: 3 })
+  assert.deepEqual(mapKeyToAction('8', 'demo'), { type: 'setStartingLevel', level: 8 })
 })
 
 test('arrows map to movement and rotate keys to rotation', () => {
@@ -246,4 +247,125 @@ test('move and tick do not restart the gravity clock', () => {
     playing.gravityEpoch,
   )
   assert.equal(reducer(playing, { type: 'tick' }).gravityEpoch, playing.gravityEpoch)
+})
+
+function emptyBoard(width, height) {
+  return {
+    width,
+    height,
+    rows: Array.from({ length: height }, (_, row) =>
+      Array.from({ length: width }, (_, column) => ({
+        row,
+        column,
+        isOccupied: false,
+      })),
+    ),
+  }
+}
+
+function filledBoard(width, height) {
+  return {
+    width,
+    height,
+    rows: Array.from({ length: height }, (_, row) =>
+      Array.from({ length: width }, (_, column) => ({
+        row,
+        column,
+        isOccupied: true,
+        pieceKey: '4Square',
+      })),
+    ),
+  }
+}
+
+test('the initial phase is the demo', () => {
+  const state = createInitialState(createDeps([0]))
+  assert.equal(state.phase, 'demo')
+})
+
+test('the demo action creates a fresh demo session', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const playing = createInitialState(deps, 'playing')
+
+  const demo = reducer(playing, { type: 'demo' })
+  assert.equal(demo.phase, 'demo')
+  assert.equal(demo.session.status, 'active')
+  assert.notEqual(demo.session.id, playing.session.id)
+})
+
+test('starting from the demo enters a fresh player game', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps)
+
+  const started = reducer(demo, { type: 'start' })
+  assert.equal(started.phase, 'playing')
+  assert.equal(started.session.status, 'active')
+  assert.notEqual(started.session.id, demo.session.id)
+})
+
+test('space enters the demo after game over and starts a game from the demo', () => {
+  assert.deepEqual(mapKeyToAction(' ', 'game-over'), { type: 'demo' })
+  assert.deepEqual(mapKeyToAction(' ', 'demo'), { type: 'start' })
+  assert.deepEqual(mapKeyToAction('Enter', 'game-over'), { type: 'start' })
+  assert.deepEqual(mapKeyToAction('Enter', 'demo'), { type: 'start' })
+  assert.deepEqual(mapKeyToAction(' ', 'playing'), { type: 'drop' })
+})
+
+test('a demo game over immediately starts a fresh demo', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps)
+  const overState = {
+    ...demo,
+    session: { ...demo.session, status: 'game-over' },
+  }
+
+  const next = reducer(overState, { type: 'tick' })
+  assert.equal(next.phase, 'demo')
+  assert.equal(next.session.status, 'active')
+  assert.notEqual(next.session.id, demo.session.id)
+})
+
+test('nextDemoAction moves toward the demo destination', () => {
+  const session = {
+    board: emptyBoard(12, 22),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
+  }
+
+  assert.deepEqual(nextDemoAction(session), { type: 'move', direction: 'right' })
+})
+
+test('nextDemoAction hard-drops once the piece reaches its destination', () => {
+  const session = {
+    board: emptyBoard(12, 22),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 11 } },
+  }
+
+  assert.deepEqual(nextDemoAction(session), { type: 'drop' })
+})
+
+test('actionTowardDestination rotates before aligning the column', () => {
+  const session = {
+    board: emptyBoard(12, 22),
+    activePiece: { key: '4T', angle: 0, origin: { row: 1, column: 5 } },
+  }
+
+  assert.deepEqual(actionTowardDestination(session, { angle: 90, column: 3 }), {
+    type: 'rotate',
+  })
+  assert.deepEqual(actionTowardDestination(session, { angle: 0, column: 3 }), {
+    type: 'move',
+    direction: 'left',
+  })
+})
+
+test('nextDemoAction returns undefined when the planner finds no placement', () => {
+  const session = {
+    board: filledBoard(3, 3),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 1 } },
+  }
+
+  assert.equal(nextDemoAction(session), undefined)
 })

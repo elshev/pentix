@@ -1,7 +1,7 @@
 # browser-gameplay Specification
 
 ## Purpose
-Define the interactive browser gameplay client that renders the shared board, translates player input into shared `pentix-core` engine operations, runs the gravity loop, displays live score/level/lines plus an optional next-piece preview, and manages ready / playing / paused / game-over / restart states.
+Define the interactive browser gameplay client that renders the shared board, translates player input into shared `pentix-core` engine operations, runs the gravity loop, displays live score/level/lines plus an optional next-piece preview, and manages demo / playing / paused / game-over / restart states.
 ## Requirements
 ### Requirement: The browser renders the shared board and active piece
 
@@ -97,11 +97,18 @@ The UI SHALL display the session's score, level, and cleared lines from the sess
 
 ### Requirement: The lifecycle spans ready, playing, paused, and game-over
 
-The UI SHALL present a ready/start state, transition to playing on start by creating a fresh `PentixGame` and `PentixGameSession`, support pause and resume, and enter a game-over state when `session.status` becomes `'game-over'`, with restart creating a fresh game and session.
+The UI SHALL present a demo state on first load, transition to playing when the player starts by creating a fresh `PentixGame` and `PentixGameSession`, support pause and resume, and enter a game-over state when `session.status` becomes `'game-over'`. On game-over the UI SHALL preserve the final locked board (drawing no active, failed spawn piece) and SHALL offer both a fresh player game and re-entry to the demo.
+
+#### Scenario: The client starts in demo mode on first load
+
+- **GIVEN** no player game is in progress
+- **WHEN** the page first loads
+- **THEN** the UI enters the demo state
+- **AND** auto-plays a local session
 
 #### Scenario: Starting a game creates fresh state
 
-- **GIVEN** the ready state
+- **GIVEN** the demo or game-over state
 - **WHEN** the player starts
 - **THEN** the UI creates a new `PentixGame` and `PentixGameSession`
 - **AND** the UI enters the playing state
@@ -113,12 +120,12 @@ The UI SHALL present a ready/start state, transition to playing on start by crea
 - **THEN** gravity stops and the UI enters the paused state
 - **AND** resuming returns to playing with gravity running
 
-#### Scenario: Game over transitions and restart
+#### Scenario: Game over preserves the final board and offers restart or demo
 
 - **GIVEN** a session whose `tick` result has `status` `'game-over'`
 - **WHEN** the UI renders that result
-- **THEN** the UI enters the game-over state and offers restart
-- **AND** restarting creates a fresh `PentixGame` and `PentixGameSession` and resumes play
+- **THEN** the UI enters the game-over state with the final locked board still visible and no failed spawn piece drawn
+- **AND** the UI offers a fresh player game and re-entry to the demo
 
 ### Requirement: Gameplay delegates to the shared engine without local re-implementation
 

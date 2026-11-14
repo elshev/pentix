@@ -1,3 +1,4 @@
+/** Piece geometry — cell offsets, rotation normalization, and the Piece value object. */
 import type { PieceKey } from './catalog.js'
 
 export interface Offset {

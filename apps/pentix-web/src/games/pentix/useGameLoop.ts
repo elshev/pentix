@@ -1,3 +1,4 @@
+/** requestAnimationFrame gravity loop hook that emits ticks on a level cadence. */
 import { useEffect, useRef } from 'react'
 
 import { getTickInterval, MAX_FRAME_MS } from '../../engine/gameLoop.ts'

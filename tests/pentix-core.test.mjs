@@ -17,6 +17,7 @@ import {
   Piece,
   getOccupiedOffsets,
   normalizeAngle,
+  planDemoDestination,
   replayPentixGameSession,
 } from '../packages/pentix-core/dist/index.js'
 
@@ -830,4 +831,52 @@ test('a hard drop with space below still awards fall-distance score', () => {
   assert.equal(result.session.statistics.blocks, 0)
   assert.ok(result.session.statistics.score > 0)
   assert.equal(result.session.status, 'active')
+})
+
+test('demo planner targets a reachable wall column on an empty board', () => {
+  const game = createPentixGame({ id: 'game-1', selectPieceId: () => 0 })
+  const session = createPentixGameSession({
+    id: 'session-1',
+    userId: 'user-1',
+    game,
+  })
+
+  const destination = planDemoDestination(session)
+
+  // `1Line` can drop anywhere on an empty board; every column scores the same,
+  // so the Delphi tie-break settles on the right wall column.
+  assert.deepEqual(destination, { angle: 0, column: 11 })
+})
+
+test('demo planner completes a line when one placement would clear it', () => {
+  const board = new Board(3, 3)
+  board.setCell(2, 0, '4Square')
+  board.setCell(2, 1, '4Square')
+
+  const session = {
+    board: createBoardSnapshot(board),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 1 } },
+  }
+
+  const destination = planDemoDestination(session)
+
+  // Dropping into column 2 fills the bottom row; the `fullLines²` term makes
+  // that placement beat the shallower columns 0 and 1.
+  assert.deepEqual(destination, { angle: 0, column: 2 })
+})
+
+test('demo planner returns null when the active piece cannot be placed', () => {
+  const board = new Board(3, 3)
+  for (let row = 0; row < 3; row += 1) {
+    for (let column = 0; column < 3; column += 1) {
+      board.setCell(row, column, '4Square')
+    }
+  }
+
+  const session = {
+    board: createBoardSnapshot(board),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 1 } },
+  }
+
+  assert.equal(planDemoDestination(session), null)
 })

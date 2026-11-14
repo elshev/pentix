@@ -1,3 +1,4 @@
+/** A Pentix game — board, available pieces, and a lazily extended piece sequence. */
 import {
   createBoard,
   createBoardSnapshot,

@@ -1,3 +1,4 @@
+/** Public API barrel for pentix-core, consumed by the server and the web client. */
 export {
   Board,
   createBoard,
@@ -58,6 +59,8 @@ export type {
   RotationAngle,
   RotationMode,
 } from './piece.js'
+export { planDemoDestination } from './demo.js'
+export type { DemoDestination } from './demo.js'
 export {
   GameSessionEngine,
   gameSessionEngine,

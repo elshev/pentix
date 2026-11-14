@@ -1,3 +1,4 @@
+/** Pentix game screen wiring the board, HUD, controls, settings, and game loop. */
 import { useMemo, useReducer } from 'react'
 
 import {
@@ -9,6 +10,7 @@ import { BoardView } from './BoardView.tsx'
 import { Controls } from './Controls.tsx'
 import { Hud } from './Hud.tsx'
 import { Settings } from './Settings.tsx'
+import { useDemoController } from './useDemoController.ts'
 import { useGameLoop } from './useGameLoop.ts'
 import { useKeyboardControls } from './useKeyboardControls.ts'
 
@@ -40,14 +42,17 @@ export function Game() {
   const dependencies = useMemo<GameDependencies>(() => ({ createId: defaultCreateId }), [])
   const reducer = useMemo(() => createGameReducer(dependencies), [dependencies])
   const [state, dispatch] = useReducer(reducer, dependencies, (deps) =>
-    createInitialState(deps, 'ready'),
+    createInitialState(deps),
   )
 
   const { phase, settings, gravityEpoch, session } = state
+  const level = session.statistics.level
+  const loopActive = phase === 'playing' || phase === 'demo'
 
-  useGameLoop(phase === 'playing', session.statistics.level, gravityEpoch, () =>
+  useGameLoop(loopActive, level, gravityEpoch, () =>
     dispatch({ type: 'tick' }),
   )
+  useDemoController(phase === 'demo', level, session, dispatch)
   useKeyboardControls(phase, dispatch)
 
   const label =
@@ -57,36 +62,47 @@ export function Game() {
         ? 'Paused'
         : phase === 'game-over'
           ? 'Game over'
-          : 'Ready'
+          : 'Demo'
 
   return (
     <section className="game">
       <div className="game__stage">
         <BoardView session={session} />
-        {phase !== 'playing' && (
+        {phase === 'paused' && (
           <div className="overlay">
-            {phase === 'paused' && (
-              <Overlay
-                title="Paused"
-                label="Resume"
-                onClick={() => dispatch({ type: 'resume' })}
-              />
-            )}
-            {phase === 'game-over' && (
-              <Overlay
-                title="Game over"
-                label="Play again"
-                onClick={() => dispatch({ type: 'restart' })}
-              />
-            )}
-            {phase === 'ready' && (
-              <Overlay
-                title="Ready"
-                label="Start game"
-                onClick={() => dispatch({ type: 'start' })}
-              />
-            )}
+            <Overlay
+              title="Paused"
+              label="Resume"
+              onClick={() => dispatch({ type: 'resume' })}
+            />
           </div>
+        )}
+        {phase === 'game-over' && (
+          <div className="overlay overlay--soft">
+            <div className="overlay__card">
+              <p className="overlay__title">Game over</p>
+              <p className="overlay__hint">Space — demo · Enter — play again</p>
+              <div className="overlay__actions">
+                <button
+                  type="button"
+                  className="overlay__button"
+                  onClick={() => dispatch({ type: 'restart' })}
+                >
+                  Play again
+                </button>
+                <button
+                  type="button"
+                  className="overlay__button overlay__button--secondary"
+                  onClick={() => dispatch({ type: 'demo' })}
+                >
+                  Demo
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {phase === 'demo' && (
+          <p className="demo-badge">Demo — press Space to play</p>
         )}
       </div>
       <Hud
