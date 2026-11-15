@@ -336,6 +336,34 @@ function filledBoard(width, height) {
   }
 }
 
+/** An empty board with the given `[row, column]` cells settled. */
+function boardWith(width, height, filled = []) {
+  const board = emptyBoard(width, height)
+  for (const [row, column] of filled) {
+    board.rows[row][column] = { row, column, isOccupied: true, pieceKey: '4Square' }
+  }
+  return board
+}
+
+/** A demo state whose session is overridden (board, piece placement, status). */
+function demoStateWith(deps, overrides) {
+  const state = createInitialState(deps, 'demo')
+  return { ...state, session: { ...state.session, ...overrides } }
+}
+
+/** A `demoStep` action planned for the state's current piece and placement. */
+function demoStepAction(state, action, overrides = {}) {
+  return {
+    type: 'demoStep',
+    action,
+    sessionId: state.session.id,
+    pieceIndex: state.session.nextPieceIndex,
+    angle: state.session.activePiece.angle,
+    column: state.session.activePiece.origin.column,
+    ...overrides,
+  }
+}
+
 test('the initial phase is the demo', () => {
   const state = createInitialState(createDeps([0]))
   assert.equal(state.phase, 'demo')
@@ -352,37 +380,150 @@ test('the demo action creates a fresh demo session', () => {
   assert.notEqual(demo.session.id, playing.session.id)
 })
 
-test('a stale demo action does not steer a different piece', () => {
+test('a stale demo step does not steer a different piece', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
 
-  // Simulate an action planned for a previous piece generation; by the time it
-  // is applied the gravity tick has already spawned the next piece.
-  const stale = reducer(demo, {
-    type: 'demoAction',
-    action: { type: 'drop' },
-    sessionId: demo.session.id,
-    pieceIndex: demo.session.nextPieceIndex - 1,
-  })
+  // Simulate a step planned for a previous piece generation; by the time it is
+  // applied the demo has already spawned the next piece.
+  const stale = reducer(
+    demo,
+    demoStepAction(demo, { type: 'drop' }, {
+      pieceIndex: demo.session.nextPieceIndex - 1,
+    }),
+  )
 
   assert.equal(stale, demo)
 })
 
-test('a demo action for the active piece is applied', () => {
+test('a stale demo step does not steer a placement that already changed', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
-  const startColumn = demo.session.activePiece.origin.column
+  const action = demoStepAction(demo, { type: 'move', direction: 'left' })
 
-  const moved = reducer(demo, {
-    type: 'demoAction',
-    action: { type: 'move', direction: 'left' },
-    sessionId: demo.session.id,
-    pieceIndex: demo.session.nextPieceIndex,
+  // The piece already shifted one column after the step was planned, so the
+  // placement in the step no longer matches and the step is dropped.
+  const shifted = {
+    ...demo,
+    session: {
+      ...demo.session,
+      activePiece: {
+        ...demo.session.activePiece,
+        origin: {
+          row: demo.session.activePiece.origin.row,
+          column: demo.session.activePiece.origin.column + 1,
+        },
+      },
+    },
+  }
+
+  assert.equal(reducer(shifted, action), shifted)
+})
+
+test('a demo step descends the piece and applies the steering action', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+  const { row, column } = demo.session.activePiece.origin
+
+  const stepped = reducer(
+    demo,
+    demoStepAction(demo, { type: 'move', direction: 'left' }),
+  )
+
+  // Delphi's `TimerExpired`: the gravity step runs before the steering step.
+  assert.equal(stepped.session.activePiece.origin.row, row + 1)
+  assert.equal(stepped.session.activePiece.origin.column, column - 1)
+})
+
+test('a demo step on a resting piece takes the last-tick move instead of locking', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = demoStateWith(deps, {
+    board: boardWith(3, 4, [
+      [2, 0],
+      [3, 0],
+    ]),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
   })
 
-  assert.equal(moved.session.activePiece.origin.column, startColumn - 1)
+  // Column 0 is stacked two rows high, so the piece rests at row 1 and stepping
+  // right lets it fall to the floor: the step replaces locking and no gravity is
+  // applied on this tick.
+  const stepped = reducer(
+    demo,
+    demoStepAction(demo, { type: 'move', direction: 'right' }),
+  )
+
+  assert.equal(stepped.session.activePiece.origin.row, 1)
+  assert.equal(stepped.session.activePiece.origin.column, 1)
+  assert.equal(stepped.session.statistics.blocks, 0)
+  assert.equal(stepped.session.id, demo.session.id)
+})
+
+test('a demo step parks the piece under a settled mino on the last tick', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = demoStateWith(deps, {
+    board: boardWith(12, 22, [[20, 11]]),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 21, column: 10 } },
+  })
+
+  // Stepping right cannot fall any further — the piece is already on the floor —
+  // but the corner under the settled mino is the better placement, so the demo
+  // takes it instead of locking.
+  const stepped = reducer(
+    demo,
+    demoStepAction(demo, { type: 'move', direction: 'right' }),
+  )
+
+  assert.equal(stepped.session.activePiece.origin.row, 21)
+  assert.equal(stepped.session.activePiece.origin.column, 11)
+  assert.equal(stepped.session.statistics.blocks, 0)
+  assert.equal(stepped.session.id, demo.session.id)
+})
+
+test('a demo step with no last-tick move settles the resting piece', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = demoStateWith(deps, {
+    board: boardWith(3, 4, [0, 1, 2].map((column) => [3, column])),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 2, column: 1 } },
+  })
+
+  const settled = reducer(
+    demo,
+    demoStepAction(demo, { type: 'drop' }),
+  )
+
+  assert.equal(settled.session.statistics.blocks, 1)
+  assert.equal(settled.session.activePiece.key, demo.session.nextPieceKey)
+  assert.equal(settled.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
+  assert.equal(settled.session.id, demo.session.id)
+})
+
+test('a demo step that ends the demo game restarts it immediately', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+  const { row, column } = demo.session.activePiece.origin
+  // Block the cell below the piece so it settles at the spawn point, and the
+  // next spawn has nowhere to go: the demo game ends.
+  const blocked = demoStateWith(deps, {
+    board: boardWith(12, 22, [[row + 1, column]]),
+    activePiece: demo.session.activePiece,
+  })
+
+  const restarted = reducer(
+    blocked,
+    demoStepAction(blocked, { type: 'drop' }),
+  )
+
+  assert.equal(restarted.phase, 'demo')
+  assert.equal(restarted.session.status, 'active')
+  assert.notEqual(restarted.session.id, blocked.session.id)
 })
 
 test('starting from the demo enters a fresh player game', () => {
@@ -571,6 +712,33 @@ test('resolveDemoPlan keeps the destination stable for the same piece', () => {
   // piece is active, otherwise the demo would jitter left/right every tick.
   assert.equal(second, first)
   assert.equal(third.destination, first.destination)
+})
+
+test('resolveDemoPlan re-targets the destination for a last-tick side-step', () => {
+  const session = {
+    id: 'session-1',
+    nextPieceIndex: 1,
+    // Column 0 is stacked two rows high, so the piece rests at row 1 and a step
+    // right lets it fall to the floor.
+    board: boardWith(3, 4, [
+      [2, 0],
+      [3, 0],
+    ]),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
+  }
+
+  const first = resolveDemoPlan(null, session)
+  const reTargeted = resolveDemoPlan(first, session)
+
+  assert.deepEqual(reTargeted.destination, { angle: 0, column: 1 })
+
+  // Once the piece has stepped and can fall again, the new destination is kept
+  // as-is so the demo does not steer back.
+  const stepped = {
+    ...session,
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 1 } },
+  }
+  assert.equal(resolveDemoPlan(reTargeted, stepped), reTargeted)
 })
 
 test('resolveDemoPlan re-plans when a new piece spawns or the session changes', () => {

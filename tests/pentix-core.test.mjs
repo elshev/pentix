@@ -17,7 +17,9 @@ import {
   Piece,
   getOccupiedOffsets,
   normalizeAngle,
+  canDemoPieceMoveDown,
   planDemoDestination,
+  planDemoLastTickMove,
   replayPentixGameSession,
 } from '../packages/pentix-core/dist/index.js'
 
@@ -901,9 +903,11 @@ test('demo planner prefers the equal-scoring placement with more contacts', () =
   const destination = planDemoDestination(session)
 
   // Columns 1 and 2 both drop onto the full bottom row at the same depth and
-  // score, but column 1 lands next to the settled mino at (1,0) and so has one
-  // more contact; the planner prefers column 1.
-  assert.deepEqual(destination, { angle: 0, column: 1 })
+  // score. Column 1 lands beside the settled mino at (1,0) for two contacts,
+  // while a drop in column 2 can side-step right on the last tick into the
+  // column-3 pocket, touching the floor, the side wall, and the mino at (0,3)
+  // for three contacts — so the planner steers to column 2.
+  assert.deepEqual(destination, { angle: 0, column: 2 })
 })
 
 test('demo planner counts contacts per mino and prefers settled-mino contacts', () => {
@@ -946,3 +950,229 @@ test('demo planner prefers non-wall placements when contacts tie', () => {
   assert.equal(destination.angle, 0)
   assert.ok(destination.column === 2 || destination.column === 4)
 })
+
+// --- Demo last-tick move -----------------------------------------------------
+
+/** A session-like fixture: a fresh board plus the piece at a given placement. */
+function demoSession({ width, height, filled = [], key, angle = 0, row, column }) {
+  const board = new Board(width, height)
+  for (const [filledRow, filledColumn] of filled) {
+    board.setCell(filledRow, filledColumn, '4Square')
+  }
+
+  return {
+    board: createBoardSnapshot(board),
+    activePiece: { key, angle, origin: { row, column } },
+  }
+}
+
+test('the demo descent check reports whether the active piece can move down', () => {
+  const falling = demoSession({
+    width: 3,
+    height: 3,
+    key: '1Line',
+    row: 0,
+    column: 1,
+  })
+  assert.equal(canDemoPieceMoveDown(falling), true)
+
+  const onFloor = demoSession({
+    width: 3,
+    height: 3,
+    key: '1Line',
+    row: 2,
+    column: 1,
+  })
+  assert.equal(canDemoPieceMoveDown(onFloor), false)
+
+  const onStack = demoSession({
+    width: 3,
+    height: 3,
+    filled: [[2, 1]],
+    key: '1Line',
+    row: 1,
+    column: 1,
+  })
+  assert.equal(canDemoPieceMoveDown(onStack), false)
+})
+
+test('the last-tick planner stays idle while the piece can still fall', () => {
+  const session = demoSession({
+    width: 3,
+    height: 3,
+    key: '1Line',
+    row: 0,
+    column: 1,
+  })
+
+  assert.equal(planDemoLastTickMove(session), null)
+})
+
+test('the last-tick planner slides a resting piece onto a deeper ledge', () => {
+  const session = demoSession({
+    width: 3,
+    height: 4,
+    filled: [
+      [2, 0],
+      [3, 0],
+    ],
+    key: '1Line',
+    row: 1,
+    column: 0,
+  })
+
+  // Column 0 is stacked two rows high, so the piece rests at row 1. Stepping
+  // right lets it fall to the floor in column 1, which scores strictly better.
+  assert.equal(canDemoPieceMoveDown(session), false)
+  assert.deepEqual(planDemoLastTickMove(session), {
+    angle: 0,
+    column: 1,
+  })
+})
+
+test('the last-tick planner takes the side-step that keeps the piece falling', () => {
+  const session = demoSession({
+    width: 3,
+    height: 4,
+    filled: [
+      [2, 0],
+      [3, 0],
+    ],
+    key: '1Line',
+    row: 1,
+    column: 0,
+  })
+
+  // Column 0 is stacked two rows high, so the piece rests at row 1. Stepping
+  // right lets it fall to the floor in column 1, so that side-step is scored at
+  // the deeper landing and wins.
+  assert.equal(canDemoPieceMoveDown(session), false)
+  assert.deepEqual(planDemoLastTickMove(session), { angle: 0, column: 1 })
+})
+
+test('the last-tick planner side-steps under a settled mino even without falling', () => {
+  const session = demoSession({
+    width: 12,
+    height: 22,
+    filled: [[20, 11]],
+    key: '1Line',
+    row: 21,
+    column: 10,
+  })
+
+  // The piece rests on the floor beside a mino one row above the right wall.
+  // Stepping right parks it on the floor again (it cannot fall), but the corner
+  // placement touches the floor, the side wall, and the settled mino, so it is
+  // the better position.
+  assert.equal(canDemoPieceMoveDown(session), false)
+  assert.deepEqual(planDemoLastTickMove(session), { angle: 0, column: 11 })
+
+  const parked = {
+    ...session,
+    activePiece: { ...session.activePiece, origin: { row: 21, column: 11 } },
+  }
+  assert.equal(canDemoPieceMoveDown(parked), false)
+})
+
+test('the last-tick planner keeps a placement that no side-step improves', () => {
+  const session = demoSession({
+    width: 3,
+    height: 4,
+    filled: [0, 1, 2].map((column) => [3, column]),
+    key: '1Line',
+    row: 2,
+    column: 0,
+  })
+
+  // The piece already sits in the floor corner; stepping right drops the wall
+  // contact, so there is nothing better to move to.
+  assert.equal(planDemoLastTickMove(session), null)
+})
+
+test('the last-tick planner ignores a resting piece with no legal side-step', () => {
+  const session = demoSession({
+    width: 3,
+    height: 5,
+    filled: [0, 2].flatMap((column) =>
+      [0, 1, 2, 3, 4].map((row) => [row, column]),
+    ),
+    key: '1Line',
+    row: 4,
+    column: 1,
+  })
+
+  // The piece sits in a one-wide well: both side walls are solid.
+  assert.equal(planDemoLastTickMove(session), null)
+})
+
+test('the last-tick planner ignores a side-step that scores worse', () => {
+  const session = demoSession({
+    width: 4,
+    height: 5,
+    filled: [[4, 3]],
+    key: '4Line',
+    angle: 90,
+    row: 2,
+    column: 2,
+  })
+
+  // The vertical bar rests on the floor of column 2. Stepping right is legal once
+  // it lands across the ledge, but that covers three holes, so staying scores
+  // better.
+  assert.equal(canDemoPieceMoveDown(session), false)
+  assert.equal(planDemoLastTickMove(session), null)
+})
+
+test('the destination planner steers to the column the side-step starts from', () => {
+  const board = new Board(12, 22)
+  board.setCell(20, 11, '4Square')
+  const session = {
+    board: createBoardSnapshot(board),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 6 } },
+  }
+
+  // The best placement is on the floor under the settled mino, which is only
+  // reachable by dropping in the column beside it and side-stepping right on the
+  // last tick — so the destination is that neighbour column, not the far corner.
+  assert.deepEqual(planDemoDestination(session), { angle: 0, column: 10 })
+})
+
+test('the destination planner prefers the placement that needs no side-step', () => {
+  const session = demoSession({
+    width: 3,
+    height: 2,
+    key: '1Line',
+    row: 0,
+    column: 1,
+  })
+
+  const destination = planDemoDestination(session)
+
+  // Both floor corners score identically with or without a side-step, so the
+  // planner must never pick the middle column (which would only reach a corner
+  // by side-stepping) — it steers straight at a corner instead.
+  assert.equal(destination.angle, 0)
+  assert.ok(destination.column === 0 || destination.column === 2)
+})
+
+test('a taken side-step ends the last-tick loop', () => {
+  const session = demoSession({
+    width: 12,
+    height: 22,
+    filled: [[20, 11]],
+    key: '1Line',
+    row: 21,
+    column: 10,
+  })
+
+  assert.deepEqual(planDemoLastTickMove(session), { angle: 0, column: 11 })
+
+  // After the side-step the piece is in the better placement and cannot be
+  // improved again, so the repeat-on-every-last-tick loop ends there.
+  const stepped = {
+    ...session,
+    activePiece: { ...session.activePiece, origin: { row: 21, column: 11 } },
+  }
+  assert.equal(planDemoLastTickMove(stepped), null)
+})
+

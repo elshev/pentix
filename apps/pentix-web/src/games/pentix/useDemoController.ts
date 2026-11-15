@@ -1,4 +1,4 @@
-/** Attract-mode hook that steers the demo one action per gravity tick. */
+/** Attract-mode hook that advances the demo one combined gravity + steering step. */
 import { useEffect, useRef } from 'react'
 import type { Dispatch } from 'react'
 
@@ -13,9 +13,14 @@ import { getTickInterval } from '../../engine/gameLoop.ts'
 import type { GameAction } from '../../engine/gameReducer.ts'
 
 /**
- * Drives the attract demo by issuing one steering action per gravity interval.
+ * Drives the attract demo by dispatching one `demoStep` per gravity interval.
+ * The reducer applies the gravity descent and this steering step together, so a
+ * last-tick side-step can never be pre-empted by a separate gravity loop.
+ *
  * The destination is planned once per spawned piece and reused across ticks, so
- * a randomly chosen tied destination does not flip while the piece falls.
+ * a randomly chosen tied destination does not flip while the piece falls. A
+ * last-tick side-step re-targets the destination, and the step carries the
+ * placement it was planned for so the reducer can drop stale steps.
  */
 export function useDemoController(
   active: boolean,
@@ -49,10 +54,12 @@ export function useDemoController(
       const action = nextDemoAction(current, plan.destination)
       if (action !== undefined) {
         dispatchRef.current({
-          type: 'demoAction',
+          type: 'demoStep',
           action,
           sessionId: current.id,
           pieceIndex: current.nextPieceIndex,
+          angle: current.activePiece.angle,
+          column: current.activePiece.origin.column,
         })
       }
     }, interval)

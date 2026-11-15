@@ -1,15 +1,18 @@
 /** Game state reducer — phase, settings, and the local Pentix session. */
 import {
+  canDemoPieceMoveDown,
   createPentixGame,
   createPentixGameSession,
   gameSessionEngine,
   PIECE_CATALOG,
+  type BoardCell,
   type MoveDirection,
   type PentixGame,
   type PentixGameSession,
   type PieceIdSelector,
   type PieceKey,
   type RotateDirection,
+  type RotationAngle,
 } from '#pentix/core'
 
 export type GamePhase = 'demo' | 'playing' | 'paused' | 'game-over'
@@ -43,6 +46,41 @@ export interface CollectedStats {
   readonly rotate: number
   readonly drop: number
   readonly pieceCounts: Readonly<Record<PieceKey, number>>
+}
+
+/**
+ * TEMPORARY debug aid: seed every demo session with one settled mino on the row
+ * above the floor, at a random column, so the last-tick side-step can be watched
+ * in the browser. Set this to `false` (or delete it together with
+ * `seedDemoBoard`) to remove the seeding.
+ */
+const DEMO_SEED_SETTLED_MINO = true
+
+/** Places the temporary demo seed mino; a no-op when the flag is off. */
+function seedDemoBoard(session: PentixGameSession): PentixGameSession {
+  if (!DEMO_SEED_SETTLED_MINO) {
+    return session
+  }
+
+  const { width, height, rows } = session.board
+  const seedRow = height - 2
+  const seedColumn = Math.floor(Math.random() * width)
+  const seedCell: BoardCell = {
+    row: seedRow,
+    column: seedColumn,
+    isOccupied: true,
+    pieceKey: '4Square',
+  }
+  const seededRows = rows.map((cells, row) =>
+    row === seedRow
+      ? cells.map((cell, column) => (column === seedColumn ? seedCell : cell))
+      : cells,
+  )
+
+  return Object.freeze({
+    ...session,
+    board: Object.freeze({ width, height, rows: seededRows }),
+  })
 }
 
 function createEmptyPieceCounts(): Record<PieceKey, number> {
@@ -91,7 +129,14 @@ export type GameAction =
   | { type: 'decreaseLevel' }
   | { type: 'tick' }
   | { type: 'drop' }
-  | { type: 'demoAction'; action: GameAction; sessionId: string; pieceIndex: number }
+  | {
+      type: 'demoStep'
+      action: GameAction
+      sessionId: string
+      pieceIndex: number
+      angle: RotationAngle
+      column: number
+    }
 
 export interface GameDependencies {
   readonly createId: () => string
@@ -179,7 +224,7 @@ function startSession(
     gameOverReady: true,
     gravityEpoch: state.gravityEpoch + 1,
     game,
-    session,
+    session: phase === 'demo' ? seedDemoBoard(session) : session,
     collectedStats: createEmptyCollectedStats(),
   }
 }
@@ -249,7 +294,7 @@ export function createInitialState(
     settings,
     gravityEpoch: 0,
     game,
-    session,
+    session: phase === 'demo' ? seedDemoBoard(session) : session,
     collectedStats: createEmptyCollectedStats(),
   }
 }
@@ -276,19 +321,38 @@ export function createGameReducer(deps: GameDependencies) {
         }
         return { ...state, gameOverReady: true }
 
-      case 'demoAction': {
-        // Ignore a steering action planned from a stale snapshot. If the demo
-        // session or active piece changed since the hook planned it (for
-        // example the gravity tick settled the piece and spawned the next one
-        // first), applying it would steer the wrong piece.
+      case 'demoStep': {
+        // Ignore a step planned from a stale snapshot. If the demo session, the
+        // active piece, or its angle/column changed since the hook planned the
+        // step (for example the piece was already steered), applying it would
+        // steer the wrong piece or the wrong placement. The row is not compared:
+        // the step is applied after this call's own gravity step.
         if (
           state.phase !== 'demo' ||
           state.session.id !== action.sessionId ||
-          state.session.nextPieceIndex !== action.pieceIndex
+          state.session.nextPieceIndex !== action.pieceIndex ||
+          state.session.activePiece.angle !== action.angle ||
+          state.session.activePiece.origin.column !== action.column
         ) {
           return state
         }
-        return gameReducer(state, action.action)
+
+        // Mirror Delphi's `TimerExpired`: a piece that can still fall takes the
+        // gravity step before its steering step. A resting piece takes only the
+        // steering step, so a last-tick move lands before anything can lock it.
+        const advanced = canDemoPieceMoveDown(state.session)
+          ? applyAdvance(
+              state,
+              deps,
+              gameSessionEngine.tick(
+                state.session,
+                state.game,
+                deps.selectPieceId,
+              ),
+            )
+          : state
+
+        return gameReducer(advanced, action.action)
       }
 
       case 'pause':
