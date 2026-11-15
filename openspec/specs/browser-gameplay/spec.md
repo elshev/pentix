@@ -1,7 +1,7 @@
 # browser-gameplay Specification
 
 ## Purpose
-Define the interactive browser gameplay client that renders the shared board, translates player input into shared `pentix-core` engine operations, runs the gravity loop, displays live score/level/lines plus an optional next-piece preview, and manages demo / playing / paused / game-over / restart states.
+Define the interactive browser gameplay client that renders the shared board, translates player input into shared `pentix-core` engine operations, runs the gravity loop, displays live score/level/lines plus an optional next-piece preview, displays the engine-owned action and per-piece statistics for every phase including the demo, and manages demo / playing / paused / game-over / restart states.
 ## Requirements
 ### Requirement: The browser renders the shared board and active piece
 
@@ -163,50 +163,41 @@ The browser gameplay UI SHALL provide level controls that increase and decrease 
 - **THEN** the configured starting level decreases by one
 - **AND** is clamped to no less than `0`
 
-### Requirement: The client collects action, rotate, and drop counts
+### Requirement: The client displays the engine-owned action and per-piece statistics
 
-The browser gameplay UI SHALL maintain, for the current player game, a per-action count of the player's left, right, rotate, and drop inputs, keyed by the pressed action, and SHALL expose aggregate rotate and drop counts derived from them. The counts SHALL reset when a new player game starts and SHALL NOT accumulate while the attract demo is running.
+The browser gameplay UI SHALL display the action counters and per-piece lock counts stored on the current `PentixGameSession` and SHALL NOT maintain its own copies of those counters. The combined move count SHALL be labelled "Moves", the rotation count "Rotates", and the hard-drop count "Drops". Per-piece counts SHALL be rendered for every `PIECE_CATALOG` key from `session.statistics.pieceCounts`. Because the values belong to the session, the panel SHALL show statistics for whichever session is active, including attract-demo sessions, and SHALL show zeroed values on a freshly started session without any client-side reset step.
 
-#### Scenario: Player actions are counted as they are pressed
+#### Scenario: Player actions are reflected through the session snapshot
 
-- **GIVEN** a playing game
+- **GIVEN** a playing game whose session has recorded move, rotate, and drop counts
 - **WHEN** the player presses left, right, rotate, or drop
-- **THEN** the corresponding per-action count increments
-- **AND** the aggregate rotate count reflects each rotate and the aggregate drop count reflects each drop
+- **THEN** the panel shows the updated `moves`, `rotates`, and `drops` values returned by the engine
+- **AND** the client does not increment any counter of its own
 
-#### Scenario: Counts reset per player game
+#### Scenario: The demo also shows statistics
 
-- **GIVEN** a game that accumulated action counts
-- **WHEN** the player starts a new game
-- **THEN** the per-action, rotate, and drop counts reset to zero
+- **GIVEN** an active demo session whose engine recorded actions
+- **WHEN** the demo panel renders
+- **THEN** it shows that demo session's move, rotate, drop, and per-piece counts
+- **AND** the same counters are cleared when the demo session restarts after game over
 
-### Requirement: The client tracks per-piece lock counts for all catalog pieces
+#### Scenario: A freshly started session shows zeroed statistics
 
-The browser gameplay UI SHALL maintain a lock count for each of the 29 catalog pieces (enumerated from `PIECE_CATALOG`), incrementing the count for the piece that locks on each settle. A fresh game SHALL represent all 29 pieces with an initial count of zero.
-
-#### Scenario: Each locked piece increments its own count
-
-- **GIVEN** a playing game
-- **WHEN** a piece locks
-- **THEN** the count for that piece's key increments by one
-- **AND** the counts for the other pieces are unchanged
-
-#### Scenario: All 29 pieces are represented
-
-- **GIVEN** a fresh game
-- **WHEN** the per-piece panel renders
-- **THEN** it includes an entry for every catalog piece
+- **GIVEN** a newly started player or demo session
+- **WHEN** the statistics panel renders
+- **THEN** it shows `0` moves, `0` rotates, and `0` drops
+- **AND** it shows `0` for every catalog piece
 
 ### Requirement: The client shows a secondary statistics panel below the main statistics
 
-The browser UI SHALL render a collapsible "Statistics" panel in the right-hand column directly below the MainStatistics panel, open by default and using a smaller font. The panel SHALL show a combined key count (left and right inputs summed and shown without separate left/right values), a rotate count, and a drop count, plus a counter for each of the 29 catalog pieces. Each per-piece counter SHALL draw a small version of the piece whose minos are 5×5 pixels with the count beside it, and the counters SHALL be laid out in a fixed three-row grid with ten counters per row.
+The browser UI SHALL render a collapsible "Statistics" panel in the right-hand column directly below the MainStatistics panel, open by default and using a smaller font. The panel SHALL show a combined move count read from `session.statistics.actions.moves` (left and right moves summed by the engine and shown without separate left/right values), a rotate count read from `session.statistics.actions.rotates`, and a drop count read from `session.statistics.actions.drops`, plus a counter for each of the 29 catalog pieces read from `session.statistics.pieceCounts`. Each per-piece counter SHALL draw a small version of the piece whose minos are 5×5 pixels with the count beside it, and the counters SHALL be laid out in a fixed three-row grid with ten counters per row. The rendered values SHALL come from the current session snapshot, so the panel updates in every phase, including the demo.
 
 #### Scenario: The panel lives below the main statistics
 
 - **GIVEN** the gameplay screen
 - **WHEN** it renders
 - **THEN** the secondary "Statistics" panel appears in the right column below the MainStatistics panel
-- **AND** it shows a combined key count, a rotate count, and a drop count
+- **AND** it shows a combined move count, a rotate count, and a drop count taken from the session statistics
 
 #### Scenario: Per-piece counters use 5px minos in a ten-per-row grid
 

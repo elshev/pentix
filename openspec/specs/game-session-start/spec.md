@@ -11,7 +11,7 @@ The shared snapshot SHALL include:
 - a required `userId` referencing the assigned user,
 - a session status value that is `active` for a playable session and becomes `game-over` when a spawn is blocked,
 - board dimensions and current board occupancy initialized independently from the game's board,
-- opening statistics including score, level, cleared-line count, and locked-block count,
+- opening statistics including score, level, cleared-line count, locked-block count, action counters (`moves`, `rotates`, `drops`), and a per-piece lock count for every catalog piece,
 - an active piece state with piece key, rotation angle, and spawn origin,
 - a next-piece preview derived from the parent game's piece sequence,
 - and a zero-based `nextPieceIndex` identifying the preview's position in that sequence.
@@ -22,6 +22,7 @@ The legacy `sessionId` field SHALL NOT be exposed.
 - **GIVEN** a caller starts a new `PentixGameSession` for a retained user
 - **WHEN** the returned session snapshot is inspected
 - **THEN** it includes `id`, `gameId`, `userId` equal to the user id, a status of `active`, independent board state, opening statistics, active piece state, next-piece preview, and `nextPieceIndex`
+- **AND** the opening statistics include action counters and a per-piece lock count for every catalog piece
 - **AND** the board and piece references use the shared Pentix domain vocabulary rather than server-local names
 - **AND** the snapshot has no `sessionId` field
 
@@ -35,6 +36,8 @@ The opening state SHALL use:
 - level `1`,
 - cleared-line count `0`,
 - locked-block count `0`,
+- `moves`, `rotates`, and `drops` action counters of `0`,
+- a per-piece lock count of `0` for each of the 29 catalog pieces,
 - the game piece at sequence index `0` as the active piece,
 - an active piece at rotation angle `0`,
 - an active-piece origin at row `1` and column `floor(width / 2)`,
@@ -46,6 +49,12 @@ The opening state SHALL use:
 - **WHEN** the returned opening board and statistics are inspected
 - **THEN** the board matches the shared default board size and every board cell is empty
 - **AND** the score is `0`, the level is `1`, the cleared-line count is `0`, and the locked-block count is `0`
+
+#### Scenario: A started session starts with zeroed action and per-piece statistics
+- **GIVEN** a caller starts a new `PentixGameSession`
+- **WHEN** the returned opening statistics are inspected
+- **THEN** `statistics.actions` is `{ moves: 0, rotates: 0, drops: 0 }`
+- **AND** `statistics.pieceCounts` contains an entry with value `0` for every catalog piece key
 
 #### Scenario: A started session spawns valid opening pieces
 - **GIVEN** a caller starts a new `PentixGameSession`
