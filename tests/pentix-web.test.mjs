@@ -7,7 +7,7 @@ import {
   createGameReducer,
   createInitialState,
 } from '../apps/pentix-web/src/engine/gameReducer.ts'
-import { actionTowardDestination, nextDemoAction } from '../apps/pentix-web/src/engine/demo.ts'
+import { actionTowardDestination, nextDemoAction, resolveDemoPlan } from '../apps/pentix-web/src/engine/demo.ts'
 import { getTickInterval } from '../apps/pentix-web/src/engine/gameLoop.ts'
 import { mapKeyToAction } from '../apps/pentix-web/src/engine/keyMap.ts'
 
@@ -23,6 +23,16 @@ function createDeps(pieceIds = [0]) {
 
 function settings(overrides = {}) {
   return { ...DEFAULT_SETTINGS, ...overrides }
+}
+
+function withFixedRandom(value, fn) {
+  const original = Math.random
+  Math.random = () => value
+  try {
+    return fn()
+  } finally {
+    Math.random = original
+  }
 }
 
 test('buildRenderGrid colors occupied cells and overlays the active piece', () => {
@@ -334,7 +344,11 @@ test('nextDemoAction moves toward the demo destination', () => {
     activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
   }
 
-  assert.deepEqual(nextDemoAction(session), { type: 'move', direction: 'right' })
+  // Pin the random tie-break so the empty-board destination is the right wall.
+  assert.deepEqual(
+    withFixedRandom(0, () => nextDemoAction(session)),
+    { type: 'move', direction: 'right' },
+  )
 })
 
 test('nextDemoAction hard-drops once the piece reaches its destination', () => {
@@ -343,7 +357,10 @@ test('nextDemoAction hard-drops once the piece reaches its destination', () => {
     activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 11 } },
   }
 
-  assert.deepEqual(nextDemoAction(session), { type: 'drop' })
+  // Pin the random tie-break so the empty-board destination is the right wall.
+  assert.deepEqual(withFixedRandom(0, () => nextDemoAction(session)), {
+    type: 'drop',
+  })
 })
 
 test('actionTowardDestination rotates before aligning the column', () => {
@@ -368,4 +385,57 @@ test('nextDemoAction returns undefined when the planner finds no placement', () 
   }
 
   assert.equal(nextDemoAction(session), undefined)
+})
+
+test('nextDemoAction uses a precomputed destination', () => {
+  const session = {
+    board: emptyBoard(12, 22),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 2 } },
+  }
+
+  // The destination is supplied, so the random planner is never consulted.
+  assert.deepEqual(nextDemoAction(session, { angle: 0, column: 0 }), {
+    type: 'move',
+    direction: 'left',
+  })
+  assert.deepEqual(nextDemoAction(session, { angle: 0, column: 2 }), {
+    type: 'drop',
+  })
+  assert.equal(nextDemoAction(session, null), undefined)
+})
+
+test('resolveDemoPlan keeps the destination stable for the same piece', () => {
+  const session = {
+    id: 'session-1',
+    nextPieceIndex: 1,
+    board: emptyBoard(12, 22),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
+  }
+
+  const first = resolveDemoPlan(null, session)
+  const second = resolveDemoPlan(first, session)
+  const third = resolveDemoPlan(second, session)
+
+  // The destination must not be re-planned (or re-randomized) while the same
+  // piece is active, otherwise the demo would jitter left/right every tick.
+  assert.equal(second, first)
+  assert.equal(third.destination, first.destination)
+})
+
+test('resolveDemoPlan re-plans when a new piece spawns or the session changes', () => {
+  const session = {
+    id: 'session-1',
+    nextPieceIndex: 1,
+    board: emptyBoard(12, 22),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
+  }
+  const first = resolveDemoPlan(null, session)
+
+  const nextPiece = resolveDemoPlan(first, { ...session, nextPieceIndex: 2 })
+  assert.notEqual(nextPiece, first)
+  assert.equal(nextPiece.pieceIndex, 2)
+
+  const nextSession = resolveDemoPlan(first, { ...session, id: 'session-2' })
+  assert.notEqual(nextSession, first)
+  assert.equal(nextSession.sessionId, 'session-2')
 })

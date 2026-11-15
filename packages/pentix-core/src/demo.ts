@@ -39,6 +39,7 @@ interface DemoChoice {
   readonly bottom: number
   readonly top: number
   readonly touchesWall: boolean
+  readonly contacts: number
 }
 
 function pieceExtents(piece: Piece): PieceExtents {
@@ -137,6 +138,36 @@ function countFullLines(
   return lines
 }
 
+const NEIGHBOR_OFFSETS = [
+  { dx: 0, dy: -1 },
+  { dx: 0, dy: 1 },
+  { dx: -1, dy: 0 },
+  { dx: 1, dy: 0 },
+] as const
+
+function countContacts(
+  baseGrid: readonly (readonly boolean[])[],
+  width: number,
+  height: number,
+  cells: readonly { readonly row: number; readonly column: number }[],
+): number {
+  let contacts = 0
+  for (const cell of cells) {
+    for (const { dx, dy } of NEIGHBOR_OFFSETS) {
+      const row = cell.row + dy
+      const column = cell.column + dx
+      if (row < 0 || row >= height || column < 0 || column >= width) {
+        // Wall contact: a side wall, the floor, or the ceiling.
+        contacts += 1
+      } else if (baseGrid[row][column]) {
+        // Mino contact: touches an already-settled mino.
+        contacts += 1
+      }
+    }
+  }
+  return contacts
+}
+
 /**
  * Delphi `Round` uses banker's rounding (round half to even), which differs
  * from JavaScript's `Math.round` (round half up). The holes term multiplies an
@@ -156,13 +187,19 @@ function bankersRound(value: number): number {
 }
 
 function preferCandidate(candidate: DemoChoice, best: DemoChoice): boolean {
-  if (candidate.bottom > best.bottom) {
-    return true
+  if (candidate.bottom !== best.bottom) {
+    return candidate.bottom > best.bottom
   }
-  if (candidate.top > best.top) {
-    return true
+  if (candidate.top !== best.top) {
+    return candidate.top > best.top
   }
-  return candidate.touchesWall
+  if (candidate.contacts !== best.contacts) {
+    return candidate.contacts > best.contacts
+  }
+  if (candidate.touchesWall !== best.touchesWall) {
+    return !candidate.touchesWall
+  }
+  return Math.random() < 0.5
 }
 
 /**
@@ -172,8 +209,10 @@ function preferCandidate(candidate: DemoChoice, best: DemoChoice): boolean {
  * Delphi's bottom-up scan: for every valid orientation, origin column, and
  * reachable origin row (a row the piece can fall into from the top), it scores
  * `row + round((holesBefore − holesAfter) × 1.5) + fullLines²` and selects the
- * maximum, resolving ties with Delphi's rules (prefer a lower bottom, then a
- * lower top, then a wall-adjacent placement).
+ * maximum. Remaining ties prefer a lower bottom, then a lower top, then more
+ * contacts with settled minos or the board walls, then placements that do not
+ * touch a side wall. Candidates that remain indistinguishable are chosen at
+ * random.
  */
 export function planDemoDestination(
   session: PentixGameSession,
@@ -202,8 +241,9 @@ export function planDemoDestination(
       }
 
       for (let row = landingRow; row >= topExtent; row -= 1) {
+        const cells = getOccupiedCells(rotated, { row, column })
         const grid = baseGrid.map((gridRow) => gridRow.slice())
-        for (const cell of getOccupiedCells(rotated, { row, column })) {
+        for (const cell of cells) {
           grid[cell.row][cell.column] = true
         }
 
@@ -223,13 +263,14 @@ export function planDemoDestination(
           top: row - topExtent,
           touchesWall:
             column - leftExtent === 0 || column + maxX === width - 1,
+          contacts: countContacts(baseGrid, width, height, cells),
         })
       }
     }
   }
 
-  // Delphi visits candidates bottom-up by row, then left-to-right by column,
-  // then by angle; sort to the same order so ties resolve identically.
+  // Iterate in a stable order (bottom-up by row, then left-to-right by column,
+  // then by angle); indistinguishable tied candidates are picked at random.
   candidates.sort(
     (a, b) => b.row - a.row || a.column - b.column || a.angle - b.angle,
   )
