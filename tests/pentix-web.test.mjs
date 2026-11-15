@@ -27,6 +27,16 @@ function settings(overrides = {}) {
   return { ...DEFAULT_SETTINGS, ...overrides }
 }
 
+/** A player game that just ended, still inside its post-game-over cooldown. */
+function coolingGameOverState(deps) {
+  const base = createInitialState(deps, 'game-over')
+  return {
+    ...base,
+    session: { ...base.session, status: 'game-over' },
+    gameOverReady: false,
+  }
+}
+
 function withFixedRandom(value, fn) {
   const original = Math.random
   Math.random = () => value
@@ -407,6 +417,76 @@ test('a demo game over immediately starts a fresh demo', () => {
   assert.equal(next.phase, 'demo')
   assert.equal(next.session.status, 'active')
   assert.notEqual(next.session.id, demo.session.id)
+  // The attract loop restarts at once, without arming the player-facing cooldown.
+  assert.equal(next.gameOverReady, true)
+})
+
+test('a fresh game over ignores start, restart, and demo until the cooldown elapses', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const over = coolingGameOverState(deps)
+
+  for (const action of [
+    { type: 'start' },
+    { type: 'restart' },
+    { type: 'demo' },
+  ]) {
+    assert.equal(reducer(over, action), over)
+  }
+
+  // The final board the player is looking at survives the stray input.
+  assert.equal(over.phase, 'game-over')
+  assert.equal(over.session.status, 'game-over')
+})
+
+test('the elapsed cooldown re-enables the game-over actions', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const over = coolingGameOverState(deps)
+
+  const ready = reducer(over, { type: 'gameOverCooldownElapsed' })
+  assert.equal(ready.phase, 'game-over')
+  assert.equal(ready.gameOverReady, true)
+  assert.equal(ready.session, over.session)
+
+  const restarted = reducer(ready, { type: 'restart' })
+  assert.equal(restarted.phase, 'playing')
+  assert.notEqual(restarted.session.id, over.session.id)
+
+  const demo = reducer(ready, { type: 'demo' })
+  assert.equal(demo.phase, 'demo')
+  assert.notEqual(demo.session.id, over.session.id)
+
+  // Outside game over the timer event is a no-op.
+  const playing = createInitialState(deps, 'playing')
+  assert.equal(reducer(playing, { type: 'gameOverCooldownElapsed' }), playing)
+})
+
+test('a tick that ends a player game enters game over with the cooldown armed', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const playing = createInitialState(deps, 'playing')
+  const lastMoment = {
+    ...playing,
+    session: { ...playing.session, status: 'game-over' },
+  }
+
+  const over = reducer(lastMoment, { type: 'tick' })
+  assert.equal(over.phase, 'game-over')
+  assert.equal(over.gameOverReady, false)
+  assert.equal(over.session.status, 'game-over')
+})
+
+test('start and demo hotkeys are ignored until the game-over cooldown elapses', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const over = coolingGameOverState(deps)
+
+  for (const key of [' ', 'Enter']) {
+    const action = mapKeyToAction(key, over.phase)
+    assert.notEqual(action, undefined)
+    assert.equal(reducer(over, action), over)
+  }
 })
 
 test('nextDemoAction moves toward the demo destination', () => {
