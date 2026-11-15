@@ -8,6 +8,42 @@ import {
 import type { GameAction } from './gameReducer.ts'
 
 /**
+ * Cached demo plan for one spawned piece. A destination depends only on the
+ * board and the active piece's shape, so it is planned once when the piece
+ * appears and reused for every steering step until a new piece spawns.
+ */
+export interface DemoPlan {
+  readonly sessionId: string
+  readonly pieceIndex: number
+  readonly destination: DemoDestination | null
+}
+
+/**
+ * Returns the cached `plan` while it still belongs to the session's current
+ * piece, otherwise plans a fresh destination. `nextPieceIndex` advances only
+ * when a new piece spawns, so this keeps the destination stable while a piece
+ * falls — which matters now that tied destinations are resolved randomly.
+ */
+export function resolveDemoPlan(
+  plan: DemoPlan | null,
+  session: PentixGameSession,
+): DemoPlan {
+  if (
+    plan !== null &&
+    plan.sessionId === session.id &&
+    plan.pieceIndex === session.nextPieceIndex
+  ) {
+    return plan
+  }
+
+  return {
+    sessionId: session.id,
+    pieceIndex: session.nextPieceIndex,
+    destination: planDemoDestination(session),
+  }
+}
+
+/**
  * Picks the next demo action toward a destination, mirroring the Delphi
  * `TimerExpired` demo branch: rotate first, then move laterally, then hard-drop
  * once the angle and column match.
@@ -33,12 +69,13 @@ export function actionTowardDestination(
 
 /**
  * Computes the next action the attract demo should take for the current piece,
- * or `undefined` when the planner finds no reachable placement.
+ * or `undefined` when there is no destination. Passing the cached destination
+ * (see `resolveDemoPlan`) avoids re-planning on every steering step.
  */
 export function nextDemoAction(
   session: PentixGameSession,
+  destination: DemoDestination | null = planDemoDestination(session),
 ): GameAction | undefined {
-  const destination = planDemoDestination(session)
   if (destination === null) {
     return undefined
   }

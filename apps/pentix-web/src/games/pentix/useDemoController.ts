@@ -4,14 +4,18 @@ import type { Dispatch } from 'react'
 
 import type { PentixGameSession } from '#pentix/core'
 
-import { nextDemoAction } from '../../engine/demo.ts'
+import {
+  nextDemoAction,
+  resolveDemoPlan,
+  type DemoPlan,
+} from '../../engine/demo.ts'
 import { getTickInterval } from '../../engine/gameLoop.ts'
 import type { GameAction } from '../../engine/gameReducer.ts'
 
 /**
  * Drives the attract demo by issuing one steering action per gravity interval.
- * This mirrors the Delphi `TimerExpired` demo branch, which steers a single step
- * toward the destination on each tick.
+ * The destination is planned once per spawned piece and reused across ticks, so
+ * a randomly chosen tied destination does not flip while the piece falls.
  */
 export function useDemoController(
   active: boolean,
@@ -21,6 +25,7 @@ export function useDemoController(
 ): void {
   const sessionRef = useRef(session)
   const dispatchRef = useRef(dispatch)
+  const planRef = useRef<DemoPlan | null>(null)
 
   useEffect(() => {
     sessionRef.current = session
@@ -37,7 +42,11 @@ export function useDemoController(
 
     const interval = getTickInterval(level)
     const timer = window.setInterval(() => {
-      const action = nextDemoAction(sessionRef.current)
+      const current = sessionRef.current
+      const plan = resolveDemoPlan(planRef.current, current)
+      planRef.current = plan
+
+      const action = nextDemoAction(current, plan.destination)
       if (action !== undefined) {
         dispatchRef.current(action)
       }

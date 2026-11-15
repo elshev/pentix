@@ -833,7 +833,7 @@ test('a hard drop with space below still awards fall-distance score', () => {
   assert.equal(result.session.status, 'active')
 })
 
-test('demo planner targets a reachable wall column on an empty board', () => {
+test('demo planner randomly picks among equally best destinations', () => {
   const game = createPentixGame({ id: 'game-1', selectPieceId: () => 0 })
   const session = createPentixGameSession({
     id: 'session-1',
@@ -843,9 +843,11 @@ test('demo planner targets a reachable wall column on an empty board', () => {
 
   const destination = planDemoDestination(session)
 
-  // `1Line` can drop anywhere on an empty board; every column scores the same,
-  // so the Delphi tie-break settles on the right wall column.
-  assert.deepEqual(destination, { angle: 0, column: 11 })
+  // `1Line` can drop anywhere on an empty board. Only the two corner columns
+  // reach two contacts (floor + side wall); they tie on every criterion, so the
+  // planner picks one of them at random.
+  assert.equal(destination.angle, 0)
+  assert.ok(destination.column === 0 || destination.column === 11)
 })
 
 test('demo planner completes a line when one placement would clear it', () => {
@@ -879,4 +881,68 @@ test('demo planner returns null when the active piece cannot be placed', () => {
   }
 
   assert.equal(planDemoDestination(session), null)
+})
+
+test('demo planner prefers the equal-scoring placement with more contacts', () => {
+  const board = new Board(4, 3)
+  board.setCell(0, 0, '4Square')
+  board.setCell(0, 3, '4Square')
+  board.setCell(1, 0, '4Square')
+  board.setCell(2, 0, '4Square')
+  board.setCell(2, 1, '4Square')
+  board.setCell(2, 2, '4Square')
+  board.setCell(2, 3, '4Square')
+
+  const session = {
+    board: createBoardSnapshot(board),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 0, column: 1 } },
+  }
+
+  const destination = planDemoDestination(session)
+
+  // Columns 1 and 2 both drop onto the full bottom row at the same depth and
+  // score, but column 1 lands next to the settled mino at (1,0) and so has one
+  // more contact; the planner prefers column 1.
+  assert.deepEqual(destination, { angle: 0, column: 1 })
+})
+
+test('demo planner counts contacts per mino and prefers settled-mino contacts', () => {
+  const board = new Board(5, 3)
+  board.setCell(1, 0, '4Square')
+  board.setCell(2, 0, '4Square')
+  board.setCell(1, 4, '4Square')
+
+  const session = {
+    board: createBoardSnapshot(board),
+    activePiece: { key: '4Square', angle: 0, origin: { row: 1, column: 1 } },
+  }
+
+  const destination = planDemoDestination(session)
+
+  // Columns 1 and 2 settle at the same depth with no score difference. The
+  // column-1 2x2 block rests against the two settled minos on its left while
+  // the column-2 block touches only one, so the planner prefers column 1.
+  assert.deepEqual(destination, { angle: 0, column: 1 })
+})
+
+test('demo planner prefers non-wall placements when contacts tie', () => {
+  const board = new Board(6, 3)
+  for (let column = 0; column < 6; column += 1) {
+    board.setCell(2, column, '4Square')
+  }
+  board.setCell(1, 3, '4Square')
+
+  const session = {
+    board: createBoardSnapshot(board),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 2 } },
+  }
+
+  const destination = planDemoDestination(session)
+
+  // Every column settles on the full bottom row for the same score. Columns 2
+  // and 4 touch the extra settled mino at (1,3) for two contacts, matching the
+  // wall columns 0 and 5. Because the contacts tie, the planner avoids the
+  // wall-touching placements and picks one of columns 2 or 4 at random.
+  assert.equal(destination.angle, 0)
+  assert.ok(destination.column === 2 || destination.column === 4)
 })
