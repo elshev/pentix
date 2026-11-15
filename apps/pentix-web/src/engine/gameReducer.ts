@@ -3,10 +3,12 @@ import {
   createPentixGame,
   createPentixGameSession,
   gameSessionEngine,
+  PIECE_CATALOG,
   type MoveDirection,
   type PentixGame,
   type PentixGameSession,
   type PieceIdSelector,
+  type PieceKey,
   type RotateDirection,
 } from '#pentix/core'
 
@@ -27,12 +29,40 @@ export const DEFAULT_SETTINGS: GameSettings = Object.freeze({
   startingLevel: 9,
 })
 
+/** Client-side per-game statistics collected for the HUD and game-over recap. */
+export interface CollectedStats {
+  readonly moveLeft: number
+  readonly moveRight: number
+  readonly rotate: number
+  readonly drop: number
+  readonly pieceCounts: Readonly<Record<PieceKey, number>>
+}
+
+function createEmptyPieceCounts(): Record<PieceKey, number> {
+  const counts = {} as Record<PieceKey, number>
+  for (const piece of PIECE_CATALOG) {
+    counts[piece.key] = 0
+  }
+  return counts
+}
+
+export function createEmptyCollectedStats(): CollectedStats {
+  return {
+    moveLeft: 0,
+    moveRight: 0,
+    rotate: 0,
+    drop: 0,
+    pieceCounts: createEmptyPieceCounts(),
+  }
+}
+
 export interface GameState {
   readonly phase: GamePhase
   readonly settings: GameSettings
   readonly gravityEpoch: number
   readonly game: PentixGame
   readonly session: PentixGameSession
+  readonly collectedStats: CollectedStats
 }
 
 export type GameAction =
@@ -134,6 +164,7 @@ function startSession(
     gravityEpoch: state.gravityEpoch + 1,
     game,
     session,
+    collectedStats: createEmptyCollectedStats(),
   }
 }
 
@@ -143,6 +174,24 @@ function startGame(state: GameState, deps: GameDependencies): GameState {
 
 function startDemo(state: GameState, deps: GameDependencies): GameState {
   return startSession(state, deps, 'demo')
+}
+
+function attributeLockedPiece(
+  stats: CollectedStats,
+  from: PentixGameSession,
+  to: PentixGameSession,
+): CollectedStats {
+  if (to.statistics.blocks !== from.statistics.blocks + 1) {
+    return stats
+  }
+  const key = from.activePiece.key
+  return {
+    ...stats,
+    pieceCounts: {
+      ...stats.pieceCounts,
+      [key]: stats.pieceCounts[key] + 1,
+    },
+  }
 }
 
 function applyAdvance(
@@ -157,7 +206,17 @@ function applyAdvance(
   }
   const phase: GamePhase =
     result.session.status === 'game-over' ? 'game-over' : state.phase
-  return { ...state, phase, game: result.game, session: result.session }
+  const collectedStats =
+    state.phase === 'playing'
+      ? attributeLockedPiece(state.collectedStats, state.session, result.session)
+      : state.collectedStats
+  return {
+    ...state,
+    phase,
+    game: result.game,
+    session: result.session,
+    collectedStats,
+  }
 }
 
 export function createInitialState(
@@ -166,7 +225,14 @@ export function createInitialState(
   settings: GameSettings = DEFAULT_SETTINGS,
 ): GameState {
   const { game, session } = createSessionBundle(deps, settings.startingLevel)
-  return { phase, settings, gravityEpoch: 0, game, session }
+  return {
+    phase,
+    settings,
+    gravityEpoch: 0,
+    game,
+    session,
+    collectedStats: createEmptyCollectedStats(),
+  }
 }
 
 export function createGameReducer(deps: GameDependencies) {
@@ -209,26 +275,40 @@ export function createGameReducer(deps: GameDependencies) {
         }
         return state
 
-      case 'move':
+      case 'move': {
         if (!isActivePhase(state.phase)) {
           return state
         }
-        return {
-          ...state,
-          session: gameSessionEngine.move(state.session, action.direction),
-        }
+        const session = gameSessionEngine.move(state.session, action.direction)
+        const collectedStats =
+          state.phase === 'playing'
+            ? {
+                ...state.collectedStats,
+                moveLeft:
+                  state.collectedStats.moveLeft +
+                  (action.direction === 'left' ? 1 : 0),
+                moveRight:
+                  state.collectedStats.moveRight +
+                  (action.direction === 'right' ? 1 : 0),
+              }
+            : state.collectedStats
+        return { ...state, session, collectedStats }
+      }
 
-      case 'rotate':
+      case 'rotate': {
         if (!isActivePhase(state.phase)) {
           return state
         }
-        return {
-          ...state,
-          session: gameSessionEngine.rotate(
-            state.session,
-            state.settings.rotateDirection,
-          ),
-        }
+        const session = gameSessionEngine.rotate(
+          state.session,
+          state.settings.rotateDirection,
+        )
+        const collectedStats =
+          state.phase === 'playing'
+            ? { ...state.collectedStats, rotate: state.collectedStats.rotate + 1 }
+            : state.collectedStats
+        return { ...state, session, collectedStats }
+      }
 
       case 'toggleRotateDirection':
         return {
@@ -289,8 +369,14 @@ export function createGameReducer(deps: GameDependencies) {
         if (result.session.status === 'game-over' && state.phase === 'demo') {
           return startDemo(state, deps)
         }
+        const advanced = applyAdvance(state, deps, result)
+        const collectedStats =
+          state.phase === 'playing'
+            ? { ...advanced.collectedStats, drop: advanced.collectedStats.drop + 1 }
+            : advanced.collectedStats
         return {
-          ...applyAdvance(state, deps, result),
+          ...advanced,
+          collectedStats,
           // Restart the gravity clock so the dropped piece gets a full tick
           // before it locks, giving the player time to adjust it.
           gravityEpoch: state.gravityEpoch + 1,

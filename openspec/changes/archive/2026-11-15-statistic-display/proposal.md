@@ -4,10 +4,10 @@ The browser UI currently shows only Score, Level, and Lines — stacked vertical
 
 ## What Changes
 
-- Add a **Pieces** statistic to the HUD (reading `statistics.blocks`) and render **Score, Level, Lines, and Pieces** on a single horizontal line.
+- Add a **Pieces** statistic (`statistics.blocks`) to a **MainStatistics** panel and render **Next, Score, Level, Lines, and Pieces** on a single horizontal line, with the next-piece preview leftmost and rendered in a fixed-size frame so it never resizes the panel.
 - Track **per-piece lock counts** for all **29 catalog pieces** (enumerated from `PIECE_CATALOG`), maintained client-side, and display them in a **collapsible, compact panel**.
 - Collect player **action counts** (left, right, rotate, drop — shown as the pressed keys) plus aggregate **rotate count** and **drop count** during a player game.
-- Add a **"Last game statistics"** section to the game-over overlay showing the final score/level/lines/pieces, the action/rotate/drop counts, and the collapsible 29-piece panel.
+- Add a collapsible **secondary statistics panel** below the MainStatistics panel in the right column (open by default, smaller font) showing a combined key count (left+right), **rotates**, **drops**, and a per-piece breakdown of all 29 pieces drawn with 5×5-pixel minos and arranged in three rows of ten with wider spacing; the game-over overlay keeps only the title and the *Play again* / *Demo* buttons whose **Enter**/**Space** hotkeys appear as popup tooltips.
 - Keep all collection client-side in the web app's reducer state; no `pentix-core`, `pentix-server`, or REST contract changes.
 
 ## Capabilities
