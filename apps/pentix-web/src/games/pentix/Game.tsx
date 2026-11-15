@@ -56,9 +56,8 @@ export function Game() {
     collectedStats,
   } = state
   const level = session.statistics.level
-  const loopActive = phase === 'playing' || phase === 'demo'
 
-  useGameLoop(loopActive, level, gravityEpoch, () =>
+  useGameLoop(phase === 'playing', level, gravityEpoch, () =>
     dispatch({ type: 'tick' }),
   )
   useDemoController(phase === 'demo', level, session, dispatch)

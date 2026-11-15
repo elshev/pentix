@@ -1,6 +1,7 @@
 /** Browser demo steering — maps the planner destination to a reducer action. */
 import {
   planDemoDestination,
+  planDemoLastTickMove,
   type DemoDestination,
   type PentixGameSession,
 } from '#pentix/core'
@@ -10,7 +11,8 @@ import type { GameAction } from './gameReducer.ts'
 /**
  * Cached demo plan for one spawned piece. A destination depends only on the
  * board and the active piece's shape, so it is planned once when the piece
- * appears and reused for every steering step until a new piece spawns.
+ * appears and reused for every steering step until a new piece spawns — or
+ * until the piece takes a last-tick side-step.
  */
 export interface DemoPlan {
   readonly sessionId: string
@@ -23,6 +25,10 @@ export interface DemoPlan {
  * piece, otherwise plans a fresh destination. `nextPieceIndex` advances only
  * when a new piece spawns, so this keeps the destination stable while a piece
  * falls — which matters now that tied destinations are resolved randomly.
+ *
+ * A resting piece that can still take a better side-step (the "last tick move")
+ * re-targets the cached destination to that step, so the demo keeps steering into
+ * the placement it just chose instead of pulling back.
  */
 export function resolveDemoPlan(
   plan: DemoPlan | null,
@@ -33,7 +39,15 @@ export function resolveDemoPlan(
     plan.sessionId === session.id &&
     plan.pieceIndex === session.nextPieceIndex
   ) {
-    return plan
+    const destination = planDemoLastTickMove(session)
+    if (destination === null) {
+      return plan
+    }
+    return {
+      sessionId: plan.sessionId,
+      pieceIndex: plan.pieceIndex,
+      destination,
+    }
   }
 
   return {
