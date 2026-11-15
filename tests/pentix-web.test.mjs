@@ -72,13 +72,13 @@ test('getActiveCells maps the origin plus rotated offsets', () => {
   assert.deepEqual(getActiveCells(session), [{ row: 1, column: 6 }])
 })
 
-test('default settings use anticlockwise rotation, hide next, start at level 1', () => {
+test('default settings use anticlockwise rotation, hide next, start at level 9', () => {
   const state = createInitialState(createDeps([0]))
 
   assert.equal(state.phase, 'demo')
   assert.equal(state.settings.rotateDirection, 'counterclockwise')
   assert.equal(state.settings.showNextPiece, false)
-  assert.equal(state.settings.startingLevel, 1)
+  assert.equal(state.settings.startingLevel, 9)
   assert.equal(state.gravityEpoch, 0)
 })
 
@@ -126,7 +126,7 @@ test('toggleNextPiece flips the preview flag', () => {
   assert.equal(off.settings.showNextPiece, false)
 })
 
-test('starting level can be set directly, clamped, and increased', () => {
+test('starting level can be set directly, clamped, and stepped up or down', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   let state = createInitialState(deps)
@@ -143,11 +143,38 @@ test('starting level can be set directly, clamped, and increased', () => {
   state = reducer(state, { type: 'increaseLevel' })
   assert.equal(state.settings.startingLevel, 1)
 
+  state = reducer(state, { type: 'decreaseLevel' })
+  assert.equal(state.settings.startingLevel, 0)
+
+  const floored = reducer(state, { type: 'decreaseLevel' })
+  assert.equal(floored.settings.startingLevel, 0)
+
   const capped = reducer(
     { ...state, settings: { ...state.settings, startingLevel: 9 } },
     { type: 'increaseLevel' },
   )
   assert.equal(capped.settings.startingLevel, 9)
+})
+
+test('level changes during the demo update the live session; outside the demo they only update settings', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+
+  const demo = createInitialState(deps, 'demo', settings({ startingLevel: 3 }))
+  assert.equal(demo.session.statistics.level, 3)
+
+  const demoUp = reducer(demo, { type: 'increaseLevel' })
+  assert.equal(demoUp.settings.startingLevel, 4)
+  assert.equal(demoUp.session.statistics.level, 4)
+
+  const demoDown = reducer(demoUp, { type: 'decreaseLevel' })
+  assert.equal(demoDown.settings.startingLevel, 3)
+  assert.equal(demoDown.session.statistics.level, 3)
+
+  const playing = createInitialState(deps, 'playing', settings({ startingLevel: 5 }))
+  const playingUp = reducer(playing, { type: 'increaseLevel' })
+  assert.equal(playingUp.settings.startingLevel, 6)
+  assert.equal(playingUp.session.statistics.level, 5)
 })
 
 test('move shifts the active piece and is ignored when not playing', () => {
@@ -209,10 +236,12 @@ test('pause and resume toggle the playing phase', () => {
   assert.equal(resumed.phase, 'playing')
 })
 
-test('higher levels tick faster', () => {
+test('higher levels tick faster on the Delphi schedule', () => {
+  assert.equal(getTickInterval(0), 1000)
+  assert.equal(getTickInterval(5), 500)
+  assert.equal(getTickInterval(9), 100)
+  assert.equal(getTickInterval(20), 100)
   assert.ok(getTickInterval(1) > getTickInterval(5))
-  assert.ok(getTickInterval(1) > 0)
-  assert.ok(getTickInterval(20) >= 120)
 })
 
 test('numeric keys move and rotate while playing', () => {
@@ -225,6 +254,13 @@ test('numeric keys move and rotate while playing', () => {
 test('digits set the starting level before a game starts', () => {
   assert.deepEqual(mapKeyToAction('3', 'demo'), { type: 'setStartingLevel', level: 3 })
   assert.deepEqual(mapKeyToAction('8', 'demo'), { type: 'setStartingLevel', level: 8 })
+})
+
+test('plus and minus keys step the starting level', () => {
+  assert.deepEqual(mapKeyToAction('+', 'demo'), { type: 'increaseLevel' })
+  assert.deepEqual(mapKeyToAction('=', 'demo'), { type: 'increaseLevel' })
+  assert.deepEqual(mapKeyToAction('-', 'demo'), { type: 'decreaseLevel' })
+  assert.deepEqual(mapKeyToAction('_', 'demo'), { type: 'decreaseLevel' })
 })
 
 test('arrows map to movement and rotate keys to rotation', () => {
@@ -302,6 +338,39 @@ test('the demo action creates a fresh demo session', () => {
   assert.equal(demo.phase, 'demo')
   assert.equal(demo.session.status, 'active')
   assert.notEqual(demo.session.id, playing.session.id)
+})
+
+test('a stale demo action does not steer a different piece', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+
+  // Simulate an action planned for a previous piece generation; by the time it
+  // is applied the gravity tick has already spawned the next piece.
+  const stale = reducer(demo, {
+    type: 'demoAction',
+    action: { type: 'drop' },
+    sessionId: demo.session.id,
+    pieceIndex: demo.session.nextPieceIndex - 1,
+  })
+
+  assert.equal(stale, demo)
+})
+
+test('a demo action for the active piece is applied', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+  const startColumn = demo.session.activePiece.origin.column
+
+  const moved = reducer(demo, {
+    type: 'demoAction',
+    action: { type: 'move', direction: 'left' },
+    sessionId: demo.session.id,
+    pieceIndex: demo.session.nextPieceIndex,
+  })
+
+  assert.equal(moved.session.activePiece.origin.column, startColumn - 1)
 })
 
 test('starting from the demo enters a fresh player game', () => {
