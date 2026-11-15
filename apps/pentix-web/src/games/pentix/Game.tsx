@@ -9,6 +9,7 @@ import {
 import { BoardView } from './BoardView.tsx'
 import { Controls } from './Controls.tsx'
 import { Hud } from './Hud.tsx'
+import { SecondaryStats } from './SecondaryStats.tsx'
 import { Settings } from './Settings.tsx'
 import { useDemoController } from './useDemoController.ts'
 import { useGameLoop } from './useGameLoop.ts'
@@ -45,7 +46,7 @@ export function Game() {
     createInitialState(deps),
   )
 
-  const { phase, settings, gravityEpoch, session } = state
+  const { phase, settings, gravityEpoch, session, collectedStats } = state
   const level = session.statistics.level
   const loopActive = phase === 'playing' || phase === 'demo'
 
@@ -81,11 +82,11 @@ export function Game() {
           <div className="overlay overlay--soft">
             <div className="overlay__card">
               <p className="overlay__title">Game over</p>
-              <p className="overlay__hint">Space — demo · Enter — play again</p>
               <div className="overlay__actions">
                 <button
                   type="button"
                   className="overlay__button"
+                  title="Play again (Enter)"
                   onClick={() => dispatch({ type: 'restart' })}
                 >
                   Play again
@@ -93,6 +94,7 @@ export function Game() {
                 <button
                   type="button"
                   className="overlay__button overlay__button--secondary"
+                  title="Demo (Space)"
                   onClick={() => dispatch({ type: 'demo' })}
                 >
                   Demo
@@ -110,6 +112,9 @@ export function Game() {
         nextPieceKey={session.nextPieceKey}
         showNextPiece={settings.showNextPiece}
       />
+      <div className="game__secondary">
+        <SecondaryStats collectedStats={collectedStats} />
+      </div>
       <Controls phase={phase} dispatch={dispatch} />
       <Settings settings={settings} dispatch={dispatch} />
       <p className="status-line" aria-live="polite">

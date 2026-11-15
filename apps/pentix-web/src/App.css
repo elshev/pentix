@@ -1,6 +1,7 @@
 :root {
   --cell-size: 22px;
   --mini-cell-size: 14px;
+  --piece-mini-cell: 5px;
 }
 
 .shell {
@@ -54,6 +55,7 @@
   grid-template-columns: auto minmax(200px, 1fr);
   grid-template-areas:
     'stage hud'
+    'stage secondary'
     'stage controls'
     'stage settings'
     'status status';
@@ -65,6 +67,12 @@
   grid-area: stage;
   position: relative;
   justify-self: center;
+}
+
+.game__secondary {
+  grid-area: secondary;
+  display: grid;
+  gap: 0.5rem;
 }
 
 .board {
@@ -121,6 +129,34 @@
 .hud__value {
   font-size: 1.4rem;
   line-height: 1;
+}
+
+.hud__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+  justify-content: space-between;
+}
+
+.hud__stat {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.hud__stats .hud__value {
+  font-size: 1.15rem;
+}
+
+.hud__title {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(247, 199, 95, 0.88);
+}
+
+.hud__stat--next {
+  align-items: start;
 }
 
 .mini-board {
@@ -241,6 +277,7 @@
     grid-template-areas:
       'stage'
       'hud'
+      'secondary'
       'controls'
       'settings'
       'status';
@@ -358,4 +395,103 @@
   color: rgba(233, 239, 255, 0.8);
   white-space: nowrap;
   pointer-events: none;
+}
+
+.overlay--soft .overlay__card {
+  max-height: calc(100% - 0.5rem);
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+.panel {
+  width: 100%;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.panel__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.2rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(26, 41, 74, 0.5);
+  color: rgba(247, 199, 95, 0.88);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.panel--small .panel__toggle {
+  padding: 0.15rem 0.4rem;
+  font-size: 0.62rem;
+}
+
+.panel__title {
+  font-weight: 600;
+}
+
+.panel__chevron {
+  font-size: 0.7rem;
+}
+
+.panel__body {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.panel--small .panel__body {
+  font-size: 0.66rem;
+}
+
+.secondary-stats__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.8rem;
+  justify-content: center;
+}
+
+.secondary-stats__item {
+  padding: 0.1rem 0.4rem;
+  border-radius: 7px;
+  background: rgba(26, 41, 74, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-weight: 600;
+}
+
+.piece-counts {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: calc(0.3rem + 5px) calc(0.55rem + 5px);
+  justify-items: center;
+}
+
+.piece-count {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.piece-mini {
+  display: grid;
+  gap: 1px;
+}
+
+.piece-mini__cell {
+  width: var(--piece-mini-cell);
+  height: var(--piece-mini-cell);
+  border-radius: 1px;
+}
+
+.piece-mini__cell--filled {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.piece-count__value {
+  font-weight: 700;
+  color: #eef2ff;
 }

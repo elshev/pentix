@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { PIECE_CATALOG } from '#pentix/core'
+
 import { buildRenderGrid, getActiveCells } from '../apps/pentix-web/src/engine/projection.ts'
 import {
   DEFAULT_SETTINGS,
@@ -507,4 +509,89 @@ test('resolveDemoPlan re-plans when a new piece spawns or the session changes', 
   const nextSession = resolveDemoPlan(first, { ...session, id: 'session-2' })
   assert.notEqual(nextSession, first)
   assert.equal(nextSession.sessionId, 'session-2')
+})
+
+test('collected piece counts start at zero for every catalog piece', () => {
+  const state = createInitialState(createDeps([0]))
+
+  assert.equal(
+    Object.keys(state.collectedStats.pieceCounts).length,
+    PIECE_CATALOG.length,
+  )
+  for (const piece of PIECE_CATALOG) {
+    assert.equal(state.collectedStats.pieceCounts[piece.key], 0)
+  }
+})
+
+test('player actions increment counts while playing and ignore the demo', () => {
+  const deps = createDeps([6])
+  const reducer = createGameReducer(deps)
+  const playing = createInitialState(deps, 'playing')
+
+  const moved = reducer(playing, { type: 'move', direction: 'left' })
+  const movedRight = reducer(moved, { type: 'move', direction: 'right' })
+  const rotated = reducer(movedRight, { type: 'rotate' })
+  const dropped = reducer(rotated, { type: 'drop' })
+
+  assert.equal(dropped.collectedStats.moveLeft, 1)
+  assert.equal(dropped.collectedStats.moveRight, 1)
+  assert.equal(dropped.collectedStats.rotate, 1)
+  assert.equal(dropped.collectedStats.drop, 1)
+
+  const demo = createInitialState(deps, 'demo')
+  const demoMoved = reducer(demo, { type: 'move', direction: 'left' })
+  assert.equal(demoMoved.collectedStats.moveLeft, 0)
+})
+
+test('a settled piece increments its own per-piece count', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const playing = createInitialState(deps, 'playing')
+
+  // Hard drop lowers the piece but does not lock it on an empty board.
+  const dropped = reducer(playing, { type: 'drop' })
+  assert.equal(dropped.session.statistics.blocks, 0)
+  assert.equal(dropped.collectedStats.pieceCounts['1Line'], 0)
+
+  // The next tick cannot move down, so the piece locks and spawns the next.
+  const settled = reducer(dropped, { type: 'tick' })
+  assert.equal(settled.session.statistics.blocks, 1)
+  assert.equal(settled.collectedStats.pieceCounts['1Line'], 1)
+
+  for (const piece of PIECE_CATALOG) {
+    if (piece.key !== '1Line') {
+      assert.equal(settled.collectedStats.pieceCounts[piece.key], 0)
+    }
+  }
+})
+
+test('the demo does not accumulate collected statistics', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+
+  const dropped = reducer(demo, { type: 'drop' })
+  const settled = reducer(dropped, { type: 'tick' })
+
+  assert.equal(settled.collectedStats.pieceCounts['1Line'], 0)
+  assert.equal(settled.collectedStats.drop, 0)
+})
+
+test('starting a new game resets collected statistics', () => {
+  const deps = createDeps([6])
+  const reducer = createGameReducer(deps)
+  const playing = createInitialState(deps, 'playing')
+
+  const moved = reducer(playing, { type: 'move', direction: 'right' })
+  const rotated = reducer(moved, { type: 'rotate' })
+  const dropped = reducer(rotated, { type: 'drop' })
+
+  assert.equal(dropped.collectedStats.moveRight, 1)
+  assert.equal(dropped.collectedStats.rotate, 1)
+  assert.equal(dropped.collectedStats.drop, 1)
+
+  const restarted = reducer(dropped, { type: 'restart' })
+  assert.equal(restarted.collectedStats.moveRight, 0)
+  assert.equal(restarted.collectedStats.rotate, 0)
+  assert.equal(restarted.collectedStats.drop, 0)
 })
