@@ -48,7 +48,12 @@ export function useDemoController(
 
       const action = nextDemoAction(current, plan.destination)
       if (action !== undefined) {
-        dispatchRef.current(action)
+        dispatchRef.current({
+          type: 'demoAction',
+          action,
+          sessionId: current.id,
+          pieceIndex: current.nextPieceIndex,
+        })
       }
     }, interval)
 

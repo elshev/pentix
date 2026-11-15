@@ -24,7 +24,7 @@ export interface GameSettings {
 export const DEFAULT_SETTINGS: GameSettings = Object.freeze({
   rotateDirection: 'counterclockwise',
   showNextPiece: false,
-  startingLevel: 1,
+  startingLevel: 9,
 })
 
 export interface GameState {
@@ -48,8 +48,10 @@ export type GameAction =
   | { type: 'toggleNextPiece' }
   | { type: 'setStartingLevel'; level: number }
   | { type: 'increaseLevel' }
+  | { type: 'decreaseLevel' }
   | { type: 'tick' }
   | { type: 'drop' }
+  | { type: 'demoAction'; action: GameAction; sessionId: string; pieceIndex: number }
 
 export interface GameDependencies {
   readonly createId: () => string
@@ -75,6 +77,24 @@ function applyStartingLevel(
     ...session,
     statistics: Object.freeze({ ...session.statistics, level }),
   })
+}
+
+/**
+ * Steps the configured starting level and, while the demo is running, applies
+ * the same level to the live demo session so its gravity speed changes at once
+ * instead of waiting for the next session.
+ */
+function changeLevel(state: GameState, level: number): GameState {
+  const startingLevel = clampLevel(level)
+  const settings = { ...state.settings, startingLevel }
+  if (state.phase === 'demo') {
+    return {
+      ...state,
+      settings,
+      session: applyStartingLevel(state.session, startingLevel),
+    }
+  }
+  return { ...state, settings }
 }
 
 interface SessionBundle {
@@ -159,6 +179,21 @@ export function createGameReducer(deps: GameDependencies) {
       case 'demo':
         return startDemo(state, deps)
 
+      case 'demoAction': {
+        // Ignore a steering action planned from a stale snapshot. If the demo
+        // session or active piece changed since the hook planned it (for
+        // example the gravity tick settled the piece and spawned the next one
+        // first), applying it would steer the wrong piece.
+        if (
+          state.phase !== 'demo' ||
+          state.session.id !== action.sessionId ||
+          state.session.nextPieceIndex !== action.pieceIndex
+        ) {
+          return state
+        }
+        return gameReducer(state, action.action)
+      }
+
       case 'pause':
         return state.phase === 'playing' ? { ...state, phase: 'paused' } : state
 
@@ -226,13 +261,10 @@ export function createGameReducer(deps: GameDependencies) {
         }
 
       case 'increaseLevel':
-        return {
-          ...state,
-          settings: {
-            ...state.settings,
-            startingLevel: clampLevel(state.settings.startingLevel + 1),
-          },
-        }
+        return changeLevel(state, state.settings.startingLevel + 1)
+
+      case 'decreaseLevel':
+        return changeLevel(state, state.settings.startingLevel - 1)
 
       case 'tick': {
         if (!isActivePhase(state.phase)) {

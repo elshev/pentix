@@ -69,6 +69,9 @@ export function mapKeyToAction(
     case '+':
     case '=':
       return { type: 'increaseLevel' }
+    case '-':
+    case '_':
+      return { type: 'decreaseLevel' }
     case 'p':
     case 'P':
       return { type: 'togglePause' }
