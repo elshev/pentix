@@ -13,6 +13,7 @@ import { SecondaryStats } from './SecondaryStats.tsx'
 import { Settings } from './Settings.tsx'
 import { useDemoController } from './useDemoController.ts'
 import { useGameLoop } from './useGameLoop.ts'
+import { useGameOverCooldown } from './useGameOverCooldown.ts'
 import { useKeyboardControls } from './useKeyboardControls.ts'
 
 interface OverlayProps {
@@ -46,7 +47,14 @@ export function Game() {
     createInitialState(deps),
   )
 
-  const { phase, settings, gravityEpoch, session, collectedStats } = state
+  const {
+    phase,
+    gameOverReady,
+    settings,
+    gravityEpoch,
+    session,
+    collectedStats,
+  } = state
   const level = session.statistics.level
   const loopActive = phase === 'playing' || phase === 'demo'
 
@@ -55,6 +63,7 @@ export function Game() {
   )
   useDemoController(phase === 'demo', level, session, dispatch)
   useKeyboardControls(phase, dispatch)
+  useGameOverCooldown(phase === 'game-over' && !gameOverReady, dispatch)
 
   const label =
     phase === 'playing'
@@ -87,6 +96,7 @@ export function Game() {
                   type="button"
                   className="overlay__button"
                   title="Play again (Enter)"
+                  disabled={!gameOverReady}
                   onClick={() => dispatch({ type: 'restart' })}
                 >
                   Play again
@@ -95,6 +105,7 @@ export function Game() {
                   type="button"
                   className="overlay__button overlay__button--secondary"
                   title="Demo (Space)"
+                  disabled={!gameOverReady}
                   onClick={() => dispatch({ type: 'demo' })}
                 >
                   Demo

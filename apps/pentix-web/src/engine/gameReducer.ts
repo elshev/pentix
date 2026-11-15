@@ -17,6 +17,13 @@ export type GamePhase = 'demo' | 'playing' | 'paused' | 'game-over'
 export const MIN_LEVEL = 0
 export const MAX_LEVEL = 9
 
+/**
+ * Delay before the game-over overlay accepts input. Key presses still coming
+ * from active play would otherwise start a new game or the demo in the same
+ * moment the final board appears.
+ */
+export const GAME_OVER_COOLDOWN_MS = 700
+
 export interface GameSettings {
   readonly rotateDirection: RotateDirection
   readonly showNextPiece: boolean
@@ -58,6 +65,8 @@ export function createEmptyCollectedStats(): CollectedStats {
 
 export interface GameState {
   readonly phase: GamePhase
+  /** False only while a fresh player game over ignores start/restart/demo input. */
+  readonly gameOverReady: boolean
   readonly settings: GameSettings
   readonly gravityEpoch: number
   readonly game: PentixGame
@@ -69,6 +78,7 @@ export type GameAction =
   | { type: 'start' }
   | { type: 'demo' }
   | { type: 'restart' }
+  | { type: 'gameOverCooldownElapsed' }
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'togglePause' }
@@ -152,6 +162,11 @@ function isActivePhase(phase: GamePhase): boolean {
   return phase === 'playing' || phase === 'demo'
 }
 
+/** True while the game-over screen is still armed against stray input. */
+function isGameOverCoolingDown(state: GameState): boolean {
+  return state.phase === 'game-over' && !state.gameOverReady
+}
+
 function startSession(
   state: GameState,
   deps: GameDependencies,
@@ -161,6 +176,7 @@ function startSession(
   return {
     ...state,
     phase,
+    gameOverReady: true,
     gravityEpoch: state.gravityEpoch + 1,
     game,
     session,
@@ -204,15 +220,17 @@ function applyAdvance(
   if (result.session.status === 'game-over' && state.phase === 'demo') {
     return startDemo(state, deps)
   }
-  const phase: GamePhase =
-    result.session.status === 'game-over' ? 'game-over' : state.phase
+  const gameOver = result.session.status === 'game-over'
   const collectedStats =
     state.phase === 'playing'
       ? attributeLockedPiece(state.collectedStats, state.session, result.session)
       : state.collectedStats
   return {
     ...state,
-    phase,
+    phase: gameOver ? 'game-over' : state.phase,
+    // Arm the cooldown the moment the final board appears, so input left over
+    // from active play cannot clear it.
+    gameOverReady: gameOver ? false : state.gameOverReady,
     game: result.game,
     session: result.session,
     collectedStats,
@@ -227,6 +245,7 @@ export function createInitialState(
   const { game, session } = createSessionBundle(deps, settings.startingLevel)
   return {
     phase,
+    gameOverReady: true,
     settings,
     gravityEpoch: 0,
     game,
@@ -240,10 +259,22 @@ export function createGameReducer(deps: GameDependencies) {
     switch (action.type) {
       case 'start':
       case 'restart':
+        if (isGameOverCoolingDown(state)) {
+          return state
+        }
         return startGame(state, deps)
 
       case 'demo':
+        if (isGameOverCoolingDown(state)) {
+          return state
+        }
         return startDemo(state, deps)
+
+      case 'gameOverCooldownElapsed':
+        if (state.phase !== 'game-over' || state.gameOverReady) {
+          return state
+        }
+        return { ...state, gameOverReady: true }
 
       case 'demoAction': {
         // Ignore a steering action planned from a stale snapshot. If the demo

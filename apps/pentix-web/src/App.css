@@ -251,6 +251,13 @@
   filter: brightness(1.05);
 }
 
+/* Dim the overlay actions while the post-game-over cooldown is still running. */
+.overlay__button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+}
+
 .status-line {
   grid-area: status;
   margin: 0;
