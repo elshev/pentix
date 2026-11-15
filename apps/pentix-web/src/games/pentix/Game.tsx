@@ -53,7 +53,6 @@ export function Game() {
     settings,
     gravityEpoch,
     session,
-    collectedStats,
   } = state
   const level = session.statistics.level
 
@@ -123,7 +122,7 @@ export function Game() {
         showNextPiece={settings.showNextPiece}
       />
       <div className="game__secondary">
-        <SecondaryStats collectedStats={collectedStats} />
+        <SecondaryStats statistics={session.statistics} />
       </div>
       <Controls phase={phase} dispatch={dispatch} />
       <Settings settings={settings} dispatch={dispatch} />

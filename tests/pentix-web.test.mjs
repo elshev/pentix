@@ -759,19 +759,24 @@ test('resolveDemoPlan re-plans when a new piece spawns or the session changes', 
   assert.equal(nextSession.sessionId, 'session-2')
 })
 
-test('collected piece counts start at zero for every catalog piece', () => {
+test('a fresh session starts with zeroed action and per-piece statistics', () => {
   const state = createInitialState(createDeps([0]))
 
+  assert.deepEqual(state.session.statistics.actions, {
+    moves: 0,
+    rotates: 0,
+    drops: 0,
+  })
   assert.equal(
-    Object.keys(state.collectedStats.pieceCounts).length,
+    Object.keys(state.session.statistics.pieceCounts).length,
     PIECE_CATALOG.length,
   )
   for (const piece of PIECE_CATALOG) {
-    assert.equal(state.collectedStats.pieceCounts[piece.key], 0)
+    assert.equal(state.session.statistics.pieceCounts[piece.key], 0)
   }
 })
 
-test('player actions increment counts while playing and ignore the demo', () => {
+test('player actions increment the session action counts', () => {
   const deps = createDeps([6])
   const reducer = createGameReducer(deps)
   const playing = createInitialState(deps, 'playing')
@@ -781,14 +786,11 @@ test('player actions increment counts while playing and ignore the demo', () => 
   const rotated = reducer(movedRight, { type: 'rotate' })
   const dropped = reducer(rotated, { type: 'drop' })
 
-  assert.equal(dropped.collectedStats.moveLeft, 1)
-  assert.equal(dropped.collectedStats.moveRight, 1)
-  assert.equal(dropped.collectedStats.rotate, 1)
-  assert.equal(dropped.collectedStats.drop, 1)
-
-  const demo = createInitialState(deps, 'demo')
-  const demoMoved = reducer(demo, { type: 'move', direction: 'left' })
-  assert.equal(demoMoved.collectedStats.moveLeft, 0)
+  assert.deepEqual(dropped.session.statistics.actions, {
+    moves: 2,
+    rotates: 1,
+    drops: 1,
+  })
 })
 
 test('a settled piece increments its own per-piece count', () => {
@@ -799,33 +801,36 @@ test('a settled piece increments its own per-piece count', () => {
   // Hard drop lowers the piece but does not lock it on an empty board.
   const dropped = reducer(playing, { type: 'drop' })
   assert.equal(dropped.session.statistics.blocks, 0)
-  assert.equal(dropped.collectedStats.pieceCounts['1Line'], 0)
+  assert.equal(dropped.session.statistics.pieceCounts['1Line'], 0)
 
   // The next tick cannot move down, so the piece locks and spawns the next.
   const settled = reducer(dropped, { type: 'tick' })
   assert.equal(settled.session.statistics.blocks, 1)
-  assert.equal(settled.collectedStats.pieceCounts['1Line'], 1)
+  assert.equal(settled.session.statistics.pieceCounts['1Line'], 1)
 
   for (const piece of PIECE_CATALOG) {
     if (piece.key !== '1Line') {
-      assert.equal(settled.collectedStats.pieceCounts[piece.key], 0)
+      assert.equal(settled.session.statistics.pieceCounts[piece.key], 0)
     }
   }
 })
 
-test('the demo does not accumulate collected statistics', () => {
+test('the demo accumulates statistics on its own session', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
 
-  const dropped = reducer(demo, { type: 'drop' })
+  const moved = reducer(demo, { type: 'move', direction: 'left' })
+  assert.equal(moved.session.statistics.actions.moves, 1)
+
+  const dropped = reducer(moved, { type: 'drop' })
   const settled = reducer(dropped, { type: 'tick' })
 
-  assert.equal(settled.collectedStats.pieceCounts['1Line'], 0)
-  assert.equal(settled.collectedStats.drop, 0)
+  assert.equal(settled.session.statistics.actions.drops, 1)
+  assert.equal(settled.session.statistics.pieceCounts['1Line'], 1)
 })
 
-test('starting a new game resets collected statistics', () => {
+test('starting a new game resets the session statistics', () => {
   const deps = createDeps([6])
   const reducer = createGameReducer(deps)
   const playing = createInitialState(deps, 'playing')
@@ -834,12 +839,17 @@ test('starting a new game resets collected statistics', () => {
   const rotated = reducer(moved, { type: 'rotate' })
   const dropped = reducer(rotated, { type: 'drop' })
 
-  assert.equal(dropped.collectedStats.moveRight, 1)
-  assert.equal(dropped.collectedStats.rotate, 1)
-  assert.equal(dropped.collectedStats.drop, 1)
+  assert.deepEqual(dropped.session.statistics.actions, {
+    moves: 1,
+    rotates: 1,
+    drops: 1,
+  })
 
   const restarted = reducer(dropped, { type: 'restart' })
-  assert.equal(restarted.collectedStats.moveRight, 0)
-  assert.equal(restarted.collectedStats.rotate, 0)
-  assert.equal(restarted.collectedStats.drop, 0)
+  assert.deepEqual(restarted.session.statistics.actions, {
+    moves: 0,
+    rotates: 0,
+    drops: 0,
+  })
+  assert.equal(restarted.session.statistics.pieceCounts['4T'], 0)
 })

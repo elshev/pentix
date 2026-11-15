@@ -7,6 +7,7 @@ import {
 } from './board.js'
 import {
   getPieceDefinitionById,
+  PIECE_CATALOG,
   type PieceKey,
 } from './catalog.js'
 import {
@@ -18,11 +19,20 @@ import type { RotationAngle } from './piece.js'
 
 export type GameSessionStatus = 'active' | 'game-over'
 
+/** Actions applied to a session: any move, rotation, or hard drop. */
+export interface GameSessionActionCounts {
+  readonly moves: number
+  readonly rotates: number
+  readonly drops: number
+}
+
 export interface GameSessionStatistics {
   readonly score: number
   readonly level: number
   readonly clearedLines: number
   readonly blocks: number
+  readonly actions: GameSessionActionCounts
+  readonly pieceCounts: Readonly<Record<PieceKey, number>>
 }
 
 export interface BoardPosition {
@@ -123,6 +133,25 @@ function createActivePieceState(
   })
 }
 
+function createInitialPieceCounts(): Readonly<Record<PieceKey, number>> {
+  const counts = {} as Record<PieceKey, number>
+  for (const piece of PIECE_CATALOG) {
+    counts[piece.key] = 0
+  }
+  return Object.freeze(counts)
+}
+
+function createOpeningStatistics(): GameSessionStatistics {
+  return Object.freeze({
+    score: 0,
+    level: 1,
+    clearedLines: 0,
+    blocks: 0,
+    actions: Object.freeze({ moves: 0, rotates: 0, drops: 0 }),
+    pieceCounts: createInitialPieceCounts(),
+  })
+}
+
 export function createPentixGameSession(
   options: CreatePentixGameSessionOptions,
 ): PentixGameSession {
@@ -137,12 +166,7 @@ export function createPentixGameSession(
     gameId: options.game.id,
     status: 'active' as const,
     board: createBoardSnapshot(board),
-    statistics: Object.freeze({
-      score: 0,
-      level: 1,
-      clearedLines: 0,
-      blocks: 0,
-    }),
+    statistics: createOpeningStatistics(),
     activePiece: createActivePieceState(activePieceKey, board.width),
     nextPieceKey,
     nextPieceIndex: 1,

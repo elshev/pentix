@@ -61,6 +61,10 @@ function assertValidPieceIds(pieceIds) {
   )
 }
 
+function zeroPieceCounts() {
+  return Object.fromEntries(PIECE_CATALOG.map((piece) => [piece.key, 0]))
+}
+
 function assertOpeningSession(session, gameId, userId) {
   assertUuidV7(session.id)
   assert.equal(session.userId, userId)
@@ -74,6 +78,8 @@ function assertOpeningSession(session, gameId, userId) {
     level: 1,
     clearedLines: 0,
     blocks: 0,
+    actions: { moves: 0, rotates: 0, drops: 0 },
+    pieceCounts: zeroPieceCounts(),
   })
   assert.deepEqual(session.activePiece.origin, { row: 1, column: 6 })
   assert.equal(session.activePiece.angle, 0)
@@ -664,6 +670,7 @@ test('POST /game-sessions/{id}/move shifts the active piece', async () => {
       moved.activePiece.origin.column,
       session.activePiece.origin.column + 1,
     )
+    assert.equal(moved.statistics.actions.moves, 1)
   } finally {
     await handle.close()
   }
@@ -692,6 +699,7 @@ test('POST /game-sessions/{id}/rotate rotates a full-rotation piece', async () =
 
     assert.equal(response.status, 200)
     assert.equal(rotated.activePiece.angle, 270)
+    assert.equal(rotated.statistics.actions.rotates, 1)
   } finally {
     await handle.close()
   }
@@ -711,6 +719,7 @@ test('POST /game-sessions/{id}/tick moves the piece down', async () => {
 
     assert.equal(response.status, 200)
     assert.equal(ticked.activePiece.origin.row, session.activePiece.origin.row + 1)
+    assert.deepEqual(ticked.statistics.actions, session.statistics.actions)
   } finally {
     await handle.close()
   }
@@ -740,6 +749,7 @@ test('POST /game-sessions/{id}/drop defers locking until the next tick', async (
       false,
     )
     assert.ok(dropped.statistics.score > 0)
+    assert.equal(dropped.statistics.actions.drops, 1)
 
     const tickResponse = await post(handle.url, `/game-sessions/${session.id}/tick`)
     const settled = await tickResponse.json()
@@ -747,6 +757,7 @@ test('POST /game-sessions/{id}/drop defers locking until the next tick', async (
     assert.equal(tickResponse.status, 200)
     assert.equal(settled.status, 'active')
     assert.equal(settled.statistics.blocks, 1)
+    assert.equal(settled.statistics.pieceCounts[session.activePiece.key], 1)
     assert.equal(
       settled.board.rows.flat().some((cell) => cell.isOccupied),
       true,

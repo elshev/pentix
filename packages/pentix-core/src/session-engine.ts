@@ -24,6 +24,7 @@ import type {
   ActivePieceState,
   AdvancePentixGameSessionResult,
   BoardPosition,
+  GameSessionActionCounts,
   GameSessionStatistics,
   PentixGameSession,
 } from './session.js'
@@ -92,6 +93,40 @@ function withStatistics(
     ...session,
     statistics: Object.freeze({ ...statistics }),
   })
+}
+
+type RecordedAction = keyof GameSessionActionCounts
+
+function recordAction(
+  statistics: GameSessionStatistics,
+  action: RecordedAction,
+): GameSessionStatistics {
+  const { moves, rotates, drops } = statistics.actions
+  return Object.freeze({
+    ...statistics,
+    actions: Object.freeze({
+      moves: moves + (action === 'moves' ? 1 : 0),
+      rotates: rotates + (action === 'rotates' ? 1 : 0),
+      drops: drops + (action === 'drops' ? 1 : 0),
+    }),
+  })
+}
+
+/** Counts one effective operation; rejected operations must not call this. */
+function withRecordedAction(
+  session: PentixGameSession,
+  action: RecordedAction,
+): PentixGameSession {
+  return withStatistics(session, recordAction(session.statistics, action))
+}
+
+function recordLockedPiece(
+  pieceCounts: Readonly<Record<PieceKey, number>>,
+  pieceKey: PieceKey,
+): Readonly<Record<PieceKey, number>> {
+  const counts: Record<PieceKey, number> = { ...pieceCounts }
+  counts[pieceKey] = (counts[pieceKey] ?? 0) + 1
+  return Object.freeze(counts)
 }
 
 function createSpawnActive(key: PieceKey, width: number): ActivePieceState {
@@ -250,6 +285,8 @@ function settle(
     level: nextLevel,
     clearedLines,
     blocks,
+    actions: session.statistics.actions,
+    pieceCounts: recordLockedPiece(session.statistics.pieceCounts, piece.key),
   })
 
   return spawn(session, game, board, statistics, selectPieceId)
@@ -279,7 +316,10 @@ export class GameSessionEngine {
       return session
     }
 
-    return withActivePiece(session, session.activePiece.angle, origin)
+    return withRecordedAction(
+      withActivePiece(session, session.activePiece.angle, origin),
+      'moves',
+    )
   }
 
   rotate(
@@ -303,7 +343,10 @@ export class GameSessionEngine {
     const nextPiece = piece.withAngle(nextAngle)
     const origin = session.activePiece.origin
     if (canPlace(session.board, getOccupiedCells(nextPiece, origin))) {
-      return withActivePiece(session, nextAngle, origin)
+      return withRecordedAction(
+        withActivePiece(session, nextAngle, origin),
+        'rotates',
+      )
     }
 
     const { minX, maxX, minY } = rotatedExtremes(nextPiece.occupiedOffsets)
@@ -322,7 +365,10 @@ export class GameSessionEngine {
       kickOrigin !== undefined &&
       canPlace(session.board, getOccupiedCells(nextPiece, kickOrigin))
     ) {
-      return withActivePiece(session, nextAngle, kickOrigin)
+      return withRecordedAction(
+        withActivePiece(session, nextAngle, kickOrigin),
+        'rotates',
+      )
     }
 
     return session
@@ -371,7 +417,11 @@ export class GameSessionEngine {
     // A hard drop with no space below settles the piece immediately and
     // awards no fall-distance score.
     if (!canPlace(session.board, getOccupiedCells(piece, down))) {
-      return settle(session, game, selectPieceId)
+      const result = settle(session, game, selectPieceId)
+      return {
+        game: result.game,
+        session: withRecordedAction(result.session, 'drops'),
+      }
     }
 
     const dropScore = Math.floor(
@@ -403,7 +453,7 @@ export class GameSessionEngine {
       score: moved.statistics.score + dropScore,
     })
 
-    return { game, session: scored }
+    return { game, session: withRecordedAction(scored, 'drops') }
   }
 }
 

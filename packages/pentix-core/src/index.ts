@@ -25,6 +25,7 @@ export type {
   AdvancePentixGameSessionResult,
   BoardPosition,
   CreatePentixGameSessionOptions,
+  GameSessionActionCounts,
   GameSessionStatistics,
   GameSessionStatus,
   PentixGameSession,

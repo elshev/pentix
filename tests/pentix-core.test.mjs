@@ -64,6 +64,24 @@ function createSelector(pieceIds) {
   return () => pieceIds[selectionIndex++]
 }
 
+/** Zeroed per-piece counts keyed by every catalog piece. */
+const zeroPieceCounts = Object.freeze(
+  Object.fromEntries(PIECE_CATALOG.map((piece) => [piece.key, 0])),
+)
+
+/** A complete statistics snapshot for hand-built sessions. */
+function statisticsFixture(overrides = {}) {
+  return Object.freeze({
+    score: 0,
+    level: 1,
+    clearedLines: 0,
+    blocks: 0,
+    actions: Object.freeze({ moves: 0, rotates: 0, drops: 0 }),
+    pieceCounts: zeroPieceCounts,
+    ...overrides,
+  })
+}
+
 test('piece catalog matches the Delphi source definitions', () => {
   assert.equal(PIECE_CATALOG.length, 29)
 
@@ -223,12 +241,7 @@ test('game session initializer starts from its parent game', () => {
   assert.notEqual(session.board, game.board)
   assert.deepEqual([session.board.width, session.board.height], [12, 22])
   assert.equal(session.board.rows.flat().some((cell) => cell.isOccupied), false)
-  assert.deepEqual(session.statistics, {
-    score: 0,
-    level: 1,
-    clearedLines: 0,
-    blocks: 0,
-  })
+  assert.deepEqual(session.statistics, statisticsFixture())
   assert.deepEqual(session.activePiece.origin, { row: 1, column: 6 })
   assert.equal(session.activePiece.angle, 0)
   assert.equal(session.activePiece.key, '3Corner')
@@ -265,12 +278,7 @@ test('next-piece advancement extends the game and preserves session fields', () 
   assert.equal(session.nextPieceIndex, 2)
   assert.equal(session.userId, 'user-1')
   assert.equal(session.gameId, 'game-1')
-  assert.deepEqual(session.statistics, {
-    score: 0,
-    level: 1,
-    clearedLines: 0,
-    blocks: 0,
-  })
+  assert.deepEqual(session.statistics, statisticsFixture())
 
   const secondAdvance = advancePentixGameSession(
     session,
@@ -483,7 +491,7 @@ test('settling clears a full line and awards line and empty-field bonuses', () =
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
-    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 0 }),
+    statistics: statisticsFixture(),
     activePiece: Object.freeze({
       key: '1Line',
       angle: 0,
@@ -520,7 +528,7 @@ test('a blocked spawn sets game-over', () => {
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
-    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 0 }),
+    statistics: statisticsFixture(),
     activePiece: Object.freeze({
       key: '1Line',
       angle: 0,
@@ -550,7 +558,7 @@ test('a piece cannot move into a buried cell', () => {
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
-    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 0 }),
+    statistics: statisticsFixture(),
     activePiece: Object.freeze({
       key: '2Line',
       angle: 0,
@@ -575,7 +583,7 @@ test('rotation kicks away from the right wall', () => {
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
-    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 0 }),
+    statistics: statisticsFixture(),
     activePiece: Object.freeze({
       key: '2Line',
       angle: 0,
@@ -603,7 +611,7 @@ test('a blocked rotation leaves the session unchanged', () => {
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
-    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 0 }),
+    statistics: statisticsFixture(),
     activePiece: Object.freeze({
       key: '2Line',
       angle: 0,
@@ -614,6 +622,137 @@ test('a blocked rotation leaves the session unchanged', () => {
   })
 
   assert.equal(gameSessionEngine.rotate(session, 'clockwise'), session)
+})
+
+test('successful moves, rotations, and drops are counted as actions', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14, 6]),
+  })
+  let session = createPentixGameSession({
+    id: 'session-1',
+    userId: 'user-1',
+    game,
+  })
+  assert.deepEqual(session.statistics.actions, {
+    moves: 0,
+    rotates: 0,
+    drops: 0,
+  })
+
+  session = gameSessionEngine.move(session, 'left')
+  session = gameSessionEngine.move(session, 'right')
+  assert.deepEqual(session.statistics.actions, {
+    moves: 2,
+    rotates: 0,
+    drops: 0,
+  })
+
+  session = gameSessionEngine.rotate(session, 'clockwise')
+  assert.equal(session.statistics.actions.rotates, 1)
+
+  session = gameSessionEngine.drop(session, game).session
+  assert.equal(session.statistics.actions.drops, 1)
+})
+
+test('blocked moves and rotations are not counted as actions', () => {
+  const board = new Board(12, 22)
+  board.setCell(1, 6, '4Square')
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([1, 3]),
+  })
+  const session = Object.freeze({
+    id: 'session-1',
+    userId: 'user-1',
+    gameId: game.id,
+    status: 'active',
+    board: createBoardSnapshot(board),
+    statistics: statisticsFixture(),
+    activePiece: Object.freeze({
+      key: '2Line',
+      angle: 0,
+      origin: Object.freeze({ row: 1, column: 5 }),
+    }),
+    nextPieceKey: '3Corner',
+    nextPieceIndex: 1,
+  })
+
+  assert.equal(gameSessionEngine.move(session, 'right'), session)
+  assert.equal(gameSessionEngine.rotate(session, 'clockwise'), session)
+  assert.equal(session.statistics.actions.moves, 0)
+  assert.equal(session.statistics.actions.rotates, 0)
+})
+
+test('gravity ticks do not count as actions', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14, 6]),
+  })
+  const session = createPentixGameSession({
+    id: 'session-1',
+    userId: 'user-1',
+    game,
+  })
+
+  const ticked = gameSessionEngine.tick(session, game).session
+
+  assert.equal(ticked.activePiece.origin.row, 2)
+  assert.deepEqual(ticked.statistics.actions, {
+    moves: 0,
+    rotates: 0,
+    drops: 0,
+  })
+})
+
+test('a fresh session starts with zeroed action and per-piece statistics', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14, 6]),
+  })
+  const session = createPentixGameSession({
+    id: 'session-1',
+    userId: 'user-1',
+    game,
+  })
+
+  assert.deepEqual(session.statistics.actions, {
+    moves: 0,
+    rotates: 0,
+    drops: 0,
+  })
+  assert.deepEqual(
+    Object.keys(session.statistics.pieceCounts).sort(),
+    PIECE_CATALOG.map((piece) => piece.key).sort(),
+  )
+  for (const piece of PIECE_CATALOG) {
+    assert.equal(session.statistics.pieceCounts[piece.key], 0)
+  }
+})
+
+test('a settle increments only the locked piece count', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([0, 1, 3]),
+  })
+  const session = createPentixGameSession({
+    id: 'session-1',
+    userId: 'user-1',
+    game,
+  })
+  const lockedKey = session.activePiece.key
+
+  const dropped = gameSessionEngine.drop(session, game)
+  assert.equal(dropped.session.statistics.pieceCounts[lockedKey], 0)
+
+  const settled = gameSessionEngine.tick(dropped.session, dropped.game).session
+  assert.equal(settled.statistics.blocks, 1)
+  assert.equal(settled.statistics.pieceCounts[lockedKey], 1)
+  for (const piece of PIECE_CATALOG) {
+    if (piece.key !== lockedKey) {
+      assert.equal(settled.statistics.pieceCounts[piece.key], 0)
+    }
+  }
 })
 
 test('level advances after thirty locked pieces', () => {
@@ -628,7 +767,7 @@ test('level advances after thirty locked pieces', () => {
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
-    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 29 }),
+    statistics: statisticsFixture({ blocks: 29 }),
     activePiece: Object.freeze({
       key: '1Line',
       angle: 0,
@@ -655,7 +794,7 @@ test('finished sessions ignore gameplay commands', () => {
     gameId: game.id,
     status: 'game-over',
     board: createBoardSnapshot(board),
-    statistics: Object.freeze({ score: 0, level: 1, clearedLines: 0, blocks: 0 }),
+    statistics: statisticsFixture(),
     activePiece: Object.freeze({
       key: '3Corner',
       angle: 0,
@@ -790,6 +929,40 @@ test('replay folds a hard drop like live play', () => {
 
   assert.deepEqual(replayPentixGameSession(log, game), dropped.session)
 })
+
+test('replay reproduces the recorded action and per-piece statistics', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14, 6]),
+  })
+  let live = createPentixGameSession({
+    id: 'session-1',
+    userId: 'user-1',
+    game,
+  })
+  live = gameSessionEngine.move(live, 'right')
+  live = gameSessionEngine.rotate(live, 'clockwise')
+  live = gameSessionEngine.drop(live, game).session
+  live = gameSessionEngine.tick(live, game).session
+
+  const log = {
+    sessionId: 'session-1',
+    userId: 'user-1',
+    gameId: 'game-1',
+    pieces: [{ pieceId: 3, actions: 'RCHT' }],
+  }
+  const replayed = replayPentixGameSession(log, game)
+
+  assert.deepEqual(replayed.statistics.actions, live.statistics.actions)
+  assert.deepEqual(replayed.statistics.pieceCounts, live.statistics.pieceCounts)
+  assert.deepEqual(live.statistics.actions, {
+    moves: 1,
+    rotates: 1,
+    drops: 1,
+  })
+  assert.equal(live.statistics.pieceCounts['3Corner'], 1)
+})
+
 test('a hard drop with no space below settles immediately without drop score', () => {
   const game = createPentixGame({
     id: 'game-1',
@@ -802,7 +975,7 @@ test('a hard drop with no space below settles immediately without drop score', (
     gameId: game.id,
     status: 'active',
     board: createBoardSnapshot(board),
-    statistics: Object.freeze({ score: 0, level: 2, clearedLines: 0, blocks: 0 }),
+    statistics: statisticsFixture({ level: 2 }),
     activePiece: Object.freeze({
       key: '4Square',
       angle: 0,
@@ -817,6 +990,7 @@ test('a hard drop with no space below settles immediately without drop score', (
   // The piece is already resting on the bottom, so the drop locks it instead
   // of awarding fall-distance score for no movement.
   assert.equal(result.session.statistics.blocks, 1)
+  assert.equal(result.session.statistics.actions.drops, 1)
   assert.equal(result.session.activePiece.key, '4T')
   assert.equal(result.session.statistics.score, 8)
 })
