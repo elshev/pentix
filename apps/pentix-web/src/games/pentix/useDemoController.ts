@@ -5,6 +5,7 @@ import type { Dispatch } from 'react'
 import type { PentixGameSession } from '#pentix/core'
 
 import {
+  activeDemoEngine,
   nextDemoAction,
   resolveDemoPlan,
   type DemoPlan,
@@ -48,7 +49,7 @@ export function useDemoController(
     const interval = getTickInterval(level)
     const timer = window.setInterval(() => {
       const current = sessionRef.current
-      const plan = resolveDemoPlan(planRef.current, current)
+      const plan = resolveDemoPlan(planRef.current, current, activeDemoEngine)
       planRef.current = plan
 
       const action = nextDemoAction(current, plan.destination)

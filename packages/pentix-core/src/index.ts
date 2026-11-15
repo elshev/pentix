@@ -67,6 +67,15 @@ export {
 } from './demo.js'
 export type { DemoDestination } from './demo.js'
 export {
+  DEFAULT_DEMO_ENGINE_ID,
+  DemoEngineRegistry,
+  demoEngineRegistry,
+  getDemoEngine,
+} from './demo-engine.js'
+export type { DemoEngine, DemoEngineId } from './demo-engine.js'
+export { delphi5DemoEngine } from './demo-delphi5.js'
+export { randomDemoEngine } from './demo-random.js'
+export {
   GameSessionEngine,
   gameSessionEngine,
 } from './session-engine.js'

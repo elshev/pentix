@@ -20,6 +20,12 @@ import {
   canDemoPieceMoveDown,
   planDemoDestination,
   planDemoLastTickMove,
+  DEFAULT_DEMO_ENGINE_ID,
+  DemoEngineRegistry,
+  demoEngineRegistry,
+  delphi5DemoEngine,
+  getDemoEngine,
+  randomDemoEngine,
   replayPentixGameSession,
 } from '../packages/pentix-core/dist/index.js'
 
@@ -1348,5 +1354,127 @@ test('a taken side-step ends the last-tick loop', () => {
     activePiece: { ...session.activePiece, origin: { row: 21, column: 11 } },
   }
   assert.equal(planDemoLastTickMove(stepped), null)
+})
+
+/** Runs `fn` with `Math.random` pinned to `value`, restoring it afterwards. */
+function withFixedRandom(value, fn) {
+  const original = Math.random
+  Math.random = () => value
+  try {
+    return fn()
+  } finally {
+    Math.random = original
+  }
+}
+
+test('the demo engine registry resolves the built-in engines', () => {
+  assert.equal(DEFAULT_DEMO_ENGINE_ID, 'delphi5')
+  assert.equal(getDemoEngine(), delphi5DemoEngine)
+  assert.equal(getDemoEngine('delphi5'), delphi5DemoEngine)
+  assert.equal(getDemoEngine('random'), randomDemoEngine)
+  assert.deepEqual(
+    demoEngineRegistry.list().map((engine) => engine.id),
+    ['delphi5', 'random'],
+  )
+})
+
+test('the demo engine registry rejects an unknown engine id', () => {
+  assert.throws(
+    () => getDemoEngine('missing'),
+    /Unknown demo engine 'missing'\./,
+  )
+})
+
+test('the demo engine registry rejects a duplicate id', () => {
+  const registry = new DemoEngineRegistry()
+  registry.register(delphi5DemoEngine)
+
+  assert.throws(
+    () => registry.register(delphi5DemoEngine),
+    /Demo engine 'delphi5' is already registered\./,
+  )
+  assert.equal(registry.get('delphi5'), delphi5DemoEngine)
+})
+
+test('the delphi5 engine delegates to the classic planners', () => {
+  const session = demoSession({ width: 12, height: 22, key: '1Line' })
+  withFixedRandom(0, () => {
+    assert.deepEqual(
+      delphi5DemoEngine.planDestination(session),
+      planDemoDestination(session),
+    )
+  })
+
+  const resting = demoSession({
+    width: 12,
+    height: 22,
+    filled: [[20, 11]],
+    key: '1Line',
+    row: 21,
+    column: 10,
+  })
+  assert.deepEqual(
+    delphi5DemoEngine.planLastTickMove(resting),
+    planDemoLastTickMove(resting),
+  )
+})
+
+test('the random engine picks among reachable destinations', () => {
+  // Column 1 is sealed from the top, so only columns 0 and 2 are reachable.
+  const session = demoSession({
+    width: 3,
+    height: 4,
+    filled: [
+      [0, 1],
+      [1, 1],
+      [2, 1],
+      [3, 1],
+    ],
+    key: '1Line',
+  })
+
+  const first = withFixedRandom(0, () =>
+    randomDemoEngine.planDestination(session),
+  )
+  const last = withFixedRandom(0.999, () =>
+    randomDemoEngine.planDestination(session),
+  )
+
+  assert.deepEqual(first, { angle: 0, column: 0 })
+  assert.deepEqual(last, { angle: 0, column: 2 })
+})
+
+test('the random engine reports no destination when every column is sealed', () => {
+  const session = demoSession({
+    width: 3,
+    height: 3,
+    filled: [
+      [0, 0],
+      [0, 1],
+      [0, 2],
+      [1, 0],
+      [1, 1],
+      [1, 2],
+      [2, 0],
+      [2, 1],
+      [2, 2],
+    ],
+    key: '1Line',
+  })
+
+  assert.equal(randomDemoEngine.planDestination(session), null)
+})
+
+test('the random engine never side-steps on the last tick', () => {
+  const session = demoSession({
+    width: 12,
+    height: 22,
+    filled: [[20, 11]],
+    key: '1Line',
+    row: 21,
+    column: 10,
+  })
+
+  assert.equal(randomDemoEngine.planLastTickMove(session), null)
 })
 

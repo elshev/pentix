@@ -79,7 +79,8 @@ function pieceExtents(piece: Piece): PieceExtents {
   return { minX, maxX, minY, maxY }
 }
 
-function candidateAngles(rotationMode: RotationMode): RotationAngle[] {
+/** The rotation angles to try, normalized for the piece's rotation mode. */
+export function candidateAngles(rotationMode: RotationMode): RotationAngle[] {
   const angles = new Set<RotationAngle>()
   for (const raw of ALL_ANGLES) {
     angles.add(normalizeAngle(raw, rotationMode))
@@ -118,7 +119,7 @@ function descend(
  * `null` when the column's shaft is blocked at the top so the piece can never
  * reach it.
  */
-function findLandingRow(
+export function findLandingRow(
   board: BoardSnapshot,
   piece: Piece,
   column: number,

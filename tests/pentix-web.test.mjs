@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { PIECE_CATALOG } from '#pentix/core'
+import { PIECE_CATALOG, delphi5DemoEngine } from '#pentix/core'
 
 import { buildRenderGrid, getActiveCells } from '../apps/pentix-web/src/engine/projection.ts'
 import {
@@ -636,11 +636,14 @@ test('nextDemoAction moves toward the demo destination', () => {
     activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
   }
 
-  // Pin the random tie-break so the empty-board destination is the right wall.
-  assert.deepEqual(
-    withFixedRandom(0, () => nextDemoAction(session)),
-    { type: 'move', direction: 'right' },
+  // Pin the classic planner's random tie-break so the destination is the wall.
+  const destination = withFixedRandom(0, () =>
+    delphi5DemoEngine.planDestination(session),
   )
+  assert.deepEqual(nextDemoAction(session, destination), {
+    type: 'move',
+    direction: 'right',
+  })
 })
 
 test('nextDemoAction hard-drops once the piece reaches its destination', () => {
@@ -649,8 +652,11 @@ test('nextDemoAction hard-drops once the piece reaches its destination', () => {
     activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 11 } },
   }
 
-  // Pin the random tie-break so the empty-board destination is the right wall.
-  assert.deepEqual(withFixedRandom(0, () => nextDemoAction(session)), {
+  // Pin the classic planner's random tie-break so the destination is the wall.
+  const destination = withFixedRandom(0, () =>
+    delphi5DemoEngine.planDestination(session),
+  )
+  assert.deepEqual(nextDemoAction(session, destination), {
     type: 'drop',
   })
 })
@@ -676,7 +682,8 @@ test('nextDemoAction returns undefined when the planner finds no placement', () 
     activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 1 } },
   }
 
-  assert.equal(nextDemoAction(session), undefined)
+  const destination = delphi5DemoEngine.planDestination(session)
+  assert.equal(nextDemoAction(session, destination), undefined)
 })
 
 test('nextDemoAction uses a precomputed destination', () => {
@@ -704,9 +711,9 @@ test('resolveDemoPlan keeps the destination stable for the same piece', () => {
     activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
   }
 
-  const first = resolveDemoPlan(null, session)
-  const second = resolveDemoPlan(first, session)
-  const third = resolveDemoPlan(second, session)
+  const first = resolveDemoPlan(null, session, delphi5DemoEngine)
+  const second = resolveDemoPlan(first, session, delphi5DemoEngine)
+  const third = resolveDemoPlan(second, session, delphi5DemoEngine)
 
   // The destination must not be re-planned (or re-randomized) while the same
   // piece is active, otherwise the demo would jitter left/right every tick.
@@ -727,8 +734,8 @@ test('resolveDemoPlan re-targets the destination for a last-tick side-step', () 
     activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
   }
 
-  const first = resolveDemoPlan(null, session)
-  const reTargeted = resolveDemoPlan(first, session)
+  const first = resolveDemoPlan(null, session, delphi5DemoEngine)
+  const reTargeted = resolveDemoPlan(first, session, delphi5DemoEngine)
 
   assert.deepEqual(reTargeted.destination, { angle: 0, column: 1 })
 
@@ -738,7 +745,10 @@ test('resolveDemoPlan re-targets the destination for a last-tick side-step', () 
     ...session,
     activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 1 } },
   }
-  assert.equal(resolveDemoPlan(reTargeted, stepped), reTargeted)
+  assert.equal(
+    resolveDemoPlan(reTargeted, stepped, delphi5DemoEngine),
+    reTargeted,
+  )
 })
 
 test('resolveDemoPlan re-plans when a new piece spawns or the session changes', () => {
@@ -748,15 +758,49 @@ test('resolveDemoPlan re-plans when a new piece spawns or the session changes', 
     board: emptyBoard(12, 22),
     activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
   }
-  const first = resolveDemoPlan(null, session)
+  const first = resolveDemoPlan(null, session, delphi5DemoEngine)
 
-  const nextPiece = resolveDemoPlan(first, { ...session, nextPieceIndex: 2 })
+  const nextPiece = resolveDemoPlan(
+    first,
+    { ...session, nextPieceIndex: 2 },
+    delphi5DemoEngine,
+  )
   assert.notEqual(nextPiece, first)
   assert.equal(nextPiece.pieceIndex, 2)
 
-  const nextSession = resolveDemoPlan(first, { ...session, id: 'session-2' })
+  const nextSession = resolveDemoPlan(
+    first,
+    { ...session, id: 'session-2' },
+    delphi5DemoEngine,
+  )
   assert.notEqual(nextSession, first)
   assert.equal(nextSession.sessionId, 'session-2')
+})
+
+test('resolveDemoPlan plans with the supplied engine', () => {
+  const session = {
+    id: 'session-1',
+    nextPieceIndex: 1,
+    board: emptyBoard(12, 22),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
+  }
+  let planned = 0
+  const engine = {
+    id: 'test',
+    name: 'Test',
+    planDestination() {
+      planned += 1
+      return { angle: 0, column: 1 }
+    },
+    planLastTickMove() {
+      return null
+    },
+  }
+
+  const plan = resolveDemoPlan(null, session, engine)
+
+  assert.equal(planned, 1)
+  assert.deepEqual(plan.destination, { angle: 0, column: 1 })
 })
 
 test('a fresh session starts with zeroed action and per-piece statistics', () => {

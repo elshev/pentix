@@ -1,12 +1,23 @@
-/** Browser demo steering — maps the planner destination to a reducer action. */
+/** Browser demo steering — maps a demo engine's destination to a reducer action. */
 import {
-  planDemoDestination,
-  planDemoLastTickMove,
+  getDemoEngine,
   type DemoDestination,
+  type DemoEngine,
+  type DemoEngineId,
   type PentixGameSession,
 } from '#pentix/core'
 
 import type { GameAction } from './gameReducer.ts'
+
+/**
+ * TEMPORARY: the engine the attract demo runs while the registry seam is
+ * validated. Set this back to `'delphi5'` (or delete the constant and use
+ * `getDemoEngine()`) once the random engine is removed.
+ */
+export const ACTIVE_DEMO_ENGINE_ID: DemoEngineId = 'random'
+
+/** The engine selected by `ACTIVE_DEMO_ENGINE_ID`. */
+export const activeDemoEngine: DemoEngine = getDemoEngine(ACTIVE_DEMO_ENGINE_ID)
 
 /**
  * Cached demo plan for one spawned piece. A destination depends only on the
@@ -28,18 +39,20 @@ export interface DemoPlan {
  *
  * A resting piece that can still take a better side-step (the "last tick move")
  * re-targets the cached destination to that step, so the demo keeps steering into
- * the placement it just chose instead of pulling back.
+ * the placement it just chose instead of pulling back. Both operations come from
+ * the supplied demo engine, which defaults to the active engine.
  */
 export function resolveDemoPlan(
   plan: DemoPlan | null,
   session: PentixGameSession,
+  engine: DemoEngine = activeDemoEngine,
 ): DemoPlan {
   if (
     plan !== null &&
     plan.sessionId === session.id &&
     plan.pieceIndex === session.nextPieceIndex
   ) {
-    const destination = planDemoLastTickMove(session)
+    const destination = engine.planLastTickMove(session)
     if (destination === null) {
       return plan
     }
@@ -53,7 +66,7 @@ export function resolveDemoPlan(
   return {
     sessionId: session.id,
     pieceIndex: session.nextPieceIndex,
-    destination: planDemoDestination(session),
+    destination: engine.planDestination(session),
   }
 }
 
@@ -88,7 +101,7 @@ export function actionTowardDestination(
  */
 export function nextDemoAction(
   session: PentixGameSession,
-  destination: DemoDestination | null = planDemoDestination(session),
+  destination: DemoDestination | null = activeDemoEngine.planDestination(session),
 ): GameAction | undefined {
   if (destination === null) {
     return undefined
