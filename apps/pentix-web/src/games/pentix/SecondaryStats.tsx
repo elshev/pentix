@@ -1,7 +1,6 @@
-/** Secondary statistics: engine-recorded action counts and per-piece totals. */
+/** Pieces statistics popup body: engine-recorded action counts and per-piece totals. */
 import { PIECE_CATALOG, type GameSessionStatistics } from '#pentix/core'
 
-import { CollapsiblePanel } from './CollapsiblePanel.tsx'
 import { PieceMini } from './PieceMini.tsx'
 
 interface SecondaryStatsProps {
@@ -13,7 +12,7 @@ export function SecondaryStats({ statistics }: SecondaryStatsProps) {
   const { actions, pieceCounts } = statistics
 
   return (
-    <CollapsiblePanel title="Statistics" defaultOpen small>
+    <div className="secondary-stats">
       <div className="secondary-stats__row">
         <span className="secondary-stats__item">Moves {actions.moves}</span>
         <span className="secondary-stats__item">Rotates {actions.rotates}</span>
@@ -29,6 +28,6 @@ export function SecondaryStats({ statistics }: SecondaryStatsProps) {
           </div>
         ))}
       </div>
-    </CollapsiblePanel>
+    </div>
   )
 }

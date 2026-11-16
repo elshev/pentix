@@ -168,7 +168,7 @@ test('starting level can be set directly, clamped, and stepped up or down', () =
   assert.equal(capped.settings.startingLevel, 9)
 })
 
-test('level changes during the demo update the live session; outside the demo they only update settings', () => {
+test('level changes follow the live session in the demo and while a player game is raised', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
 
@@ -186,7 +186,9 @@ test('level changes during the demo update the live session; outside the demo th
   const playing = createInitialState(deps, 'playing', settings({ startingLevel: 5 }))
   const playingUp = reducer(playing, { type: 'increaseLevel' })
   assert.equal(playingUp.settings.startingLevel, 6)
-  assert.equal(playingUp.session.statistics.level, 5)
+  // A running game follows the raise; lowering it stays refused.
+  assert.equal(playingUp.session.statistics.level, 6)
+  assert.equal(reducer(playingUp, { type: 'decreaseLevel' }), playingUp)
 })
 
 test('move shifts the active piece and is ignored when not playing', () => {
@@ -504,7 +506,7 @@ test('a demo step with no last-tick move settles the resting piece', () => {
   assert.equal(settled.session.id, demo.session.id)
 })
 
-test('a demo step that ends the demo game restarts it immediately', () => {
+test('a demo step that ends the demo game keeps the final board until the delay elapses', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
@@ -516,14 +518,19 @@ test('a demo step that ends the demo game restarts it immediately', () => {
     activePiece: demo.session.activePiece,
   })
 
-  const restarted = reducer(
+  const over = reducer(
     blocked,
     demoStepAction(blocked, { type: 'drop' }),
   )
 
+  assert.equal(over.phase, 'demo-over')
+  assert.equal(over.session.status, 'game-over')
+  assert.equal(over.session.id, blocked.session.id)
+
+  const restarted = reducer(over, { type: 'demoRestart' })
   assert.equal(restarted.phase, 'demo')
   assert.equal(restarted.session.status, 'active')
-  assert.notEqual(restarted.session.id, blocked.session.id)
+  assert.notEqual(restarted.session.id, over.session.id)
 })
 
 test('starting from the demo enters a fresh player game', () => {
@@ -543,9 +550,17 @@ test('space enters the demo after game over and starts a game from the demo', ()
   assert.deepEqual(mapKeyToAction('Enter', 'game-over'), { type: 'start' })
   assert.deepEqual(mapKeyToAction('Enter', 'demo'), { type: 'start' })
   assert.deepEqual(mapKeyToAction(' ', 'playing'), { type: 'drop' })
+  // The demo's post-game-over delay still lets the player take over or pick a
+  // level instead of waiting for the next demo.
+  assert.deepEqual(mapKeyToAction(' ', 'demo-over'), { type: 'start' })
+  assert.deepEqual(mapKeyToAction('Enter', 'demo-over'), { type: 'start' })
+  assert.deepEqual(mapKeyToAction('4', 'demo-over'), {
+    type: 'setStartingLevel',
+    level: 4,
+  })
 })
 
-test('a demo game over immediately starts a fresh demo', () => {
+test('a demo game over waits for the demo restart action', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps)
@@ -555,11 +570,93 @@ test('a demo game over immediately starts a fresh demo', () => {
   }
 
   const next = reducer(overState, { type: 'tick' })
-  assert.equal(next.phase, 'demo')
-  assert.equal(next.session.status, 'active')
-  assert.notEqual(next.session.id, demo.session.id)
-  // The attract loop restarts at once, without arming the player-facing cooldown.
-  assert.equal(next.gameOverReady, true)
+  assert.equal(next.phase, 'demo-over')
+  assert.equal(next.session.status, 'game-over')
+  assert.equal(next.session.id, demo.session.id)
+  // The attract loop is only restarted by the delay's own action.
+  assert.equal(reducer(demo, { type: 'demoRestart' }), demo)
+
+  const restarted = reducer(next, { type: 'demoRestart' })
+  assert.equal(restarted.phase, 'demo')
+  assert.equal(restarted.session.status, 'active')
+  assert.notEqual(restarted.session.id, demo.session.id)
+  // No player-facing cooldown is armed for the attract loop.
+  assert.equal(restarted.gameOverReady, true)
+})
+
+test('choosing a level on the game-over screen starts that level', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const over = {
+    ...createInitialState(deps, 'game-over', settings({ startingLevel: 9 })),
+    gameOverReady: true,
+  }
+
+  const started = reducer(over, { type: 'setStartingLevel', level: 3 })
+
+  assert.equal(started.phase, 'playing')
+  assert.equal(started.settings.startingLevel, 3)
+  assert.equal(started.session.statistics.level, 3)
+  assert.notEqual(started.session.id, over.session.id)
+})
+
+test('level buttons are inert during the cooldown but may raise a running game', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+
+  const cooling = coolingGameOverState(deps)
+  assert.equal(reducer(cooling, { type: 'setStartingLevel', level: 3 }), cooling)
+
+  const playing = createInitialState(deps, 'playing', settings({ startingLevel: 2 }))
+  // Lowering or keeping the level is refused while a player game runs.
+  assert.equal(reducer(playing, { type: 'setStartingLevel', level: 2 }), playing)
+  assert.equal(reducer(playing, { type: 'setStartingLevel', level: 0 }), playing)
+
+  // Raising it applies to the live session and to the configured level.
+  const raised = reducer(playing, { type: 'setStartingLevel', level: 6 })
+  assert.equal(raised.phase, 'playing')
+  assert.equal(raised.session.id, playing.session.id)
+  assert.equal(raised.session.statistics.level, 6)
+  assert.equal(raised.settings.startingLevel, 6)
+
+  // The same rule holds while paused.
+  const paused = reducer(playing, { type: 'pause' })
+  const pausedRaised = reducer(paused, { type: 'setStartingLevel', level: 5 })
+  assert.equal(pausedRaised.phase, 'paused')
+  assert.equal(pausedRaised.session.statistics.level, 5)
+})
+
+test('the plus key raises a running game while minus cannot lower it', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const playing = createInitialState(deps, 'playing', settings({ startingLevel: 4 }))
+
+  const up = reducer(playing, { type: 'increaseLevel' })
+  assert.equal(up.session.statistics.level, 5)
+
+  const down = reducer(up, { type: 'decreaseLevel' })
+  assert.equal(down, up)
+})
+
+test('a level chosen during the demo delay applies to the next demo', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo', settings({ startingLevel: 2 }))
+  const over = {
+    ...demo,
+    phase: 'demo-over',
+    session: { ...demo.session, status: 'game-over' },
+  }
+
+  const chosen = reducer(over, { type: 'setStartingLevel', level: 7 })
+  assert.equal(chosen.phase, 'demo-over')
+  assert.equal(chosen.settings.startingLevel, 7)
+  // The finished demo keeps the level it played at.
+  assert.equal(chosen.session.statistics.level, 2)
+
+  const restarted = reducer(chosen, { type: 'demoRestart' })
+  assert.equal(restarted.phase, 'demo')
+  assert.equal(restarted.session.statistics.level, 7)
 })
 
 test('a fresh game over ignores start, restart, and demo until the cooldown elapses', () => {

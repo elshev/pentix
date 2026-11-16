@@ -1,5 +1,5 @@
 /** Pentix game screen wiring the board, HUD, controls, settings, and game loop. */
-import { useMemo, useReducer } from 'react'
+import { useMemo, useReducer, useRef, useState } from 'react'
 
 import {
   createGameReducer,
@@ -9,9 +9,9 @@ import {
 import { BoardView } from './BoardView.tsx'
 import { Controls } from './Controls.tsx'
 import { Hud } from './Hud.tsx'
-import { SecondaryStats } from './SecondaryStats.tsx'
 import { Settings } from './Settings.tsx'
 import { useDemoController } from './useDemoController.ts'
+import { useDemoRestart } from './useDemoRestart.ts'
 import { useGameLoop } from './useGameLoop.ts'
 import { useGameOverCooldown } from './useGameOverCooldown.ts'
 import { useKeyboardControls } from './useKeyboardControls.ts'
@@ -56,12 +56,36 @@ export function Game() {
   } = state
   const level = session.statistics.level
 
+  // The pieces statistics popup pauses whatever is running: a player game is put
+  // into the paused phase (the paused overlay is suppressed while the popup is
+  // open) and the attract demo simply stops advancing. Closing resumes only a
+  // game this popup paused.
+  const [statsOpen, setStatsOpen] = useState(false)
+  const resumeOnClose = useRef(false)
+
+  function toggleStats() {
+    if (statsOpen) {
+      setStatsOpen(false)
+      if (resumeOnClose.current) {
+        resumeOnClose.current = false
+        dispatch({ type: 'resume' })
+      }
+      return
+    }
+    setStatsOpen(true)
+    if (phase === 'playing') {
+      resumeOnClose.current = true
+      dispatch({ type: 'pause' })
+    }
+  }
+
   useGameLoop(phase === 'playing', level, gravityEpoch, () =>
     dispatch({ type: 'tick' }),
   )
-  useDemoController(phase === 'demo', level, session, dispatch)
+  useDemoController(phase === 'demo' && !statsOpen, level, session, dispatch)
   useKeyboardControls(phase, dispatch)
   useGameOverCooldown(phase === 'game-over' && !gameOverReady, dispatch)
+  useDemoRestart(phase === 'demo-over', dispatch)
 
   const label =
     phase === 'playing'
@@ -74,61 +98,64 @@ export function Game() {
 
   return (
     <section className="game">
-      <div className="game__stage">
-        <BoardView session={session} />
-        {phase === 'paused' && (
-          <div className="overlay">
-            <Overlay
-              title="Paused"
-              label="Resume"
-              onClick={() => dispatch({ type: 'resume' })}
-            />
-          </div>
-        )}
-        {phase === 'game-over' && (
-          <div className="overlay overlay--soft">
-            <div className="overlay__card">
-              <p className="overlay__title">Game over</p>
-              <div className="overlay__actions">
-                <button
-                  type="button"
-                  className="overlay__button"
-                  title="Play again (Enter)"
-                  disabled={!gameOverReady}
-                  onClick={() => dispatch({ type: 'restart' })}
-                >
-                  Play again
-                </button>
-                <button
-                  type="button"
-                  className="overlay__button overlay__button--secondary"
-                  title="Demo (Space)"
-                  disabled={!gameOverReady}
-                  onClick={() => dispatch({ type: 'demo' })}
-                >
-                  Demo
-                </button>
+      <div className="game__column">
+        <Hud
+          statistics={session.statistics}
+          nextPieceKey={session.nextPieceKey}
+          showNextPiece={settings.showNextPiece}
+          statsOpen={statsOpen}
+          onToggleStats={toggleStats}
+        />
+        <div className="game__stage">
+          <BoardView session={session} />
+          {phase === 'paused' && !statsOpen && (
+            <div className="overlay">
+              <Overlay
+                title="Paused"
+                label="Resume"
+                onClick={() => dispatch({ type: 'resume' })}
+              />
+            </div>
+          )}
+          {phase === 'game-over' && (
+            <div className="overlay overlay--soft">
+              <div className="overlay__card">
+                <p className="overlay__title">Game over</p>
+                <div className="overlay__actions">
+                  <button
+                    type="button"
+                    className="overlay__button"
+                    title="Play again (Enter)"
+                    disabled={!gameOverReady}
+                    onClick={() => dispatch({ type: 'restart' })}
+                  >
+                    Play again
+                  </button>
+                  <button
+                    type="button"
+                    className="overlay__button overlay__button--secondary"
+                    title="Demo (Space)"
+                    disabled={!gameOverReady}
+                    onClick={() => dispatch({ type: 'demo' })}
+                  >
+                    Demo
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-        {phase === 'demo' && (
-          <p className="demo-badge">Demo — press Space to play</p>
-        )}
+          )}
+          {(phase === 'demo' || phase === 'demo-over') && (
+            <p className="demo-badge">Demo — press Space to play</p>
+          )}
+        </div>
+        <div className="game__bottom">
+          <Controls phase={phase} level={level} dispatch={dispatch} />
+          <Settings settings={settings} dispatch={dispatch} />
+        </div>
+        <p className="status-line" aria-live="polite">
+          {label}
+        </p>
       </div>
-      <Hud
-        statistics={session.statistics}
-        nextPieceKey={session.nextPieceKey}
-        showNextPiece={settings.showNextPiece}
-      />
-      <div className="game__secondary">
-        <SecondaryStats statistics={session.statistics} />
-      </div>
-      <Controls phase={phase} dispatch={dispatch} />
-      <Settings settings={settings} dispatch={dispatch} />
-      <p className="status-line" aria-live="polite">
-        {label}
-      </p>
     </section>
   )
 }
