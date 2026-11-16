@@ -1,9 +1,11 @@
-/** Game state reducer — phase, settings, and the local Pentix session. */
+/** Game state reducer — phase, settings, the main session, and the demo boards. */
 import {
   canDemoPieceMoveDown,
   createPentixGame,
   createPentixGameSession,
   gameSessionEngine,
+  type AdvancePentixGameSessionResult,
+  type DemoEngineId,
   type MoveDirection,
   type PentixGame,
   type PentixGameSession,
@@ -13,6 +15,17 @@ import {
 } from '#pentix/core'
 
 export type GamePhase = 'demo' | 'demo-over' | 'playing' | 'paused' | 'game-over'
+
+/** The board id the player controls. */
+export const MAIN_BOARD_ID = 'main'
+
+/**
+ * The engines driving the small demo boards, in board order: the second board
+ * runs the classic `delphi5` heuristic and the third the `random` one. Adding a
+ * board to the rail is one entry here.
+ */
+export const DEMO_BOARD_ENGINES = ['delphi5', 'random'] as const
+
 
 export const MIN_LEVEL = 0
 export const MAX_LEVEL = 9
@@ -36,14 +49,34 @@ export const DEFAULT_SETTINGS: GameSettings = Object.freeze({
   startingLevel: 9,
 })
 
+/**
+ * One small demo board: the engine that plans it and the session it plays. All
+ * demo boards of a state share the main board's `PentixGame`.
+ */
+export interface DemoBoardState {
+  readonly id: string
+  readonly engineId: DemoEngineId
+  readonly session: PentixGameSession
+}
+
+/** The steering steps an auto-played session takes toward its destination. */
+export type DemoStepAction =
+  | { type: 'move'; direction: MoveDirection }
+  | { type: 'rotate' }
+  | { type: 'drop' }
+
 export interface GameState {
   readonly phase: GamePhase
   /** False only while a fresh player game over ignores start/restart/demo input. */
   readonly gameOverReady: boolean
   readonly settings: GameSettings
   readonly gravityEpoch: number
+  /** The piece list every board of this state draws from. */
   readonly game: PentixGame
+  /** The main board's session. */
   readonly session: PentixGameSession
+  /** The parallel demo boards shown beside the main board. */
+  readonly demoBoards: readonly DemoBoardState[]
 }
 
 export type GameAction =
@@ -66,7 +99,16 @@ export type GameAction =
   | { type: 'drop' }
   | {
       type: 'demoStep'
-      action: GameAction
+      action: DemoStepAction
+      sessionId: string
+      pieceIndex: number
+      angle: RotationAngle
+      column: number
+    }
+  | {
+      type: 'demoBoardStep'
+      boardId: string
+      action: DemoStepAction
       sessionId: string
       pieceIndex: number
       angle: RotationAngle
@@ -100,6 +142,20 @@ function applyStartingLevel(
 }
 
 /**
+ * Retunes the demo boards to `level` while the main board runs its attract
+ * demo, so the whole rail speeds up or slows down together with it.
+ */
+function applyLevelToDemoBoards(
+  boards: readonly DemoBoardState[],
+  level: number,
+): readonly DemoBoardState[] {
+  return boards.map((board) => {
+    const session = applyStartingLevel(board.session, level)
+    return session === board.session ? board : { ...board, session }
+  })
+}
+
+/**
  * Applies a chosen level to the configured starting level and to the live
  * session. The demo takes the new level at once so its gravity speed changes
  * without waiting for the next session; a running player game may only be
@@ -112,7 +168,24 @@ function changeLevel(state: GameState, level: number): GameState {
     return state
   }
   const settings = { ...state.settings, startingLevel }
-  if (state.phase === 'demo' || playerGame) {
+  if (state.phase === 'demo') {
+    return {
+      ...state,
+      settings,
+      session: applyStartingLevel(state.session, startingLevel),
+      demoBoards: applyLevelToDemoBoards(state.demoBoards, startingLevel),
+    }
+  }
+  if (state.phase === 'demo-over') {
+    // The finished demo keeps the level it played at, but the demo boards are
+    // still playing, so the whole rail follows the chosen level at once.
+    return {
+      ...state,
+      settings,
+      demoBoards: applyLevelToDemoBoards(state.demoBoards, startingLevel),
+    }
+  }
+  if (playerGame) {
     return {
       ...state,
       settings,
@@ -129,25 +202,57 @@ function currentLevel(state: GameState): number {
     : state.settings.startingLevel
 }
 
-interface SessionBundle {
+/** One game plus every session that plays it: the main board and the demo boards. */
+interface BoardSet {
   readonly game: PentixGame
   readonly session: PentixGameSession
+  readonly demoBoards: readonly DemoBoardState[]
 }
 
-function createSessionBundle(
+function demoBoardId(engineId: DemoEngineId): string {
+  return `demo-${engineId}`
+}
+
+function createSessionForGame(
+  game: PentixGame,
   deps: GameDependencies,
   startingLevel: number,
-): SessionBundle {
+): PentixGameSession {
+  return applyStartingLevel(
+    createPentixGameSession({
+      id: deps.createId(),
+      userId: deps.userId ?? DEFAULT_USER_ID,
+      game,
+    }),
+    startingLevel,
+  )
+}
+
+/**
+ * Creates one `PentixGame` and the whole board set that plays it, so the main
+ * session and every demo board draw from the same piece list.
+ */
+function createBoardSet(deps: GameDependencies, startingLevel: number): BoardSet {
   const game = createPentixGame({
     id: deps.createId(),
     selectPieceId: deps.selectPieceId,
   })
-  const baseSession = createPentixGameSession({
-    id: deps.createId(),
-    userId: deps.userId ?? DEFAULT_USER_ID,
-    game,
-  })
-  return { game, session: applyStartingLevel(baseSession, startingLevel) }
+  const session = createSessionForGame(game, deps, startingLevel)
+  const demoBoards = DEMO_BOARD_ENGINES.map((engineId) => ({
+    id: demoBoardId(engineId),
+    engineId,
+    session: createSessionForGame(game, deps, startingLevel),
+  }))
+
+  return { game, session, demoBoards: Object.freeze(demoBoards) }
+}
+
+/**
+ * Keeps the longer piece list: every session operation returns the game it used
+ * or extended, and all boards of a state must keep drawing from one list.
+ */
+function mergeGame(shared: PentixGame, next: PentixGame): PentixGame {
+  return next.pieceIds.length > shared.pieceIds.length ? next : shared
 }
 
 function isActivePhase(phase: GamePhase): boolean {
@@ -159,12 +264,19 @@ function isGameOverCoolingDown(state: GameState): boolean {
   return state.phase === 'game-over' && !state.gameOverReady
 }
 
+/**
+ * Starts a new session on the main board and a fresh session on every demo
+ * board, all from one new game: the whole board set starts in parallel.
+ */
 function startSession(
   state: GameState,
   deps: GameDependencies,
   phase: 'demo' | 'playing',
 ): GameState {
-  const { game, session } = createSessionBundle(deps, state.settings.startingLevel)
+  const { game, session, demoBoards } = createBoardSet(
+    deps,
+    state.settings.startingLevel,
+  )
   return {
     ...state,
     phase,
@@ -172,6 +284,7 @@ function startSession(
     gravityEpoch: state.gravityEpoch + 1,
     game,
     session,
+    demoBoards,
   }
 }
 
@@ -183,11 +296,32 @@ function startDemo(state: GameState, deps: GameDependencies): GameState {
   return startSession(state, deps, 'demo')
 }
 
-function applyAdvance(state: GameState, result: SessionBundle): GameState {
+/**
+ * Starts the next attract demo while leaving the demo boards alone. Their
+ * sessions keep playing, so the piece list they share must stay the same game.
+ */
+function restartDemoSession(
+  state: GameState,
+  deps: GameDependencies,
+): GameState {
+  return {
+    ...state,
+    phase: 'demo',
+    gameOverReady: true,
+    gravityEpoch: state.gravityEpoch + 1,
+    session: createSessionForGame(state.game, deps, state.settings.startingLevel),
+  }
+}
+
+function applyAdvance(
+  state: GameState,
+  result: AdvancePentixGameSessionResult,
+): GameState {
+  const game = mergeGame(state.game, result.game)
   // A demo session that ends keeps its final board for the same delay a player
   // game over uses; `demoRestart` starts the next demo once that delay elapses.
   if (result.session.status === 'game-over' && state.phase === 'demo') {
-    return { ...state, phase: 'demo-over', game: result.game, session: result.session }
+    return { ...state, phase: 'demo-over', game, session: result.session }
   }
   const gameOver = result.session.status === 'game-over'
   return {
@@ -196,8 +330,73 @@ function applyAdvance(state: GameState, result: SessionBundle): GameState {
     // Arm the cooldown the moment the final board appears, so input left over
     // from active play cannot clear it.
     gameOverReady: gameOver ? false : state.gameOverReady,
-    game: result.game,
+    game,
     session: result.session,
+  }
+}
+
+/** The placement an auto-play step was planned for. */
+interface DemoStepPlacement {
+  readonly sessionId: string
+  readonly pieceIndex: number
+  readonly angle: RotationAngle
+  readonly column: number
+}
+
+/**
+ * True while a planned step still belongs to the session's current piece and
+ * placement. The row is not compared: a step is applied after its own gravity
+ * descent.
+ */
+function isCurrentPlacement(
+  session: PentixGameSession,
+  step: DemoStepPlacement,
+): boolean {
+  return (
+    session.id === step.sessionId &&
+    session.nextPieceIndex === step.pieceIndex &&
+    session.activePiece.angle === step.angle &&
+    session.activePiece.origin.column === step.column
+  )
+}
+
+/**
+ * Applies one auto-play step to a session: the gravity descent when the piece
+ * can still fall, then the steering action, both through the shared engine.
+ */
+function runDemoStep(
+  session: PentixGameSession,
+  game: PentixGame,
+  action: DemoStepAction,
+  rotateDirection: RotateDirection,
+  selectPieceId?: PieceIdSelector,
+): AdvancePentixGameSessionResult {
+  const descended = canDemoPieceMoveDown(session)
+    ? gameSessionEngine.tick(session, game, selectPieceId)
+    : { game, session }
+
+  // A descent can end the game; there is nothing left to steer on that tick.
+  if (descended.session.status !== 'active') {
+    return descended
+  }
+
+  switch (action.type) {
+    case 'move':
+      return {
+        game: descended.game,
+        session: gameSessionEngine.move(descended.session, action.direction),
+      }
+    case 'rotate':
+      return {
+        game: descended.game,
+        session: gameSessionEngine.rotate(descended.session, rotateDirection),
+      }
+    case 'drop':
+      return gameSessionEngine.drop(
+        descended.session,
+        descended.game,
+        selectPieceId,
+      )
   }
 }
 
@@ -206,7 +405,7 @@ export function createInitialState(
   phase: GamePhase = 'demo',
   settings: GameSettings = DEFAULT_SETTINGS,
 ): GameState {
-  const { game, session } = createSessionBundle(deps, settings.startingLevel)
+  const { game, session, demoBoards } = createBoardSet(deps, settings.startingLevel)
   return {
     phase,
     gameOverReady: true,
@@ -214,6 +413,7 @@ export function createInitialState(
     gravityEpoch: 0,
     game,
     session,
+    demoBoards,
   }
 }
 
@@ -241,40 +441,61 @@ export function createGameReducer(deps: GameDependencies) {
 
       case 'demoRestart':
         // Only the finished demo waits on this action; it starts the next demo
-        // once the post-demo delay has elapsed.
-        return state.phase === 'demo-over' ? startDemo(state, deps) : state
+        // once the post-demo delay has elapsed. The demo boards keep playing, so
+        // they are deliberately left untouched.
+        return state.phase === 'demo-over' ? restartDemoSession(state, deps) : state
 
       case 'demoStep': {
-        // Ignore a step planned from a stale snapshot. If the demo session, the
-        // active piece, or its angle/column changed since the hook planned the
-        // step (for example the piece was already steered), applying it would
-        // steer the wrong piece or the wrong placement. The row is not compared:
-        // the step is applied after this call's own gravity step.
-        if (
-          state.phase !== 'demo' ||
-          state.session.id !== action.sessionId ||
-          state.session.nextPieceIndex !== action.pieceIndex ||
-          state.session.activePiece.angle !== action.angle ||
-          state.session.activePiece.origin.column !== action.column
-        ) {
+        // Ignore a step planned from a stale snapshot (see `isCurrentPlacement`),
+        // so the demo cannot steer the wrong piece or placement.
+        if (state.phase !== 'demo' || !isCurrentPlacement(state.session, action)) {
           return state
         }
 
         // Mirror Delphi's `TimerExpired`: a piece that can still fall takes the
         // gravity step before its steering step. A resting piece takes only the
         // steering step, so a last-tick move lands before anything can lock it.
-        const advanced = canDemoPieceMoveDown(state.session)
-          ? applyAdvance(
-              state,
-              gameSessionEngine.tick(
-                state.session,
-                state.game,
-                deps.selectPieceId,
-              ),
-            )
-          : state
+        return applyAdvance(
+          state,
+          runDemoStep(
+            state.session,
+            state.game,
+            action.action,
+            state.settings.rotateDirection,
+            deps.selectPieceId,
+          ),
+        )
+      }
 
-        return gameReducer(advanced, action.action)
+      case 'demoBoardStep': {
+        const board = state.demoBoards.find(
+          (entry) => entry.id === action.boardId,
+        )
+        // A finished demo board keeps its final board and ignores further steps;
+        // a stale step leaves the whole board set unchanged.
+        if (
+          board === undefined ||
+          board.session.status !== 'active' ||
+          !isCurrentPlacement(board.session, action)
+        ) {
+          return state
+        }
+
+        const result = runDemoStep(
+          board.session,
+          state.game,
+          action.action,
+          DEFAULT_SETTINGS.rotateDirection,
+          deps.selectPieceId,
+        )
+        return {
+          ...state,
+          // Only the addressed board and the shared piece list change.
+          game: mergeGame(state.game, result.game),
+          demoBoards: state.demoBoards.map((entry) =>
+            entry.id === board.id ? { ...entry, session: result.session } : entry,
+          ),
+        }
       }
 
       case 'pause':

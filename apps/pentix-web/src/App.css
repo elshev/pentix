@@ -4,6 +4,18 @@
   --cell-size: calc(22px * 1.2);
   --mini-cell-size: calc(14px * 1.2);
   --piece-mini-cell: 5px;
+
+  /* Small demo-board minos, and the slot a demo board occupies in the rail. */
+  --demo-cell-size: 9px;
+  --demo-gap: 1px;
+  --demo-board-pad: 4px;
+  --demo-card-pad: 4px;
+  /* A 12-column mini board (tracks, gaps, padding, border) plus the card chrome.
+     Four of these per row reserve the planned 4x3 grid of twelve boards. */
+  --demo-slot-width: calc(
+    12 * var(--demo-cell-size) + 11 * var(--demo-gap) + 2 * var(--demo-board-pad) +
+      2 * var(--demo-card-pad) + 4px
+  );
 }
 
 .shell {
@@ -38,6 +50,15 @@
 .game {
   display: grid;
   justify-items: center;
+}
+
+/* The main board and the demo-board rail sit side by side, both starting at the
+   top of the gameplay area: the rail's first row is level with the statistics. */
+.game__layout {
+  display: grid;
+  grid-template-columns: min-content auto;
+  align-items: start;
+  gap: 1rem;
 }
 
 /* One centered column. The board's fixed cell tracks make its min-content width
@@ -90,6 +111,83 @@
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.55),
     0 0 8px rgba(255, 255, 255, 0.35);
+}
+
+/* Small demo-board variant: the same stored grid at the reduced mino size. */
+.board--mini {
+  --cell-size: var(--demo-cell-size);
+  gap: var(--demo-gap);
+  padding: var(--demo-board-pad);
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+/* The rail fills from its top-left corner and reserves four slots per row, so
+   the planned twelve boards need no re-layout. */
+.demo-rail__grid {
+  display: grid;
+  grid-template-columns: repeat(4, var(--demo-slot-width));
+  gap: 0.6rem;
+  align-content: start;
+  justify-content: start;
+}
+
+.demo-board {
+  display: grid;
+  gap: 0.25rem;
+  width: var(--demo-slot-width);
+  padding: var(--demo-card-pad);
+  border-radius: 10px;
+  background: rgba(9, 15, 28, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.demo-board__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem;
+}
+
+.demo-board__engine {
+  margin: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #f7c75f;
+}
+
+.demo-board__status {
+  margin: 0;
+  font-size: 0.56rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(233, 239, 255, 0.72);
+}
+
+/* Only the primary statistics: score, lines, and locked pieces. */
+.demo-board__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.45rem;
+  font-size: 0.56rem;
+}
+
+.demo-board__stat {
+  display: flex;
+  align-items: baseline;
+  gap: 0.2rem;
+}
+
+.demo-board__label {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(233, 239, 255, 0.6);
+}
+
+.demo-board__value {
+  color: #eef2ff;
 }
 
 .hud {
@@ -304,10 +402,19 @@
   color: rgba(233, 239, 255, 0.6);
 }
 
+/* Below this width the four reserved slots plus the board column no longer fit,
+   so the demo minos step down one size before the small-screen breakpoint. */
+@media (max-width: 1000px) {
+  :root {
+    --demo-cell-size: 7px;
+  }
+}
+
 @media (max-width: 900px) {
   :root {
     --cell-size: calc(16px * 1.2);
     --mini-cell-size: calc(11px * 1.2);
+    --demo-cell-size: 6px;
   }
 
   .shell {
@@ -324,6 +431,26 @@
     font-size: clamp(1rem, 4.5vw, 1.4rem);
   }
 }
+
+/* Narrow viewports stack the rail under the main column instead of squeezing
+   the board; the main board keeps its cell size and stored grid. */
+@media (max-width: 760px) {
+  .game__layout {
+    grid-template-columns: min-content;
+    justify-items: center;
+  }
+
+  .demo-rail__grid {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .demo-rail__grid {
+    grid-template-columns: repeat(2, var(--demo-slot-width));
+  }
+}
+
 
 .settings {
   display: grid;

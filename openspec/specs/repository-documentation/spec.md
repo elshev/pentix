@@ -12,7 +12,7 @@ The documentation SHALL describe:
 
 - the glossary terms `Mino`, `Piece`, `Board`, `BoardCell`, `GameLevel`, `Tick`, `PentixGame`, `PentixGameSession`, `User`, and `Next piece`, using the vocabulary of `shared-game-primitives`, `game-piece-set`, and `game-session-start` (a piece has a single `key` and no `name` field),
 - the shared-code direction: `apps/pentix-web` (browser client), `apps/pentix-server` (`PentixServer`), and `packages/pentix-core`, which both applications consume,
-- the capabilities as built: the shared primitives and `GameSessionEngine`, the REST endpoints and their persistence, the browser client with its board, statistics popup, level selector, and attract demo,
+- the capabilities as built: the shared primitives and `GameSessionEngine`, the REST endpoints and their persistence, the browser client with its board, statistics popup, level selector, attract demo, and the two parallel demo boards driven by the `delphi5` and `random` engines,
 - and the capabilities that are not built yet, stated as such rather than as finished work.
 
 The documentation SHALL NOT describe shipped behaviour as future work, SHALL NOT describe contracts that were removed, and SHALL NOT present a historical increment as the current scope.
@@ -29,8 +29,15 @@ The documentation SHALL NOT describe shipped behaviour as future work, SHALL NOT
 
 - **GIVEN** the browser client that ships today
 - **WHEN** a developer reads the documentation
-- **THEN** the board, the statistics popup, the level selector, and the attract demo are described as present
+- **THEN** the board, the statistics popup, the level selector, the attract demo, and the two demo boards are described as present
 - **AND** no shipped feature is listed as not implemented
+
+#### Scenario: The demo boards are documented as a shipped client capability
+
+- **GIVEN** the browser client running two parallel demo boards with the `delphi5` and `random` engines
+- **WHEN** a developer reads the browser-client section of the documentation
+- **THEN** the two boards, their engines, and their shared piece sequence are described as present
+- **AND** they are not listed among the work that is not implemented yet
 
 #### Scenario: The remaining gaps are stated explicitly
 

@@ -3,7 +3,7 @@
 Pentix is a modern TypeScript reboot of a legacy Delphi Pentix/Tetris project. Two applications share the same game-domain code:
 
 - `PentixServer`: the backend responsible for users, Pentix games, and Pentix game history
-- `Pentix` browser application: the client that renders the board, the statistics popup, the level selector, and the attract demo in the browser
+- `Pentix` browser application: the client that renders the board, the statistics popup, the level selector, the attract demo, and the parallel demo boards in the browser
 
 Both applications consume `packages/pentix-core`, which holds the piece catalog, the board and session snapshots, and the shared gameplay and demo engines.
 
@@ -26,7 +26,7 @@ Both applications consume `packages/pentix-core`, which holds the piece catalog,
 apps/
   pentix-server/   Server with game/session lifecycle and gameplay APIs
     src/storage/   Engine-agnostic repositories (in-memory and SQLite)
-  pentix-web/      Browser gameplay client (board, HUD, controls, attract demo)
+  pentix-web/      Browser gameplay client (board, HUD, controls, attract demo, demo boards)
 packages/
   pentix-core/     Shared Pentix domain primitives, gameplay and demo engines
 delphi/
@@ -50,7 +50,7 @@ The codebase currently includes:
   - a shared gameplay engine for movement, rotation, gravity ticks, hard drop, line clearing, scoring, and leveling
   - the demo-engine contract, the engine registry, and the built-in `delphi5` and `random` planners
   - the compact session action log and its deterministic replay
-- a browser gameplay client that plays a local session against the shared engine: the board with its next-piece preview, the title-less statistics line, the pieces statistics popup, the ten-button level selector, the rotation and next-piece settings, the pause/restart controls, and the attract demo that runs whenever no player game is active
+- a browser gameplay client that plays a local session against the shared engine: the board with its next-piece preview, the title-less statistics line, the pieces statistics popup, the ten-button level selector, the rotation and next-piece settings, the pause/restart controls, the attract demo that runs whenever no player game is active, and two small demo boards beside the board — driven by the `delphi5` and `random` engines, started in parallel with a new main session, sharing the player's piece sequence while keeping their own session, statistics, and piece index, and following the level chosen while the attract demo runs
 
 The following are intentionally not implemented yet:
 
