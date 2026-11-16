@@ -2,10 +2,14 @@
 import { useEffect, useRef } from 'react'
 import type { Dispatch } from 'react'
 
-import type { DemoEngine, PentixGameSession } from '#pentix/core'
+import {
+  getDemoEngine,
+  type DemoEngine,
+  type DemoEngineId,
+  type PentixGameSession,
+} from '#pentix/core'
 
 import {
-  activeDemoEngine,
   nextDemoAction,
   resolveDemoPlan,
   type DemoPlan,
@@ -87,16 +91,21 @@ export function useDemoStepper({
   }, [active, level, boardId, engine])
 }
 
-/** Drives the main board's attract demo with the active demo engine. */
+/**
+ * Drives the main board's attract demo with the engine its state holds. Passing
+ * the engine id (instead of a module constant) lets a swapped demo board bring
+ * its engine to the main board, and rebuilds the timer when it changes.
+ */
 export function useDemoController(
   active: boolean,
   level: number,
   session: PentixGameSession,
+  engineId: DemoEngineId,
   dispatch: Dispatch<GameAction>,
 ): void {
   useDemoStepper({
     boardId: MAIN_BOARD_ID,
-    engine: activeDemoEngine,
+    engine: getDemoEngine(engineId),
     level,
     session,
     dispatch,

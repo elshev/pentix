@@ -4,6 +4,7 @@ import { useMemo, useReducer, useRef, useState } from 'react'
 import {
   createGameReducer,
   createInitialState,
+  mainBoardName,
   type GameDependencies,
 } from '../../engine/gameReducer.ts'
 import { BoardView } from './BoardView.tsx'
@@ -53,10 +54,15 @@ export function Game() {
     gameOverReady,
     settings,
     gravityEpoch,
+    mainEngineId,
     session,
     demoBoards,
   } = state
   const level = session.statistics.level
+  const name = mainBoardName(state)
+  // A demo board can trade places with the main board only while the attract
+  // demo (or its finished board) owns the main board.
+  const canSwapBoards = phase === 'demo' || phase === 'demo-over'
 
   // The pieces statistics popup pauses whatever is running: a player game is put
   // into the paused phase (the paused overlay is suppressed while the popup is
@@ -84,7 +90,13 @@ export function Game() {
   useGameLoop(phase === 'playing', level, gravityEpoch, () =>
     dispatch({ type: 'tick' }),
   )
-  useDemoController(phase === 'demo' && !statsOpen, level, session, dispatch)
+  useDemoController(
+    phase === 'demo' && !statsOpen,
+    level,
+    session,
+    mainEngineId,
+    dispatch,
+  )
   useKeyboardControls(phase, dispatch)
   useGameOverCooldown(phase === 'game-over' && !gameOverReady, dispatch)
   useDemoRestart(phase === 'demo-over', dispatch)
@@ -103,6 +115,7 @@ export function Game() {
       <div className="game__layout">
         <div className="game__column">
           <Hud
+            name={name}
             statistics={session.statistics}
             nextPieceKey={session.nextPieceKey}
             showNextPiece={settings.showNextPiece}
@@ -163,7 +176,12 @@ export function Game() {
         <aside className="demo-rail" aria-label="Demo boards">
           <div className="demo-rail__grid">
             {demoBoards.map((board) => (
-              <DemoBoard key={board.id} board={board} dispatch={dispatch} />
+              <DemoBoard
+                key={board.id}
+                board={board}
+                dispatch={dispatch}
+                canSwap={canSwapBoards}
+              />
             ))}
           </div>
         </aside>
