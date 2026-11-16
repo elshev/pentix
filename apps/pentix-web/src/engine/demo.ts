@@ -1,5 +1,6 @@
 /** Browser demo steering — maps a demo engine's destination to a reducer action. */
 import {
+  DEFAULT_DEMO_ENGINE_ID,
   getDemoEngine,
   type DemoDestination,
   type DemoEngine,
@@ -7,13 +8,22 @@ import {
   type PentixGameSession,
 } from '#pentix/core'
 
-import type { GameAction } from './gameReducer.ts'
+import type { DemoStepAction } from './gameReducer.ts'
 
 /**
- * The attract demo plans with the registry's default engine (`delphi5`), so the
- * demo behaviour matches the documented default and stays reproducible.
+ * TEMPORARY: the attract demo on the main board runs the `random` engine so it
+ * can be watched and compared against the classic `delphi5` heuristic while the
+ * demo boards are evaluated. Set this back to `null` to let the demo use the
+ * registry's default engine (`delphi5`) again.
  */
-export const ACTIVE_DEMO_ENGINE_ID: DemoEngineId = 'delphi5'
+const DEMO_ENGINE_OVERRIDE: DemoEngineId | null = 'random'
+
+/**
+ * The engine driving the attract demo: the temporary override above, otherwise
+ * the registry's default engine (`delphi5`).
+ */
+export const ACTIVE_DEMO_ENGINE_ID: DemoEngineId =
+  DEMO_ENGINE_OVERRIDE ?? DEFAULT_DEMO_ENGINE_ID
 
 /** The engine selected by `ACTIVE_DEMO_ENGINE_ID`. */
 export const activeDemoEngine: DemoEngine = getDemoEngine(ACTIVE_DEMO_ENGINE_ID)
@@ -77,7 +87,7 @@ export function resolveDemoPlan(
 export function actionTowardDestination(
   session: PentixGameSession,
   destination: DemoDestination,
-): GameAction {
+): DemoStepAction {
   if (session.activePiece.angle !== destination.angle) {
     return { type: 'rotate' }
   }
@@ -101,7 +111,7 @@ export function actionTowardDestination(
 export function nextDemoAction(
   session: PentixGameSession,
   destination: DemoDestination | null = activeDemoEngine.planDestination(session),
-): GameAction | undefined {
+): DemoStepAction | undefined {
   if (destination === null) {
     return undefined
   }

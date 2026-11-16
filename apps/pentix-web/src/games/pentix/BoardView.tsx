@@ -4,12 +4,18 @@ import type { PentixGameSession } from '#pentix/core'
 import { getPieceColor } from '../../engine/colors.ts'
 import { buildRenderGrid } from '../../engine/projection.ts'
 
-export function BoardView({ session }: { session: PentixGameSession }) {
+interface BoardViewProps {
+  readonly session: PentixGameSession
+  /** Renders the small demo-board variant (`8px`/`6px` minos). */
+  readonly compact?: boolean
+}
+
+export function BoardView({ session, compact = false }: BoardViewProps) {
   const grid = buildRenderGrid(session)
 
   return (
     <div
-      className="board"
+      className={compact ? 'board board--mini' : 'board'}
       role="grid"
       aria-label="Pentix board"
       style={{

@@ -8,6 +8,7 @@ import {
 } from '../../engine/gameReducer.ts'
 import { BoardView } from './BoardView.tsx'
 import { Controls } from './Controls.tsx'
+import { DemoBoard } from './DemoBoard.tsx'
 import { Hud } from './Hud.tsx'
 import { Settings } from './Settings.tsx'
 import { useDemoController } from './useDemoController.ts'
@@ -53,6 +54,7 @@ export function Game() {
     settings,
     gravityEpoch,
     session,
+    demoBoards,
   } = state
   const level = session.statistics.level
 
@@ -98,63 +100,73 @@ export function Game() {
 
   return (
     <section className="game">
-      <div className="game__column">
-        <Hud
-          statistics={session.statistics}
-          nextPieceKey={session.nextPieceKey}
-          showNextPiece={settings.showNextPiece}
-          statsOpen={statsOpen}
-          onToggleStats={toggleStats}
-        />
-        <div className="game__stage">
-          <BoardView session={session} />
-          {phase === 'paused' && !statsOpen && (
-            <div className="overlay">
-              <Overlay
-                title="Paused"
-                label="Resume"
-                onClick={() => dispatch({ type: 'resume' })}
-              />
-            </div>
-          )}
-          {phase === 'game-over' && (
-            <div className="overlay overlay--soft">
-              <div className="overlay__card">
-                <p className="overlay__title">Game over</p>
-                <div className="overlay__actions">
-                  <button
-                    type="button"
-                    className="overlay__button"
-                    title="Play again (Enter)"
-                    disabled={!gameOverReady}
-                    onClick={() => dispatch({ type: 'restart' })}
-                  >
-                    Play again
-                  </button>
-                  <button
-                    type="button"
-                    className="overlay__button overlay__button--secondary"
-                    title="Demo (Space)"
-                    disabled={!gameOverReady}
-                    onClick={() => dispatch({ type: 'demo' })}
-                  >
-                    Demo
-                  </button>
+      <div className="game__layout">
+        <div className="game__column">
+          <Hud
+            statistics={session.statistics}
+            nextPieceKey={session.nextPieceKey}
+            showNextPiece={settings.showNextPiece}
+            statsOpen={statsOpen}
+            onToggleStats={toggleStats}
+          />
+          <div className="game__stage">
+            <BoardView session={session} />
+            {phase === 'paused' && !statsOpen && (
+              <div className="overlay">
+                <Overlay
+                  title="Paused"
+                  label="Resume"
+                  onClick={() => dispatch({ type: 'resume' })}
+                />
+              </div>
+            )}
+            {phase === 'game-over' && (
+              <div className="overlay overlay--soft">
+                <div className="overlay__card">
+                  <p className="overlay__title">Game over</p>
+                  <div className="overlay__actions">
+                    <button
+                      type="button"
+                      className="overlay__button"
+                      title="Play again (Enter)"
+                      disabled={!gameOverReady}
+                      onClick={() => dispatch({ type: 'restart' })}
+                    >
+                      Play again
+                    </button>
+                    <button
+                      type="button"
+                      className="overlay__button overlay__button--secondary"
+                      title="Demo (Space)"
+                      disabled={!gameOverReady}
+                      onClick={() => dispatch({ type: 'demo' })}
+                    >
+                      Demo
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
-          {(phase === 'demo' || phase === 'demo-over') && (
-            <p className="demo-badge">Demo — press Space to play</p>
-          )}
+            )}
+            {(phase === 'demo' || phase === 'demo-over') && (
+              <p className="demo-badge">Demo — press Space to play</p>
+            )}
+          </div>
+          <div className="game__bottom">
+            <Controls phase={phase} level={level} dispatch={dispatch} />
+            <Settings settings={settings} dispatch={dispatch} />
+          </div>
+          <p className="status-line" aria-live="polite">
+            {label}
+          </p>
         </div>
-        <div className="game__bottom">
-          <Controls phase={phase} level={level} dispatch={dispatch} />
-          <Settings settings={settings} dispatch={dispatch} />
-        </div>
-        <p className="status-line" aria-live="polite">
-          {label}
-        </p>
+        {/* The rail reserves four slots per row for the planned twelve boards. */}
+        <aside className="demo-rail" aria-label="Demo boards">
+          <div className="demo-rail__grid">
+            {demoBoards.map((board) => (
+              <DemoBoard key={board.id} board={board} dispatch={dispatch} />
+            ))}
+          </div>
+        </aside>
       </div>
     </section>
   )

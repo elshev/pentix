@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { PIECE_CATALOG, delphi5DemoEngine } from '#pentix/core'
+import { PIECE_CATALOG, delphi5DemoEngine, getPieceDefinitionById } from '#pentix/core'
 
 import { buildRenderGrid, getActiveCells } from '../apps/pentix-web/src/engine/projection.ts'
 import {
@@ -848,6 +848,289 @@ test('resolveDemoPlan re-targets the destination for a last-tick side-step', () 
   )
 })
 
+/** A `demoBoardStep` action planned for a demo board's current piece. */
+function demoBoardStepAction(board, action, overrides = {}) {
+  return {
+    type: 'demoBoardStep',
+    boardId: board.id,
+    action,
+    sessionId: board.session.id,
+    pieceIndex: board.session.nextPieceIndex,
+    angle: board.session.activePiece.angle,
+    column: board.session.activePiece.origin.column,
+    ...overrides,
+  }
+}
+
+/** The catalog key of the piece at `index` in the shared game. */
+function pieceKeyAt(game, index) {
+  return getPieceDefinitionById(game.pieceIds[index]).key
+}
+
+function filledCellCount(board) {
+  return board.rows.flat().filter((cell) => cell.isOccupied).length
+}
+
+test('a fresh state starts two demo boards from the main game', () => {
+  const state = createInitialState(createDeps([0, 1]))
+
+  assert.deepEqual(
+    state.demoBoards.map((board) => board.id),
+    ['demo-delphi5', 'demo-random'],
+  )
+  assert.deepEqual(
+    state.demoBoards.map((board) => board.engineId),
+    ['delphi5', 'random'],
+  )
+
+  const sessionIds = new Set([state.session.id])
+  for (const board of state.demoBoards) {
+    assert.equal(board.session.status, 'active')
+    assert.equal(board.session.gameId, state.game.id)
+    assert.equal(board.session.userId, state.session.userId)
+    sessionIds.add(board.session.id)
+  }
+  assert.equal(sessionIds.size, 3)
+})
+
+test('every board draws from the one shared piece list', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const playing = createInitialState(deps, 'playing')
+  const [delphi, random] = playing.demoBoards
+
+  // Boards on the same index hold the same active and next pieces.
+  assert.equal(playing.session.nextPieceIndex, delphi.session.nextPieceIndex)
+  assert.equal(playing.session.activePiece.key, delphi.session.activePiece.key)
+  assert.equal(playing.session.nextPieceKey, delphi.session.nextPieceKey)
+  assert.equal(delphi.session.activePiece.key, random.session.activePiece.key)
+
+  // A demo-board lock extends the one list; the main session keeps matching it.
+  // The first drop reaches the floor, the second settles the resting piece.
+  const dropped = reducer(playing, demoBoardStepAction(delphi, { type: 'drop' }))
+  const settled = reducer(
+    dropped,
+    demoBoardStepAction(dropped.demoBoards[0], { type: 'drop' }),
+  )
+  const advanced = settled.demoBoards[0]
+
+  assert.equal(settled.game.id, playing.game.id)
+  assert.ok(settled.game.pieceIds.length > playing.game.pieceIds.length)
+  assert.equal(advanced.session.statistics.blocks, 1)
+  assert.equal(
+    settled.session.activePiece.key,
+    pieceKeyAt(settled.game, settled.session.nextPieceIndex - 1),
+  )
+  assert.equal(
+    advanced.session.activePiece.key,
+    pieceKeyAt(settled.game, advanced.session.nextPieceIndex - 1),
+  )
+})
+
+test('a main-board advance extends the shared list for the demo boards', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const playing = createInitialState(deps, 'playing')
+
+  const dropped = reducer(playing, { type: 'drop' })
+  const settled = reducer(dropped, { type: 'drop' })
+
+  assert.equal(settled.game.id, playing.game.id)
+  assert.ok(settled.game.pieceIds.length > playing.game.pieceIds.length)
+  for (const board of settled.demoBoards) {
+    assert.equal(board.session.gameId, settled.game.id)
+    assert.equal(
+      board.session.activePiece.key,
+      pieceKeyAt(settled.game, board.session.nextPieceIndex - 1),
+    )
+  }
+})
+
+test('starting a game starts fresh demo-board sessions in parallel', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+
+  const started = reducer(demo, { type: 'start' })
+
+  assert.equal(started.phase, 'playing')
+  assert.notEqual(started.game.id, demo.game.id)
+  started.demoBoards.forEach((board, index) => {
+    assert.notEqual(board.session.id, demo.demoBoards[index].session.id)
+    assert.equal(board.session.status, 'active')
+    assert.equal(board.session.gameId, started.game.id)
+    assert.equal(board.session.statistics.level, started.session.statistics.level)
+  })
+})
+
+test('restarting replaces the demo-board sessions', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const playing = createInitialState(deps, 'playing')
+  const dropped = reducer(
+    playing,
+    demoBoardStepAction(playing.demoBoards[0], { type: 'drop' }),
+  )
+  // The second drop settles the piece that is already resting on the floor.
+  const advanced = reducer(
+    dropped,
+    demoBoardStepAction(dropped.demoBoards[0], { type: 'drop' }),
+  )
+
+  assert.equal(advanced.demoBoards[0].session.statistics.blocks, 1)
+  assert.ok(filledCellCount(advanced.demoBoards[0].session.board) > 0)
+
+  const restarted = reducer(advanced, { type: 'restart' })
+
+  restarted.demoBoards.forEach((board, index) => {
+    assert.notEqual(board.session.id, advanced.demoBoards[index].session.id)
+    assert.equal(board.session.statistics.blocks, 0)
+    assert.equal(board.session.statistics.score, 0)
+    assert.equal(filledCellCount(board.session.board), 0)
+  })
+})
+
+test('a level pick on the game-over screen starts a fresh board set', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const over = {
+    ...createInitialState(deps, 'game-over', settings({ startingLevel: 2 })),
+    gameOverReady: true,
+  }
+
+  const started = reducer(over, { type: 'setStartingLevel', level: 6 })
+
+  assert.equal(started.phase, 'playing')
+  assert.equal(started.session.statistics.level, 6)
+  assert.deepEqual(
+    started.demoBoards.map((board) => board.session.statistics.level),
+    [6, 6],
+  )
+  started.demoBoards.forEach((board, index) => {
+    assert.notEqual(board.session.id, over.demoBoards[index].session.id)
+  })
+})
+
+test('the attract demo restart leaves the demo boards untouched', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+  const advanced = reducer(
+    demo,
+    demoBoardStepAction(demo.demoBoards[1], { type: 'drop' }),
+  )
+  const over = {
+    ...advanced,
+    phase: 'demo-over',
+    session: { ...advanced.session, status: 'game-over' },
+  }
+
+  const restarted = reducer(over, { type: 'demoRestart' })
+
+  assert.equal(restarted.phase, 'demo')
+  assert.notEqual(restarted.session.id, over.session.id)
+  assert.equal(restarted.settings.startingLevel, demo.settings.startingLevel)
+  // Same piece list and the same demo-board sessions: only the main demo restarted.
+  assert.equal(restarted.game, advanced.game)
+  assert.deepEqual(restarted.demoBoards, advanced.demoBoards)
+})
+
+
+test('a demo-board step advances only the addressed board', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+  const [delphi] = demo.demoBoards
+
+  const stepped = reducer(
+    demo,
+    demoBoardStepAction(demo.demoBoards[1], { type: 'drop' }),
+  )
+
+  assert.notEqual(stepped.demoBoards[1].session, demo.demoBoards[1].session)
+  assert.equal(stepped.demoBoards[1].session.statistics.actions.drops, 1)
+  assert.equal(stepped.demoBoards[0], delphi)
+  assert.equal(stepped.session, demo.session)
+  assert.equal(stepped.phase, 'demo')
+})
+
+test('a stale demo-board step is ignored', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+  const [delphi] = demo.demoBoards
+
+  for (const overrides of [
+    { sessionId: 'session-missing' },
+    { pieceIndex: delphi.session.nextPieceIndex - 1 },
+    { angle: 90 },
+    { column: delphi.session.activePiece.origin.column + 1 },
+    { boardId: 'demo-missing' },
+  ]) {
+    assert.equal(
+      reducer(demo, demoBoardStepAction(delphi, { type: 'drop' }, overrides)),
+      demo,
+    )
+  }
+})
+
+test('a finished demo board keeps its final board and ignores steps', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+  const finished = {
+    ...demo,
+    demoBoards: demo.demoBoards.map((board, index) =>
+      index === 0
+        ? { ...board, session: { ...board.session, status: 'game-over' } }
+        : board,
+    ),
+  }
+
+  const stepped = reducer(
+    finished,
+    demoBoardStepAction(finished.demoBoards[0], { type: 'drop' }),
+  )
+
+  assert.equal(stepped, finished)
+  assert.equal(stepped.demoBoards[0].session.status, 'game-over')
+})
+
+test('demo-board steps run through the engine at the board’s own level', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const playing = createInitialState(deps, 'playing', settings({ startingLevel: 4 }))
+  const board = playing.demoBoards[1]
+  const { row, column } = board.session.activePiece.origin
+
+  const stepped = reducer(
+    playing,
+    demoBoardStepAction(board, { type: 'move', direction: 'left' }),
+  )
+
+  // One gravity descent plus one steering step, on that board's own session.
+  assert.equal(stepped.demoBoards[1].session.activePiece.origin.row, row + 1)
+  assert.equal(stepped.demoBoards[1].session.activePiece.origin.column, column - 1)
+  assert.equal(stepped.demoBoards[1].session.statistics.actions.moves, 1)
+  assert.equal(stepped.demoBoards[1].session.statistics.level, 4)
+})
+
+test('player actions leave the demo boards unchanged', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const playing = createInitialState(deps, 'playing')
+
+  for (const action of [
+    { type: 'move', direction: 'left' },
+    { type: 'rotate' },
+    { type: 'tick' },
+    { type: 'drop' },
+    { type: 'pause' },
+  ]) {
+    assert.equal(reducer(playing, action).demoBoards, playing.demoBoards)
+  }
+})
+
 test('resolveDemoPlan re-plans when a new piece spawns or the session changes', () => {
   const session = {
     id: 'session-1',
@@ -994,3 +1277,82 @@ test('starting a new game resets the session statistics', () => {
   })
   assert.equal(restarted.session.statistics.pieceCounts['4T'], 0)
 })
+test('changing the level during the attract demo retunes every demo board', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo', settings({ startingLevel: 2 }))
+
+  const retuned = reducer(demo, { type: 'setStartingLevel', level: 5 })
+
+  assert.equal(retuned.phase, 'demo')
+  assert.equal(retuned.settings.startingLevel, 5)
+  assert.equal(retuned.session.statistics.level, 5)
+  assert.deepEqual(
+    retuned.demoBoards.map((board) => board.session.statistics.level),
+    [5, 5],
+  )
+  // The same sessions keep playing; only their level changes.
+  retuned.demoBoards.forEach((board, index) => {
+    assert.equal(board.session.id, demo.demoBoards[index].session.id)
+    assert.equal(
+      board.session.board.height,
+      demo.demoBoards[index].session.board.height,
+    )
+  })
+})
+
+test('raising the level during a player game leaves the demo boards alone', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const playing = createInitialState(
+    deps,
+    'playing',
+    settings({ startingLevel: 2 }),
+  )
+
+  const raised = reducer(playing, { type: 'setStartingLevel', level: 4 })
+
+  assert.equal(raised.session.statistics.level, 4)
+  assert.equal(raised.demoBoards, playing.demoBoards)
+})
+
+test('the level step keys retune the demo boards while the demo runs', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo', settings({ startingLevel: 3 }))
+
+  const raised = reducer(demo, { type: 'increaseLevel' })
+  assert.deepEqual(
+    raised.demoBoards.map((board) => board.session.statistics.level),
+    [4, 4],
+  )
+
+  const lowered = reducer(raised, { type: 'decreaseLevel' })
+  assert.deepEqual(
+    lowered.demoBoards.map((board) => board.session.statistics.level),
+    [3, 3],
+  )
+})
+
+test('a level chosen during the demo delay retunes the demo boards at once', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo', settings({ startingLevel: 2 }))
+  const over = {
+    ...demo,
+    phase: 'demo-over',
+    session: { ...demo.session, status: 'game-over' },
+  }
+
+  const chosen = reducer(over, { type: 'setStartingLevel', level: 7 })
+
+  // The finished demo keeps the level it played at; the rail, still playing,
+  // follows the chosen level immediately.
+  assert.equal(chosen.phase, 'demo-over')
+  assert.equal(chosen.session.statistics.level, 2)
+  assert.deepEqual(
+    chosen.demoBoards.map((board) => board.session.statistics.level),
+    [7, 7],
+  )
+})
+
