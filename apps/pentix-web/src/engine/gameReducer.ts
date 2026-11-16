@@ -4,7 +4,6 @@ import {
   createPentixGame,
   createPentixGameSession,
   gameSessionEngine,
-  type BoardCell,
   type MoveDirection,
   type PentixGame,
   type PentixGameSession,
@@ -36,41 +35,6 @@ export const DEFAULT_SETTINGS: GameSettings = Object.freeze({
   showNextPiece: false,
   startingLevel: 9,
 })
-
-/**
- * TEMPORARY debug aid: seed every demo session with one settled mino on the row
- * above the floor, at a random column, so the last-tick side-step can be watched
- * in the browser. Set this to `false` (or delete it together with
- * `seedDemoBoard`) to remove the seeding.
- */
-const DEMO_SEED_SETTLED_MINO = true
-
-/** Places the temporary demo seed mino; a no-op when the flag is off. */
-function seedDemoBoard(session: PentixGameSession): PentixGameSession {
-  if (!DEMO_SEED_SETTLED_MINO) {
-    return session
-  }
-
-  const { width, height, rows } = session.board
-  const seedRow = height - 2
-  const seedColumn = Math.floor(Math.random() * width)
-  const seedCell: BoardCell = {
-    row: seedRow,
-    column: seedColumn,
-    isOccupied: true,
-    pieceKey: '4Square',
-  }
-  const seededRows = rows.map((cells, row) =>
-    row === seedRow
-      ? cells.map((cell, column) => (column === seedColumn ? seedCell : cell))
-      : cells,
-  )
-
-  return Object.freeze({
-    ...session,
-    board: Object.freeze({ width, height, rows: seededRows }),
-  })
-}
 
 export interface GameState {
   readonly phase: GamePhase
@@ -207,7 +171,7 @@ function startSession(
     gameOverReady: true,
     gravityEpoch: state.gravityEpoch + 1,
     game,
-    session: phase === 'demo' ? seedDemoBoard(session) : session,
+    session,
   }
 }
 
@@ -249,7 +213,7 @@ export function createInitialState(
     settings,
     gravityEpoch: 0,
     game,
-    session: phase === 'demo' ? seedDemoBoard(session) : session,
+    session,
   }
 }
 

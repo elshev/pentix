@@ -1,11 +1,11 @@
 # Pentix
 
-Pentix is a modern TypeScript reboot of a legacy Delphi Pentix/Tetris project. The repository is being prepared for two applications that share the same game-domain code:
+Pentix is a modern TypeScript reboot of a legacy Delphi Pentix/Tetris project. Two applications share the same game-domain code:
 
-- `PentixServer`: the future backend responsible for users, Pentix games, and Pentix game history
-- `Pentix` web browser application: the future client that will render boards, statistics, menus, and game flow in the browser
+- `PentixServer`: the backend responsible for users, Pentix games, and Pentix game history
+- `Pentix` browser application: the client that renders the board, the statistics popup, the level selector, and the attract demo in the browser
 
-This implementation increment does not build the full game yet. It establishes the repository layout, adds narrow `PentixServer` game and session lifecycle endpoints, and shares the legacy piece, board, game, and session primitives across TypeScript code.
+Both applications consume `packages/pentix-core`, which holds the piece catalog, the board and session snapshots, and the shared gameplay and demo engines.
 
 ## Glossary
 
@@ -15,27 +15,27 @@ This implementation increment does not build the full game yet. It establishes t
 - `BoardCell`: one cell of the board
 - `GameLevel`: difficulty level; higher level means higher speed
 - `Tick`: unit of internal game time
-- `PentixGame` (Game): a reusable playfield definition with a board of a defined size, a set of available pieces (each with an ID and a name), and a theoretically infinite sequence drawn from those pieces. In the future a game may restrict its pieces to a subset (for example, Tetris uses only 4-mino pieces).
+- `PentixGame` (Game): a reusable playfield definition with a board of a defined size, a set of available pieces (identified by stable numeric catalog IDs and their `key`s), and a theoretically infinite sequence drawn from those pieces. In the future a game may restrict its pieces to a subset (for example, Tetris uses only 4-mino pieces).
 - `PentixGameSession` (session): one play of a `PentixGame` by one `User`. Different users can play the same `PentixGame` in different places and at different times, each through their own session.
 - `User`: a registered player with an Id and a Nick/Name; additional attributes (first name, surname, middle name, creation date, etc.) can be added in the future.
-- `Next piece`: the piece after the current active piece, shown as a preview when the "show next piece" option is on; it is drawn from the engine once the current piece settles and is persisted (or cached for later persistence).
+- `Next piece`: the piece after the current active piece, shown as a preview when the "show next piece" option is on; it comes from the game's piece sequence at `nextPieceIndex`.
 
 ## Repository Layout
 
 ```text
 apps/
-  pentix-server/   Server with game/session lifecycle APIs
+  pentix-server/   Server with game/session lifecycle and gameplay APIs
     src/storage/   Engine-agnostic repositories (in-memory and SQLite)
-  pentix-web/      Browser application shell
+  pentix-web/      Browser gameplay client (board, HUD, controls, attract demo)
 packages/
-  pentix-core/     Shared Pentix domain primitives
+  pentix-core/     Shared Pentix domain primitives, gameplay and demo engines
 delphi/
   Tetris.pas       Legacy Delphi source used as the migration reference
 docs/
-  foundation.md    Notes about the current foundation change
+  foundation.md    Notes about the current architecture
 ```
 
-## Current Foundation Scope
+## Current Scope
 
 The codebase currently includes:
 
@@ -48,14 +48,16 @@ The codebase currently includes:
   - `Board` and `BoardCell`
   - serializable `User`, `PentixGame`, and `PentixGameSession` snapshots
   - a shared gameplay engine for movement, rotation, gravity ticks, hard drop, line clearing, scoring, and leveling
-- a lightweight browser placeholder that imports the shared piece catalog
+  - the demo-engine contract, the engine registry, and the built-in `delphi5` and `random` planners
+  - the compact session action log and its deterministic replay
+- a browser gameplay client that plays a local session against the shared engine: the board with its next-piece preview, the title-less statistics line, the pieces statistics popup, the ten-button level selector, the rotation and next-piece settings, the pause/restart controls, and the attract demo that runs whenever no player game is active
 
 The following are intentionally not implemented yet:
 
 - durable history endpoints
 - a PostgreSQL repository implementation (the interfaces make it a later drop-in)
 - multiplayer orchestration beyond sharing one game's piece sequence
-- browser gameplay, scoring, ticks, and UI behavior from the final product goals
+- the connection between the browser client and `PentixServer` — the client plays a local session and records no action log
 
 ## Server API
 
@@ -79,11 +81,11 @@ Scoring follows [Demo/Pentix/Main.pas](./delphi/Demo/Pentix/Main.pas): a lock sc
 - `npm run build`: build the shared core, server, and web app
 - `npm run start:server`: build and start PentixServer (persists to `PENTIX_DATA_FILE`, default `data/pentix.db`)
 - `npm run dev:web`: run the browser app with Vite
-- `npm run test`: verify shared primitives, game/session lifecycle behavior, and server APIs
+- `npm run test`: verify shared primitives, game/session lifecycle behavior, server APIs, and the browser reducer, engine, and demo planner
 - `npm run lint`: run ESLint across the repository
 
 ## Legacy Notes
 
-The piece catalog is ported from [Tetris.pas](./delphi/Tetris.pas). It keeps stable numeric IDs and Delphi geometry while using single simplified keys such as `1Line`, `3Corner`, and `5RMir`; the old `bi*` TypeScript identifiers and duplicate `name` field are no longer part of the shared contract. Most pieces occupy `(0, 0)` as the rotation-center mino. One known exception is `5Corner`, whose legacy Delphi offsets rotate around an empty origin; this repository intentionally preserves that behavior for parity with the original code.
+The piece catalog is ported from [Tetris.pas](./delphi/Tetris.pas). It keeps stable numeric IDs and Delphi geometry while using single simplified keys such as `1Line`, `3Corner`, and `5RMir`; the `bi*` TypeScript identifiers and the duplicate `name` field are not part of the shared contract. Most pieces occupy `(0, 0)` as the rotation-center mino. One known exception is `5Corner`, whose legacy Delphi offsets rotate around an empty origin; this repository intentionally preserves that behavior for parity with the original code.
 
-More detail about the current foundation change lives in [docs/foundation.md](./docs/foundation.md).
+More detail about the current architecture lives in [docs/foundation.md](./docs/foundation.md).

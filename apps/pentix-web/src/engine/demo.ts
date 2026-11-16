@@ -10,11 +10,10 @@ import {
 import type { GameAction } from './gameReducer.ts'
 
 /**
- * TEMPORARY: the engine the attract demo runs while the registry seam is
- * validated. Set this back to `'delphi5'` (or delete the constant and use
- * `getDemoEngine()`) once the random engine is removed.
+ * The attract demo plans with the registry's default engine (`delphi5`), so the
+ * demo behaviour matches the documented default and stays reproducible.
  */
-export const ACTIVE_DEMO_ENGINE_ID: DemoEngineId = 'random'
+export const ACTIVE_DEMO_ENGINE_ID: DemoEngineId = 'delphi5'
 
 /** The engine selected by `ACTIVE_DEMO_ENGINE_ID`. */
 export const activeDemoEngine: DemoEngine = getDemoEngine(ACTIVE_DEMO_ENGINE_ID)

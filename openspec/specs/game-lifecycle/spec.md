@@ -9,12 +9,14 @@ The system SHALL define a JSON-serializable `PentixGame` with a UUIDv7 string `i
 `POST /games` SHALL create and retain an independent Pentix game, returning `201 Created` and its JSON representation. Unless a valid optional name is supplied, the name SHALL be empty. Initialization SHALL use the default empty board, set the available piece set to the full catalog, and provide at least two valid piece IDs for active and preview pieces.
 
 #### Scenario: A client initializes a game
+
 - **GIVEN** `PentixServer` is running
 - **WHEN** a client sends `POST /games` without a name
 - **THEN** the server responds with `201 Created`
 - **AND** the game has a UUIDv7 `id`, an empty `name`, an empty default board, an `availablePieceIds` set equal to the full catalog, and at least two catalog-valid numeric `pieceIds`
 
 #### Scenario: Games have independent identities and boards
+
 - **GIVEN** a client has created two games
 - **WHEN** their identities and initial boards are compared
 - **THEN** their UUIDv7 IDs are distinct
@@ -24,6 +26,7 @@ The system SHALL define a JSON-serializable `PentixGame` with a UUIDv7 string `i
 The lifecycle service SHALL retain each game's piece sequence and SHALL append a catalog-valid numeric piece ID whenever a session needs a preview beyond the current sequence. Different sessions using one game SHALL observe the same sequence values while maintaining independent cursors.
 
 #### Scenario: A session reaches the end of the initialized sequence
+
 - **GIVEN** a game has exactly enough IDs for a session's active and preview pieces
 - **WHEN** that session requests its next piece
 - **THEN** the game sequence gains another valid catalog ID for the new preview
@@ -35,6 +38,7 @@ The lifecycle service SHALL retain each game's piece sequence and SHALL append a
 The server SHALL return `404 Not Found` for a well-formed session ID that does not exist and `400 Bad Request` for a malformed session ID. A successful request SHALL NOT alter the session's board, statistics, `userId`, or `gameId`.
 
 #### Scenario: The next piece becomes active
+
 - **GIVEN** a retained session has an active piece, a preview piece, and cursor `1`
 - **WHEN** a client sends `POST /game-sessions/{id}/next-piece`
 - **THEN** the server responds with `200 OK` and the updated session snapshot
@@ -42,6 +46,7 @@ The server SHALL return `404 Not Found` for a well-formed session ID that does n
 - **AND** the cursor is `2` and the preview references the game sequence at index `2`
 
 #### Scenario: An unknown session cannot advance
+
 - **GIVEN** no session exists for a well-formed UUIDv7 supplied by a client
 - **WHEN** the client sends `POST /game-sessions/{id}/next-piece`
 - **THEN** the server responds with `404 Not Found`

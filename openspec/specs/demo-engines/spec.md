@@ -1,7 +1,9 @@
 # demo-engines Specification
 
 ## Purpose
-TBD - created by archiving change add-demo-engines-registry. Update Purpose after archive.
+
+Define the demo-engine contract in `pentix-core`, the registry that resolves engines by id, and the built-in `delphi5` and `random` planners the browser's attract demo selects between.
+
 ## Requirements
 ### Requirement: The shared core exposes a demo-engine contract
 

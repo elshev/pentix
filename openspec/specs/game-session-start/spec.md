@@ -1,3 +1,6 @@
+# game-session-start Specification
+
+
 ## Purpose
 
 Define the shared `PentixGameSession` snapshot, the opening defaults for a newly started session, and the `POST /game-sessions` endpoint that creates a retained session for a new or existing `PentixGame`.
@@ -19,6 +22,7 @@ The shared snapshot SHALL include:
 The legacy `sessionId` field SHALL NOT be exposed.
 
 #### Scenario: A started session exposes the shared opening fields
+
 - **GIVEN** a caller starts a new `PentixGameSession` for a retained user
 - **WHEN** the returned session snapshot is inspected
 - **THEN** it includes `id`, `gameId`, `userId` equal to the user id, a status of `active`, independent board state, opening statistics, active piece state, next-piece preview, and `nextPieceIndex`
@@ -45,18 +49,21 @@ The opening state SHALL use:
 - and `nextPieceIndex` equal to `1`.
 
 #### Scenario: A started session begins on an empty default board
+
 - **GIVEN** a caller starts a new `PentixGameSession` using a default game
 - **WHEN** the returned opening board and statistics are inspected
 - **THEN** the board matches the shared default board size and every board cell is empty
 - **AND** the score is `0`, the level is `1`, the cleared-line count is `0`, and the locked-block count is `0`
 
 #### Scenario: A started session starts with zeroed action and per-piece statistics
+
 - **GIVEN** a caller starts a new `PentixGameSession`
 - **WHEN** the returned opening statistics are inspected
 - **THEN** `statistics.actions` is `{ moves: 0, rotates: 0, drops: 0 }`
 - **AND** `statistics.pieceCounts` contains an entry with value `0` for every catalog piece key
 
 #### Scenario: A started session spawns valid opening pieces
+
 - **GIVEN** a caller starts a new `PentixGameSession`
 - **WHEN** the active and next pieces are inspected
 - **THEN** their numeric IDs match the parent game sequence at indexes `0` and `1`
@@ -76,36 +83,42 @@ The endpoint SHALL:
 - and return `404 Not Found` for a well-formed `gameId` that does not identify a retained game.
 
 #### Scenario: The server requires an assigned user to start a session
+
 - **GIVEN** `PentixServer` is running
 - **WHEN** a client sends `POST /game-sessions` without a `userId` or with a malformed `userId`
 - **THEN** the server responds with `400 Bad Request`
 - **AND** no session is created
 
 #### Scenario: The server returns a session with a newly initialized game
+
 - **GIVEN** `PentixServer` is running and a user has been created
 - **WHEN** a client sends `POST /game-sessions` with that user's `userId` and no `gameId`
 - **THEN** the server responds with `201 Created`
 - **AND** the response is an opening `PentixGameSession` whose `userId` equals the user id and whose UUIDv7 `gameId` identifies a newly retained game
 
 #### Scenario: The server reuses a requested game
+
 - **GIVEN** a client has created a user and a game
 - **WHEN** the client sends `POST /game-sessions` with that user's `userId` and that game's ID in JSON
 - **THEN** the server responds with `201 Created`
 - **AND** the session's `gameId` equals the supplied ID, its `userId` equals the user id, and its pieces come from that game's sequence
 
 #### Scenario: Repeated start requests produce distinct sessions
+
 - **GIVEN** `PentixServer` is running and a user has been created
 - **WHEN** a client sends `POST /game-sessions` twice with that user's `userId`
 - **THEN** each response contains a different UUIDv7 session `id`
 - **AND** each returned session starts from its own empty opening state rather than sharing mutable session data
 
 #### Scenario: An unknown user is rejected
+
 - **GIVEN** no retained user has the well-formed UUIDv7 supplied by a client
 - **WHEN** the client sends `POST /game-sessions` with that `userId`
 - **THEN** the server responds with `404 Not Found`
 - **AND** no session is created
 
 #### Scenario: An unknown game is rejected
+
 - **GIVEN** a user has been created and no retained game has the well-formed UUIDv7 supplied by a client
 - **WHEN** the client sends `POST /game-sessions` with the user's `userId` and that `gameId`
 - **THEN** the server responds with `404 Not Found`
