@@ -1,7 +1,7 @@
 # demo-mode Specification
 
 ## Purpose
-Define the attract/demo mode: auto-play that starts when no player game is active, imitates player actions through the shared engine, restarts itself on game over, and yields to / re-enters from player play.
+Define the attract/demo mode: auto-play that starts when no player game is active, imitates player actions through the shared engine, restarts itself after the same post-game-over delay a player game uses, and yields to / re-enters from player play.
 ## Requirements
 ### Requirement: Demo mode runs when no game is active
 
@@ -16,7 +16,7 @@ The browser gameplay client SHALL start demo mode when the page first loads with
 
 ### Requirement: The demo imitates player actions within the shared engine
 
-The demo SHALL plan the active piece's destination (rotation angle and column) with the demo engine selected from the shared demo engine registry, and SHALL use that same engine's last-tick operation to decide whether a resting piece side-steps instead of locking. The destination SHALL be planned once per spawned piece and reused across steering steps, and SHALL additionally be re-targeted when the selected engine returns a last-tick side-step. The demo SHALL then steer toward that destination by rotating, then moving left or right, then hard-dropping once aligned. All demo movement, rotation, locking, and game-over detection SHALL go through the shared `GameSessionEngine`; the demo SHALL NOT re-implement those operations.
+The demo SHALL plan the active piece's destination (rotation angle and column) with the demo engine selected from the shared demo engine registry, and SHALL use that same engine's last-tick operation to decide whether a resting piece side-steps instead of locking. The client SHALL select the registry's default engine (`delphi5`) and SHALL NOT override it with a hardcoded engine id. The destination SHALL be planned once per spawned piece and reused across steering steps, and SHALL additionally be re-targeted when the selected engine returns a last-tick side-step. The demo SHALL then steer toward that destination by rotating, then moving left or right, then hard-dropping once aligned. All demo movement, rotation, locking, and game-over detection SHALL go through the shared `GameSessionEngine`; the demo SHALL NOT re-implement those operations.
 
 #### Scenario: The demo plans with the selected engine
 
@@ -24,6 +24,13 @@ The demo SHALL plan the active piece's destination (rotation angle and column) w
 - **WHEN** the demo plans a destination for the active piece
 - **THEN** it calls that engine's destination operation
 - **AND** it does not consult another engine's planner for that piece
+
+#### Scenario: The client uses the registry default engine
+
+- **GIVEN** a freshly started attract demo
+- **WHEN** the client selects the engine that plans its destinations
+- **THEN** it resolves the registry's default engine, whose id is `delphi5`
+- **AND** it does not select `random` or any other registered engine by a hardcoded id
 
 #### Scenario: The demo plans a destination for the active piece
 
@@ -54,17 +61,6 @@ The demo SHALL plan the active piece's destination (rotation angle and column) w
 - **THEN** the demo locks the piece through the shared `GameSessionEngine`
 - **AND** it does not move the piece sideways
 
-### Requirement: The demo restarts automatically on game over
-
-When a demo session's `status` becomes `'game-over'`, the client SHALL immediately start a fresh demo session, clearing the board and resuming auto-play, so the demo loops continuously while no player game is active.
-
-#### Scenario: A demo game over starts the next demo
-
-- **GIVEN** a demo session whose next tick or drop produces `status` `'game-over'`
-- **WHEN** that result is applied
-- **THEN** the client starts a fresh demo session
-- **AND** auto-play resumes without player input
-
 ### Requirement: Starting a player game exits the demo
 
 From the demo phase, a start input SHALL create a fresh `PentixGame` and `PentixGameSession` at the configured starting level and transition the client into the playing phase.
@@ -86,30 +82,6 @@ After a player game over, the final board SHALL remain visible, and pressing Spa
 - **WHEN** the player presses Space
 - **THEN** the client starts a fresh demo session
 - **AND** auto-plays while the player's final board is replaced by the demo board
-
-### Requirement: The demo follows manual level changes
-
-When the player increases or decreases the game level during the demo, the running demo session SHALL adopt the new level immediately — changing its gravity speed at once — and the new level SHALL become the starting level for the next session.
-
-#### Scenario: Raising the level speeds up the running demo
-
-- **GIVEN** an active demo session and a configured starting level below `9`
-- **WHEN** the player increases the level during the demo
-- **THEN** the running demo session's level matches the new level
-- **AND** the demo's gravity interval shortens immediately
-
-#### Scenario: Lowering the level slows down the running demo
-
-- **GIVEN** an active demo session and a configured starting level above `0`
-- **WHEN** the player decreases the level during the demo
-- **THEN** the running demo session's level matches the new level
-- **AND** the demo's gravity interval lengthens immediately
-
-#### Scenario: The changed level carries into the next session
-
-- **GIVEN** an active demo session whose level the player changed
-- **WHEN** the player starts a player game, or the demo auto-restarts on game over
-- **THEN** the new session begins at the changed starting level
 
 ### Requirement: The demo plans each placement together with its side-steps
 

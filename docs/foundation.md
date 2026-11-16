@@ -1,12 +1,12 @@
-# Pentix Foundation Change
+# Pentix Architecture
 
-This repository now uses an `apps/` and `packages/` layout so the browser client and `PentixServer` can share common game-domain code instead of duplicating it.
+The repository uses an `apps/` and `packages/` layout so the browser client and `PentixServer` share common game-domain code instead of duplicating it.
 
 ## What Exists Today
 
-- `apps/pentix-web`: a lightweight browser placeholder
+- `apps/pentix-web`: the browser gameplay client — board rendering at the shared board size, the statistics line and pieces statistics popup, the ten-button level selector, rotation/next-piece settings, pause and restart, and the attract demo that auto-plays whenever no player game is running
 - `apps/pentix-server`: a Node.js server with user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints
-- `packages/pentix-core`: shared user, piece, board, game, game-session, and gameplay-engine primitives
+- `packages/pentix-core`: shared user, piece, board, game, game-session, gameplay-engine, demo-engine, and session-log primitives
 
 ## HTTP Transport
 
@@ -25,7 +25,7 @@ The piece catalog is ported directly from the legacy Delphi source at [Tetris.pa
 
 ## 5Corner Decision
 
-The Delphi `5Corner` definition does not contain an occupied `(0, 0)` mino. The new code keeps that exact geometry instead of normalizing it, because this foundation change prioritizes legacy parity over reinterpretation.
+The Delphi `5Corner` definition does not contain an occupied `(0, 0)` mino. The port keeps that exact geometry instead of normalizing it, because legacy parity takes priority over reinterpretation.
 
 That means:
 
@@ -38,7 +38,7 @@ That means:
 
 ## Game And Session Lifecycle
 
-A `PentixGame` (Game) is a reusable playfield definition: a board of a defined size, a set of available pieces (each with an ID and a name), and a theoretically infinite sequence drawn from those pieces. A `PentixGameSession` (session) is one play of a Game by one User; different users can play the same Game in different places and at different times.
+A `PentixGame` (Game) is a reusable playfield definition: a board of a defined size, a set of available pieces (identified by stable numeric catalog IDs and their `key`s), and a theoretically infinite sequence drawn from those pieces. A `PentixGameSession` (session) is one play of a Game by one User; different users can play the same Game in different places and at different times.
 
 `POST /users` creates a `User` with UUIDv7 identity and a required non-empty `name`, rejecting duplicate names case-insensitively. `POST /games` creates a `PentixGame` with UUIDv7 identity, an optional name, an empty board, and a server-owned sequence of catalog piece IDs. `POST /game-sessions` creates a session either with a new game or with a retained game selected by `gameId`, and always for a retained user selected by the required `userId`. Sessions use UUIDv7 `id`, `gameId`, `userId`, and `nextPieceIndex`; the old `sessionId` field is gone.
 
@@ -71,5 +71,5 @@ A session's `status` becomes `game-over` when a spawn is blocked.
 ## Next Likely Steps
 
 - add PentixGame history models and durable history endpoints
-- introduce browser gameplay state and rendering
-- connect the web app to `PentixServer`
+- add a PostgreSQL repository implementation behind the existing interfaces
+- connect the browser client to `PentixServer` so a played session becomes a retained session with an action log

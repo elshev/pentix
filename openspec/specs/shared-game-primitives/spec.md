@@ -1,3 +1,5 @@
+# shared-game-primitives Specification
+
 ## Purpose
 
 Describe the shared Pentix piece, rotation, catalog, and board primitives that both the browser application and `PentixServer` build on.
@@ -13,12 +15,14 @@ The shared model SHALL include:
 - and a way to enumerate the occupied minos for a piece at a given orientation.
 
 #### Scenario: Type names avoid Delphi abbreviations
+
 - **GIVEN** a developer inspects the shared TypeScript API
 - **WHEN** they read the piece-related contracts
 - **THEN** the API uses `Offset` terminology instead of `Ofs`
 - **AND** the piece model is understandable without reading Delphi-specific abbreviations
 
 #### Scenario: Piece sizes stay within Pentix rules
+
 - **GIVEN** the shared piece catalog
 - **WHEN** a developer enumerates the minos of any piece
 - **THEN** the piece contains between 1 and 5 occupied minos inclusive
@@ -40,24 +44,28 @@ The shared rotation mode behavior SHALL also preserve the Delphi constraints:
 - and the equivalent of `brFullRotate` allows `0`, `90`, `180`, and `270`.
 
 #### Scenario: A full-rotation piece can be evaluated at all four right angles
+
 - **GIVEN** a piece with the full-rotation mode
 - **WHEN** its occupied minos are evaluated at `0`, `90`, `180`, and `270`
 - **THEN** the returned occupied offsets follow the Delphi rotation formulas exactly
 
 #### Scenario: A half-rotation piece normalizes to two orientations
+
 - **GIVEN** a piece with the Delphi-equivalent `br90` rotation mode
 - **WHEN** a caller requests angle `180` or `270`
 - **THEN** the shared model normalizes those requests to the same occupied offsets as `0` or `90` respectively
 
 #### Scenario: A non-rotating piece stays fixed
+
 - **GIVEN** a piece with the Delphi-equivalent `brNoRotate` rotation mode
 - **WHEN** a caller requests any angle
 - **THEN** the shared model returns the same occupied offsets as angle `0`
 
 ### Requirement: Shared piece catalog reproduces the Delphi piece set
+
 The shared game-primitives package SHALL include a constant piece catalog derived from the legacy Delphi `TBlockDesc.SetDefaults` data and its associated offset constants.
 
-Each catalog entry SHALL preserve its stable numeric ID, rotation mode, color, and occupied offsets. Each entry SHALL expose the former legacy display name as its single string `key`; the redundant `name` field and `bi*` legacy key identifiers SHALL be removed. The shared key type SHALL be named `PieceKey`, and all catalog lookups, board cells, and session piece references SHALL use these keys.
+Each catalog entry SHALL preserve its stable numeric ID, rotation mode, color, and occupied offsets. Each entry SHALL expose its former legacy display name as its single string `key`; entries SHALL NOT expose a `name` field or the legacy `bi*` key identifiers. The shared key type SHALL be named `PieceKey`, and all catalog lookups, board cells, and session piece references SHALL use these keys.
 
 | Numeric Id | Key | Rotation Mode | Occupied Offsets |
 | --- | --- | --- | --- |
@@ -92,6 +100,7 @@ Each catalog entry SHALL preserve its stable numeric ID, rotation mode, color, a
 | `28` | `5RMir` | `full` | `(0,0)`, `(1,0)`, `(0,-1)`, `(-2,0)`, `(-1,0)` |
 
 #### Scenario: The shared catalog contains the complete legacy piece set
+
 - **GIVEN** the shared piece catalog
 - **WHEN** a developer enumerates its entries
 - **THEN** it contains exactly 29 pieces with unique numeric IDs and unique keys
@@ -99,6 +108,7 @@ Each catalog entry SHALL preserve its stable numeric ID, rotation mode, color, a
 - **AND** no entry exposes a duplicate `name` or a `bi*` legacy key
 
 #### Scenario: The legacy 5Corner ambiguity is preserved explicitly
+
 - **GIVEN** the shared catalog is derived from the Delphi source
 - **WHEN** a developer inspects the `5Corner` entry
 - **THEN** they can see that its legacy occupied offsets do not include `(0,0)`
@@ -115,12 +125,14 @@ The shared board model SHALL include:
 - and enough structure for both the browser application and PentixServer to reason about occupied versus empty cells.
 
 #### Scenario: A board exposes its rectangular dimensions
+
 - **GIVEN** a shared board instance
 - **WHEN** a caller inspects its dimensions
 - **THEN** the board exposes integer width and height values
 - **AND** those values define the valid row and column coordinate range for its cells
 
 #### Scenario: A board cell can be addressed consistently
+
 - **GIVEN** a shared board instance
 - **WHEN** a caller requests a cell by row and column
 - **THEN** the same board cell can be retrieved consistently by both the server and browser code
