@@ -5,11 +5,16 @@
   --mini-cell-size: calc(14px * 1.2);
   --piece-mini-cell: 5px;
 
-  /* Small demo-board minos, and the slot a demo board occupies in the rail. */
-  --demo-cell-size: 9px;
+  /* Small demo-board minos. The rail holds the planned wall of four boards per
+     row and three rows, so the mino is the largest that keeps four boards plus
+     three horizontal gaps inside the rail column: 11px is that maximum at the
+     1100px shell, and the media queries below step it down with the viewport. */
+  --demo-cell-size: 11px;
   --demo-gap: 1px;
   --demo-board-pad: 4px;
   --demo-card-pad: 4px;
+  /* Boards are separated horizontally by the row gap plus 0.25rem. */
+  --demo-rail-gap: calc(0.6rem + 0.25rem);
   /* A 12-column mini board (tracks, gaps, padding, border) plus the card chrome.
      Four of these per row reserve the planned 4x3 grid of twelve boards. */
   --demo-slot-width: calc(
@@ -24,6 +29,10 @@
   padding: 1.25rem 0 2rem;
   display: grid;
   gap: 0.9rem;
+  /* The gameplay area bleeds 4px past the header on both sides; clip that much
+     on viewports where the shell already fills the screen, so the page never
+     grows a horizontal scrollbar. */
+  overflow-x: clip;
 }
 
 .hero {
@@ -49,16 +58,19 @@
 
 .game {
   display: grid;
-  justify-items: center;
 }
 
 /* The main board and the demo-board rail sit side by side, both starting at the
-   top of the gameplay area: the rail's first row is level with the statistics. */
+   top of the gameplay area: the rail's first row is level with the statistics.
+   The area starts 4px left of the PENTIX header and may extend 4px past its
+   right edge, so the main board sits as far left as the header allows. */
 .game__layout {
   display: grid;
   grid-template-columns: min-content auto;
   align-items: start;
   gap: 1rem;
+  width: calc(100% + 8px);
+  margin-inline: -4px;
 }
 
 /* One centered column. The board's fixed cell tracks make its min-content width
@@ -123,11 +135,13 @@
 }
 
 /* The rail fills from its top-left corner and reserves four slots per row, so
-   the planned twelve boards need no re-layout. */
+   the planned twelve boards need no re-layout. The horizontal gap is 0.25rem
+   wider than the row gap. */
 .demo-rail__grid {
   display: grid;
   grid-template-columns: repeat(4, var(--demo-slot-width));
-  gap: 0.6rem;
+  row-gap: 0.6rem;
+  column-gap: var(--demo-rail-gap);
   align-content: start;
   justify-content: start;
 }
@@ -140,6 +154,15 @@
   border-radius: 10px;
   background: rgba(9, 15, 28, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* A demo board can be moved to the main board with a double-click. */
+.demo-board--swap {
+  cursor: pointer;
+}
+
+.demo-board--swap:hover {
+  border-color: rgba(247, 199, 95, 0.55);
 }
 
 .demo-board__head {
@@ -198,6 +221,16 @@
   border-radius: 12px;
   background: rgba(9, 15, 28, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* The name of whoever owns the main board: the player or the demo engine. */
+.hud__player {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #f7c75f;
 }
 
 /* The pieces counter doubles as the drop-down toggle for its statistics. */
@@ -402,9 +435,28 @@
   color: rgba(233, 239, 255, 0.6);
 }
 
-/* Below this width the four reserved slots plus the board column no longer fit,
-   so the demo minos step down one size before the small-screen breakpoint. */
-@media (max-width: 1000px) {
+/* Four demo boards share a rail row, so the largest mino that still fits steps
+   down with the shell; each breakpoint is the widest viewport where the next
+   size would overflow the rail. */
+@media (max-width: 1089px) {
+  :root {
+    --demo-cell-size: 10px;
+  }
+}
+
+@media (max-width: 1041px) {
+  :root {
+    --demo-cell-size: 9px;
+  }
+}
+
+@media (max-width: 993px) {
+  :root {
+    --demo-cell-size: 8px;
+  }
+}
+
+@media (max-width: 945px) {
   :root {
     --demo-cell-size: 7px;
   }
@@ -414,7 +466,6 @@
   :root {
     --cell-size: calc(16px * 1.2);
     --mini-cell-size: calc(11px * 1.2);
-    --demo-cell-size: 6px;
   }
 
   .shell {
@@ -429,6 +480,14 @@
 
   .hero__wordmark {
     font-size: clamp(1rem, 4.5vw, 1.4rem);
+  }
+}
+
+/* The narrower shell no longer fits four 7px boards side by side, so the wall
+   steps down to its smallest size; the stacked rail below reuses it. */
+@media (max-width: 800px) {
+  :root {
+    --demo-cell-size: 6px;
   }
 }
 

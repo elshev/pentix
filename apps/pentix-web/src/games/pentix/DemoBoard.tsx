@@ -10,21 +10,29 @@ import { useDemoBoard } from './useDemoBoard.ts'
 interface DemoBoardProps {
   readonly board: DemoBoardState
   readonly dispatch: Dispatch<GameAction>
+  /** True while the main board runs the attract demo, so a double-click swaps. */
+  readonly canSwap: boolean
 }
 
 /**
  * A parallel demo board in the rail. It shows only the primary statistics and
  * its engine's name: no next-piece preview, no pieces popup, no level buttons,
- * no controls, and no overlays.
+ * no controls, and no overlays. During the attract demo a double-click moves it
+ * to the main board, sending the main board's session into this slot.
  */
-export function DemoBoard({ board, dispatch }: DemoBoardProps) {
+export function DemoBoard({ board, dispatch, canSwap }: DemoBoardProps) {
   useDemoBoard(board, dispatch)
 
   const engine = getDemoEngine(board.engineId)
   const { statistics, status } = board.session
 
   return (
-    <article className="demo-board" aria-label={`${engine.name} demo board`}>
+    <article
+      className={canSwap ? 'demo-board demo-board--swap' : 'demo-board'}
+      aria-label={`${engine.name} demo board`}
+      title={canSwap ? 'Double-click to move to the main board' : undefined}
+      onDoubleClick={() => dispatch({ type: 'swapBoard', boardId: board.id })}
+    >
       <header className="demo-board__head">
         <p className="demo-board__engine">{engine.name}</p>
         {status === 'game-over' && (

@@ -4,6 +4,7 @@ import {
   createPentixGame,
   createPentixGameSession,
   gameSessionEngine,
+  getDemoEngine,
   type AdvancePentixGameSessionResult,
   type DemoEngineId,
   type MoveDirection,
@@ -20,9 +21,23 @@ export type GamePhase = 'demo' | 'demo-over' | 'playing' | 'paused' | 'game-over
 export const MAIN_BOARD_ID = 'main'
 
 /**
- * The engines driving the small demo boards, in board order: the second board
- * runs the classic `delphi5` heuristic and the third the `random` one. Adding a
- * board to the rail is one entry here.
+ * The engine driving the main board's attract demo. The main board is the
+ * showcase board, so it runs the `random` engine from the registry by id.
+ */
+export const MAIN_DEMO_ENGINE_ID: DemoEngineId = 'random'
+
+/**
+ * The name shown on the main board while a player game runs. Temporary
+ * placeholder until real user selection is wired into the browser client.
+ */
+export const PLAYER_NAME = 'Player01'
+
+/**
+ * The initial engine of each demo board, in rail order: slot one runs the
+ * classic `delphi5` heuristic and slot two the `random` one. This is only the
+ * assignment a fresh board set starts with — an engine travels with its session
+ * when the player swaps a board with the main board. Adding a board to the rail
+ * is one entry here.
  */
 export const DEMO_BOARD_ENGINES = ['delphi5', 'random'] as const
 
@@ -73,6 +88,8 @@ export interface GameState {
   readonly gravityEpoch: number
   /** The piece list every board of this state draws from. */
   readonly game: PentixGame
+  /** The engine planning the main board's attract demo; travels with a swap. */
+  readonly mainEngineId: DemoEngineId
   /** The main board's session. */
   readonly session: PentixGameSession
   /** The parallel demo boards shown beside the main board. */
@@ -97,6 +114,7 @@ export type GameAction =
   | { type: 'decreaseLevel' }
   | { type: 'tick' }
   | { type: 'drop' }
+  | { type: 'swapBoard'; boardId: string }
   | {
       type: 'demoStep'
       action: DemoStepAction
@@ -205,12 +223,17 @@ function currentLevel(state: GameState): number {
 /** One game plus every session that plays it: the main board and the demo boards. */
 interface BoardSet {
   readonly game: PentixGame
+  readonly mainEngineId: DemoEngineId
   readonly session: PentixGameSession
   readonly demoBoards: readonly DemoBoardState[]
 }
 
-function demoBoardId(engineId: DemoEngineId): string {
-  return `demo-${engineId}`
+/**
+ * The stable id of a demo board: its rail slot, not its engine, so a slot keeps
+ * its id when a swap gives it another engine.
+ */
+function demoBoardId(index: number): string {
+  return `demo-slot-${index + 1}`
 }
 
 function createSessionForGame(
@@ -238,13 +261,18 @@ function createBoardSet(deps: GameDependencies, startingLevel: number): BoardSet
     selectPieceId: deps.selectPieceId,
   })
   const session = createSessionForGame(game, deps, startingLevel)
-  const demoBoards = DEMO_BOARD_ENGINES.map((engineId) => ({
-    id: demoBoardId(engineId),
+  const demoBoards = DEMO_BOARD_ENGINES.map((engineId, index) => ({
+    id: demoBoardId(index),
     engineId,
     session: createSessionForGame(game, deps, startingLevel),
   }))
 
-  return { game, session, demoBoards: Object.freeze(demoBoards) }
+  return {
+    game,
+    mainEngineId: MAIN_DEMO_ENGINE_ID,
+    session,
+    demoBoards: Object.freeze(demoBoards),
+  }
 }
 
 /**
@@ -273,7 +301,7 @@ function startSession(
   deps: GameDependencies,
   phase: 'demo' | 'playing',
 ): GameState {
-  const { game, session, demoBoards } = createBoardSet(
+  const { game, mainEngineId, session, demoBoards } = createBoardSet(
     deps,
     state.settings.startingLevel,
   )
@@ -283,6 +311,7 @@ function startSession(
     gameOverReady: true,
     gravityEpoch: state.gravityEpoch + 1,
     game,
+    mainEngineId,
     session,
     demoBoards,
   }
@@ -299,6 +328,8 @@ function startDemo(state: GameState, deps: GameDependencies): GameState {
 /**
  * Starts the next attract demo while leaving the demo boards alone. Their
  * sessions keep playing, so the piece list they share must stay the same game.
+ * The main board also keeps the engine it currently plays, so a swapped-in demo
+ * engine survives its own automatic restart.
  */
 function restartDemoSession(
   state: GameState,
@@ -361,8 +392,39 @@ function isCurrentPlacement(
 }
 
 /**
+ * Applies one steering step to a session through the shared engine.
+ */
+function applyDemoAction(
+  session: PentixGameSession,
+  game: PentixGame,
+  action: DemoStepAction,
+  rotateDirection: RotateDirection,
+  selectPieceId?: PieceIdSelector,
+): AdvancePentixGameSessionResult {
+  switch (action.type) {
+    case 'move':
+      return {
+        game,
+        session: gameSessionEngine.move(session, action.direction),
+      }
+    case 'rotate':
+      return {
+        game,
+        session: gameSessionEngine.rotate(session, rotateDirection),
+      }
+    case 'drop':
+      return gameSessionEngine.drop(session, game, selectPieceId)
+  }
+}
+
+/**
  * Applies one auto-play step to a session: the gravity descent when the piece
  * can still fall, then the steering action, both through the shared engine.
+ *
+ * A resting piece whose steering step is blocked can never reach the planned
+ * placement: it would wait for a column or angle that is out of reach and the
+ * board would freeze. Such a step locks the piece instead, so the demo always
+ * makes progress.
  */
 function runDemoStep(
   session: PentixGameSession,
@@ -371,7 +433,8 @@ function runDemoStep(
   rotateDirection: RotateDirection,
   selectPieceId?: PieceIdSelector,
 ): AdvancePentixGameSessionResult {
-  const descended = canDemoPieceMoveDown(session)
+  const canDescend = canDemoPieceMoveDown(session)
+  const descended = canDescend
     ? gameSessionEngine.tick(session, game, selectPieceId)
     : { game, session }
 
@@ -380,24 +443,32 @@ function runDemoStep(
     return descended
   }
 
-  switch (action.type) {
-    case 'move':
-      return {
-        game: descended.game,
-        session: gameSessionEngine.move(descended.session, action.direction),
-      }
-    case 'rotate':
-      return {
-        game: descended.game,
-        session: gameSessionEngine.rotate(descended.session, rotateDirection),
-      }
-    case 'drop':
-      return gameSessionEngine.drop(
-        descended.session,
-        descended.game,
-        selectPieceId,
-      )
+  const steered = applyDemoAction(
+    descended.session,
+    descended.game,
+    action,
+    rotateDirection,
+    selectPieceId,
+  )
+
+  // The engine returns the same session for a blocked move or rotation, so an
+  // unchanged session on a resting piece means the destination is unreachable.
+  if (!canDescend && steered.session === descended.session) {
+    return gameSessionEngine.tick(descended.session, descended.game, selectPieceId)
   }
+
+  return steered
+}
+
+/**
+ * The name shown on the main board: the display name of the engine that owns
+ * the attract demo, otherwise the placeholder player name.
+ */
+export function mainBoardName(state: GameState): string {
+  if (state.phase === 'demo' || state.phase === 'demo-over') {
+    return getDemoEngine(state.mainEngineId).name
+  }
+  return PLAYER_NAME
 }
 
 export function createInitialState(
@@ -405,13 +476,17 @@ export function createInitialState(
   phase: GamePhase = 'demo',
   settings: GameSettings = DEFAULT_SETTINGS,
 ): GameState {
-  const { game, session, demoBoards } = createBoardSet(deps, settings.startingLevel)
+  const { game, mainEngineId, session, demoBoards } = createBoardSet(
+    deps,
+    settings.startingLevel,
+  )
   return {
     phase,
     gameOverReady: true,
     settings,
     gravityEpoch: 0,
     game,
+    mainEngineId,
     session,
     demoBoards,
   }
@@ -494,6 +569,38 @@ export function createGameReducer(deps: GameDependencies) {
           game: mergeGame(state.game, result.game),
           demoBoards: state.demoBoards.map((entry) =>
             entry.id === board.id ? { ...entry, session: result.session } : entry,
+          ),
+        }
+      }
+
+      case 'swapBoard': {
+        // Only the attract demo can trade places with the rail: a player's own
+        // session must stay on the main board.
+        if (state.phase !== 'demo' && state.phase !== 'demo-over') {
+          return state
+        }
+        const board = state.demoBoards.find(
+          (entry) => entry.id === action.boardId,
+        )
+        if (board === undefined) {
+          return state
+        }
+
+        return {
+          ...state,
+          // The arriving session decides whether the demo can keep playing or
+          // must wait out the post-game-over delay.
+          phase: board.session.status === 'active' ? 'demo' : 'demo-over',
+          mainEngineId: board.engineId,
+          session: board.session,
+          demoBoards: state.demoBoards.map((entry) =>
+            entry.id === board.id
+              ? {
+                  ...entry,
+                  engineId: state.mainEngineId,
+                  session: state.session,
+                }
+              : entry,
           ),
         }
       }

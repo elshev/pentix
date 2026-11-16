@@ -1,32 +1,11 @@
 /** Browser demo steering — maps a demo engine's destination to a reducer action. */
-import {
-  DEFAULT_DEMO_ENGINE_ID,
-  getDemoEngine,
-  type DemoDestination,
-  type DemoEngine,
-  type DemoEngineId,
-  type PentixGameSession,
+import type {
+  DemoDestination,
+  DemoEngine,
+  PentixGameSession,
 } from '#pentix/core'
 
 import type { DemoStepAction } from './gameReducer.ts'
-
-/**
- * TEMPORARY: the attract demo on the main board runs the `random` engine so it
- * can be watched and compared against the classic `delphi5` heuristic while the
- * demo boards are evaluated. Set this back to `null` to let the demo use the
- * registry's default engine (`delphi5`) again.
- */
-const DEMO_ENGINE_OVERRIDE: DemoEngineId | null = 'random'
-
-/**
- * The engine driving the attract demo: the temporary override above, otherwise
- * the registry's default engine (`delphi5`).
- */
-export const ACTIVE_DEMO_ENGINE_ID: DemoEngineId =
-  DEMO_ENGINE_OVERRIDE ?? DEFAULT_DEMO_ENGINE_ID
-
-/** The engine selected by `ACTIVE_DEMO_ENGINE_ID`. */
-export const activeDemoEngine: DemoEngine = getDemoEngine(ACTIVE_DEMO_ENGINE_ID)
 
 /**
  * Cached demo plan for one spawned piece. A destination depends only on the
@@ -49,12 +28,12 @@ export interface DemoPlan {
  * A resting piece that can still take a better side-step (the "last tick move")
  * re-targets the cached destination to that step, so the demo keeps steering into
  * the placement it just chose instead of pulling back. Both operations come from
- * the supplied demo engine, which defaults to the active engine.
+ * the supplied demo engine, which the caller takes from the board's state.
  */
 export function resolveDemoPlan(
   plan: DemoPlan | null,
   session: PentixGameSession,
-  engine: DemoEngine = activeDemoEngine,
+  engine: DemoEngine,
 ): DemoPlan {
   if (
     plan !== null &&
@@ -110,7 +89,7 @@ export function actionTowardDestination(
  */
 export function nextDemoAction(
   session: PentixGameSession,
-  destination: DemoDestination | null = activeDemoEngine.planDestination(session),
+  destination: DemoDestination | null,
 ): DemoStepAction | undefined {
   if (destination === null) {
     return undefined

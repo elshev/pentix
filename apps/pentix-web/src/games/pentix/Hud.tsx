@@ -5,6 +5,8 @@ import { NextPiecePreview } from './NextPiecePreview.tsx'
 import { SecondaryStats } from './SecondaryStats.tsx'
 
 interface HudProps {
+  /** The occupant of the main board: the player or the demo engine's name. */
+  readonly name: string
   readonly statistics: GameSessionStatistics
   readonly nextPieceKey: PieceKey
   readonly showNextPiece: boolean
@@ -13,6 +15,7 @@ interface HudProps {
 }
 
 export function Hud({
+  name,
   statistics,
   nextPieceKey,
   showNextPiece,
@@ -21,6 +24,7 @@ export function Hud({
 }: HudProps) {
   return (
     <aside className="hud" aria-label="Statistics">
+      <p className="hud__player">{name}</p>
       <div className="hud__stats">
         {showNextPiece && (
           <div className="hud__stat hud__stat--next">
