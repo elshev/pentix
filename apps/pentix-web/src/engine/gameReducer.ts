@@ -13,7 +13,7 @@ import {
   type RotationAngle,
 } from '#pentix/core'
 
-export type GamePhase = 'demo' | 'playing' | 'paused' | 'game-over'
+export type GamePhase = 'demo' | 'demo-over' | 'playing' | 'paused' | 'game-over'
 
 export const MIN_LEVEL = 0
 export const MAX_LEVEL = 9
@@ -86,6 +86,7 @@ export type GameAction =
   | { type: 'start' }
   | { type: 'demo' }
   | { type: 'restart' }
+  | { type: 'demoRestart' }
   | { type: 'gameOverCooldownElapsed' }
   | { type: 'pause' }
   | { type: 'resume' }
@@ -135,14 +136,19 @@ function applyStartingLevel(
 }
 
 /**
- * Steps the configured starting level and, while the demo is running, applies
- * the same level to the live demo session so its gravity speed changes at once
- * instead of waiting for the next session.
+ * Applies a chosen level to the configured starting level and to the live
+ * session. The demo takes the new level at once so its gravity speed changes
+ * without waiting for the next session; a running player game may only be
+ * raised, because lowering it would rewind the engine's own progression.
  */
 function changeLevel(state: GameState, level: number): GameState {
   const startingLevel = clampLevel(level)
+  const playerGame = state.phase === 'playing' || state.phase === 'paused'
+  if (playerGame && startingLevel <= state.session.statistics.level) {
+    return state
+  }
   const settings = { ...state.settings, startingLevel }
-  if (state.phase === 'demo') {
+  if (state.phase === 'demo' || playerGame) {
     return {
       ...state,
       settings,
@@ -150,6 +156,13 @@ function changeLevel(state: GameState, level: number): GameState {
     }
   }
   return { ...state, settings }
+}
+
+/** The level the player sees: the session's while a game runs, else the configured one. */
+function currentLevel(state: GameState): number {
+  return state.phase === 'playing' || state.phase === 'paused'
+    ? state.session.statistics.level
+    : state.settings.startingLevel
 }
 
 interface SessionBundle {
@@ -206,15 +219,11 @@ function startDemo(state: GameState, deps: GameDependencies): GameState {
   return startSession(state, deps, 'demo')
 }
 
-function applyAdvance(
-  state: GameState,
-  deps: GameDependencies,
-  result: SessionBundle,
-): GameState {
-  // A demo session that ends starts the next demo instead of surfacing a
-  // player-facing game-over state, mirroring the Delphi attract loop.
+function applyAdvance(state: GameState, result: SessionBundle): GameState {
+  // A demo session that ends keeps its final board for the same delay a player
+  // game over uses; `demoRestart` starts the next demo once that delay elapses.
   if (result.session.status === 'game-over' && state.phase === 'demo') {
-    return startDemo(state, deps)
+    return { ...state, phase: 'demo-over', game: result.game, session: result.session }
   }
   const gameOver = result.session.status === 'game-over'
   return {
@@ -266,6 +275,11 @@ export function createGameReducer(deps: GameDependencies) {
         }
         return { ...state, gameOverReady: true }
 
+      case 'demoRestart':
+        // Only the finished demo waits on this action; it starts the next demo
+        // once the post-demo delay has elapsed.
+        return state.phase === 'demo-over' ? startDemo(state, deps) : state
+
       case 'demoStep': {
         // Ignore a step planned from a stale snapshot. If the demo session, the
         // active piece, or its angle/column changed since the hook planned the
@@ -288,7 +302,6 @@ export function createGameReducer(deps: GameDependencies) {
         const advanced = canDemoPieceMoveDown(state.session)
           ? applyAdvance(
               state,
-              deps,
               gameSessionEngine.tick(
                 state.session,
                 state.game,
@@ -355,20 +368,30 @@ export function createGameReducer(deps: GameDependencies) {
           },
         }
 
-      case 'setStartingLevel':
-        return {
-          ...state,
-          settings: {
-            ...state.settings,
-            startingLevel: clampLevel(action.level),
-          },
+      case 'setStartingLevel': {
+        // The engine owns the level during a player game, but the player may
+        // still raise it (see `changeLevel`).
+        if (state.phase === 'playing' || state.phase === 'paused') {
+          return changeLevel(state, action.level)
         }
+        // Leaving game over through the selector obeys the same cooldown as the
+        // overlay buttons and the hotkeys.
+        if (isGameOverCoolingDown(state)) {
+          return state
+        }
+        const withLevel = changeLevel(state, action.level)
+        // Picking a level on the game-over screen starts that game right away.
+        if (state.phase === 'game-over') {
+          return startGame(withLevel, deps)
+        }
+        return withLevel
+      }
 
       case 'increaseLevel':
-        return changeLevel(state, state.settings.startingLevel + 1)
+        return changeLevel(state, currentLevel(state) + 1)
 
       case 'decreaseLevel':
-        return changeLevel(state, state.settings.startingLevel - 1)
+        return changeLevel(state, currentLevel(state) - 1)
 
       case 'tick': {
         if (!isActivePhase(state.phase)) {
@@ -376,7 +399,6 @@ export function createGameReducer(deps: GameDependencies) {
         }
         return applyAdvance(
           state,
-          deps,
           gameSessionEngine.tick(state.session, state.game, deps.selectPieceId),
         )
       }
@@ -390,10 +412,7 @@ export function createGameReducer(deps: GameDependencies) {
           state.game,
           deps.selectPieceId,
         )
-        if (result.session.status === 'game-over' && state.phase === 'demo') {
-          return startDemo(state, deps)
-        }
-        const advanced = applyAdvance(state, deps, result)
+        const advanced = applyAdvance(state, result)
         return {
           ...advanced,
           // Restart the gravity clock so the dropped piece gets a full tick

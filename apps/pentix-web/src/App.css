@@ -1,20 +1,22 @@
 :root {
-  --cell-size: 22px;
-  --mini-cell-size: 14px;
+  /* Every board mino is 20% larger than the old 22px baseline; the grid keeps
+     its stored row/column count. The next-piece preview scales with it. */
+  --cell-size: calc(22px * 1.2);
+  --mini-cell-size: calc(14px * 1.2);
   --piece-mini-cell: 5px;
 }
 
 .shell {
   width: min(1100px, calc(100vw - 2rem));
   margin: 0 auto;
-  padding: 2.5rem 0 3rem;
+  padding: 1.25rem 0 2rem;
   display: grid;
-  gap: 1.75rem;
+  gap: 0.9rem;
 }
 
 .hero {
-  padding: 1.75rem;
-  border-radius: 24px;
+  padding: 0.3rem 1.25rem;
+  border-radius: 14px;
   background:
     radial-gradient(circle at top left, rgba(247, 199, 95, 0.22), transparent 32%),
     linear-gradient(135deg, rgba(17, 25, 40, 0.92), rgba(26, 41, 74, 0.82));
@@ -22,57 +24,45 @@
   box-shadow: 0 24px 80px rgba(4, 10, 24, 0.35);
 }
 
-.eyebrow {
-  margin: 0 0 0.5rem;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  font-size: 0.78rem;
-  color: #f7c75f;
-}
-
-.hero h1 {
+/* Half the previous header height, with the wordmark still the largest text. */
+.hero__wordmark {
   margin: 0;
-  font-size: clamp(1.8rem, 3.5vw, 3rem);
-  line-height: 1;
-}
-
-.lede {
-  margin: 0.75rem 0 0;
-  max-width: 46rem;
-  font-size: 1rem;
-  color: rgba(233, 239, 255, 0.82);
-}
-
-.lede code {
-  padding: 0.05rem 0.35rem;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  font-size: 0.9em;
+  text-align: center;
+  font-size: clamp(1.2rem, 3vw, 2rem);
+  line-height: 1.05;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #f7c75f;
 }
 
 .game {
   display: grid;
-  grid-template-columns: auto minmax(200px, 1fr);
-  grid-template-areas:
-    'stage hud'
-    'stage secondary'
-    'stage controls'
-    'stage settings'
-    'status status';
-  gap: 1.25rem;
-  align-items: start;
+  justify-items: center;
+}
+
+/* One centered column. The board's fixed cell tracks make its min-content width
+   equal to the board width, so the column is exactly that wide and every other
+   block stretches to it — nothing sits beside the board. (max-content would be
+   stretched by the unwrapped keyboard hint text.) */
+.game__column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: min-content;
+  max-width: 100%;
+}
+
+.game__bottom {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 12px;
+  background: rgba(9, 15, 28, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .game__stage {
-  grid-area: stage;
   position: relative;
-  justify-self: center;
-}
-
-.game__secondary {
-  grid-area: secondary;
-  display: grid;
-  gap: 0.5rem;
 }
 
 .board {
@@ -103,14 +93,56 @@
 }
 
 .hud {
-  grid-area: hud;
+  position: relative;
   display: grid;
-  gap: 0.75rem;
-  padding: 1.1rem;
-  border-radius: 18px;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 12px;
   background: rgba(9, 15, 28, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 16px 48px rgba(4, 10, 24, 0.28);
+}
+
+/* The pieces counter doubles as the drop-down toggle for its statistics. */
+.hud__toggle {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hud__toggle:hover .hud__label,
+.hud__toggle:focus-visible .hud__label {
+  color: #f7c75f;
+}
+
+.hud__toggle:focus-visible {
+  outline: 1px solid rgba(247, 199, 95, 0.7);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.hud__chevron {
+  margin-left: 0.3rem;
+  font-size: 0.7rem;
+  color: rgba(233, 239, 255, 0.7);
+}
+
+/* Drop-down statistics: anchored under the statistics row, over the board. */
+.stats-popup {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  padding: 0.5rem 0.6rem;
+  border-radius: 12px;
+  background: rgba(9, 15, 28, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 18px 40px rgba(4, 10, 24, 0.5);
 }
 
 .hud__group {
@@ -147,14 +179,6 @@
   font-size: 1.15rem;
 }
 
-.hud__title {
-  margin: 0 0 0.35rem;
-  font-size: 0.72rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: rgba(247, 199, 95, 0.88);
-}
-
 .hud__stat--next {
   align-items: start;
 }
@@ -179,25 +203,38 @@
 }
 
 .controls {
-  grid-area: controls;
   display: grid;
-  gap: 0.6rem;
+  gap: 0.4rem;
 }
 
 .controls__row {
   display: flex;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* Level selector, directly under the Hard drop button. */
+.controls__levels {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.controls__levels .level-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .control-button {
   flex: 0 0 auto;
-  min-width: 2.75rem;
-  padding: 0.6rem 0.7rem;
-  border-radius: 12px;
+  min-width: 2.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(26, 41, 74, 0.85);
   color: #eef2ff;
   font-weight: 600;
+  font-size: 0.82rem;
   cursor: pointer;
 }
 
@@ -259,10 +296,9 @@
 }
 
 .status-line {
-  grid-area: status;
   margin: 0;
   text-align: center;
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: rgba(233, 239, 255, 0.6);
@@ -270,78 +306,44 @@
 
 @media (max-width: 900px) {
   :root {
-    --cell-size: 16px;
-    --mini-cell-size: 11px;
+    --cell-size: calc(16px * 1.2);
+    --mini-cell-size: calc(11px * 1.2);
   }
 
   .shell {
     width: min(100vw - 1rem, 1100px);
-    padding: 1rem 0 2rem;
-  }
-
-  .game {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      'stage'
-      'hud'
-      'secondary'
-      'controls'
-      'settings'
-      'status';
+    padding: 0.75rem 0 1.5rem;
   }
 
   .hero {
-    border-radius: 18px;
+    border-radius: 12px;
+    padding: 0.25rem 0.9rem;
+  }
+
+  .hero__wordmark {
+    font-size: clamp(1rem, 4.5vw, 1.4rem);
   }
 }
 
 .settings {
-  grid-area: settings;
   display: grid;
-  gap: 0.6rem;
-  padding: 0.9rem;
-  border-radius: 14px;
-  background: rgba(9, 15, 28, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 0.4rem;
 }
 
 .settings__row {
   display: flex;
-  gap: 0.5rem;
-}
-
-.settings__levels {
-  display: grid;
-  gap: 0.5rem;
-}
-
-.settings__levels-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.settings__label {
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(247, 199, 95, 0.88);
-}
-
-.settings__level-grid {
-  display: grid;
-  grid-template-columns: repeat(10, minmax(0, 1fr));
-  gap: 0.3rem;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
 .level-button {
-  padding: 0.4rem 0;
-  border-radius: 8px;
+  padding: 0.25rem 0;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(26, 41, 74, 0.85);
   color: #eef2ff;
   font-weight: 600;
+  font-size: 0.72rem;
   cursor: pointer;
 }
 
@@ -357,8 +359,8 @@
 
 .settings__hint {
   margin: 0;
-  font-size: 0.72rem;
-  line-height: 1.5;
+  font-size: 0.66rem;
+  line-height: 1.45;
   color: rgba(233, 239, 255, 0.55);
 }
 
@@ -410,48 +412,9 @@
   padding: 0.5rem;
 }
 
-.panel {
-  width: 100%;
+.secondary-stats {
   display: grid;
   gap: 0.4rem;
-}
-
-.panel__toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.2rem 0.45rem;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(26, 41, 74, 0.5);
-  color: rgba(247, 199, 95, 0.88);
-  font-size: 0.72rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.panel--small .panel__toggle {
-  padding: 0.15rem 0.4rem;
-  font-size: 0.62rem;
-}
-
-.panel__title {
-  font-weight: 600;
-}
-
-.panel__chevron {
-  font-size: 0.7rem;
-}
-
-.panel__body {
-  display: grid;
-  gap: 0.4rem;
-}
-
-.panel--small .panel__body {
   font-size: 0.66rem;
 }
 
@@ -470,11 +433,14 @@
   font-weight: 600;
 }
 
+/* The counters now sit in the board-width column, so they wrap onto as many
+   rows as needed — each chip keeps its natural size instead of being squeezed
+   into a fixed ten-per-row grid. */
 .piece-counts {
-  display: grid;
-  grid-template-columns: repeat(10, minmax(0, 1fr));
-  gap: calc(0.3rem + 5px) calc(0.55rem + 5px);
-  justify-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.4rem 0.6rem;
 }
 
 .piece-count {

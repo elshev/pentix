@@ -11,17 +11,18 @@ export function mapKeyToAction(
   key: string,
   phase: GamePhase,
 ): GameAction | undefined {
-  const canStart = phase === 'demo' || phase === 'game-over'
+  const canStart =
+    phase === 'demo' || phase === 'demo-over' || phase === 'game-over'
   const playing = phase === 'playing'
 
   if (key === 'Enter' && canStart) {
     return { type: 'start' }
   }
 
-  // Space starts a player game from the demo, re-enters the demo after a game
-  // over, and hard-drops while playing.
+  // Space starts a player game from the demo (and from the demo's post-game-over
+  // delay), re-enters the demo after a game over, and hard-drops while playing.
   if (key === ' ' || key === 'Spacebar') {
-    if (phase === 'demo') {
+    if (phase === 'demo' || phase === 'demo-over') {
       return { type: 'start' }
     }
     if (phase === 'game-over') {
