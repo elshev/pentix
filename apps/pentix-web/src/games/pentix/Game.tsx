@@ -4,6 +4,7 @@ import { useMemo, useReducer, useRef, useState } from 'react'
 import {
   createGameReducer,
   createInitialState,
+  isDemoCycleOver,
   mainBoardName,
   type GameDependencies,
 } from '../../engine/gameReducer.ts'
@@ -99,7 +100,9 @@ export function Game() {
   )
   useKeyboardControls(phase, dispatch)
   useGameOverCooldown(phase === 'game-over' && !gameOverReady, dispatch)
-  useDemoRestart(phase === 'demo-over', dispatch)
+  // The attract cycle restarts only once every board has ended, so a finished
+  // main demo waits for the rail instead of starting a new demo beside it.
+  useDemoRestart(isDemoCycleOver(state), dispatch)
 
   const label =
     phase === 'playing'
@@ -160,8 +163,13 @@ export function Game() {
                 </div>
               </div>
             )}
-            {(phase === 'demo' || phase === 'demo-over') && (
+            {phase === 'demo' && (
               <p className="demo-badge">Demo — press Space to play</p>
+            )}
+            {phase === 'demo-over' && (
+              <p className="demo-badge">
+                Demo over — press Space for the next demo
+              </p>
             )}
           </div>
           <div className="game__bottom">

@@ -7,9 +7,10 @@ import type { DemoBoardState, GameAction } from '../../engine/gameReducer.ts'
 import { useDemoStepper } from './useDemoController.ts'
 
 /**
- * Advances one demo board on its own timer, at that board's level cadence, and
- * with its own engine. A finished board stops stepping and keeps its final
- * board until a new board set replaces it.
+ * Advances one demo board on its own clock, at that board's level cadence and
+ * with its own engine: a steering step at each interval's midpoint and a gravity
+ * tick between them. A finished board stops stepping and keeps its final board
+ * until the whole board set restarts.
  */
 export function useDemoBoard(
   board: DemoBoardState,

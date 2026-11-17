@@ -3,11 +3,9 @@ import {
   DEMO_ACTION_CODES,
   createDemoEngineInput,
   isDemoAction,
-  isDemoLastTickMove,
   type DemoAction,
   type DemoActionLog,
   type DemoEngine,
-  type DemoLastTickMove,
   type PentixGameSession,
 } from '#pentix/core'
 
@@ -68,33 +66,17 @@ export function advanceDemoPlan(plan: DemoPlan): DemoPlan {
   return { ...plan, index: plan.index + 1 }
 }
 
-/** One replayed step: the action, its post-drop side-step, and the rest of the log. */
-export interface DemoStepPlan {
-  readonly action: DemoAction | null
-  readonly lastTickAction: DemoLastTickMove | null
-  readonly plan: DemoPlan
-}
+/** The two halves of the demo clock: one steering action or one gravity tick. */
+export type DemoSlot = 'action' | 'tick'
 
 /**
- * The next step of the plan. A hard drop consumes the code after it as the
- * piece's last-tick move, because the driver applies that side-step in the same
- * interval, after the drop and before the interval's tick. Any other code
- * consumes one position, and an exhausted or invalid log consumes nothing new.
+ * The slot that follows one steering step. A hard drop restarts the clock's
+ * phase, exactly like the player's own drop restarts the gravity epoch: the next
+ * slot is an action (the log's last-tick move, when it carries one) and the tick
+ * that locks the dropped piece comes a full interval after the drop. The dropped
+ * piece therefore rests visibly before the next piece appears, and its side-step
+ * is never applied in the drop's own instant.
  */
-export function nextDemoStep(plan: DemoPlan): DemoStepPlan {
-  const action = nextDemoAction(plan)
-  let next = advanceDemoPlan(plan)
-
-  if (action !== DEMO_ACTION_CODES.hardDrop) {
-    return { action, lastTickAction: null, plan: next }
-  }
-
-  const followUp = nextDemoAction(next)
-  next = advanceDemoPlan(next)
-  return {
-    action,
-    lastTickAction:
-      followUp !== null && isDemoLastTickMove(followUp) ? followUp : null,
-    plan: next,
-  }
+export function nextDemoSlot(action: DemoAction | null): DemoSlot {
+  return action === DEMO_ACTION_CODES.hardDrop ? 'action' : 'tick'
 }
