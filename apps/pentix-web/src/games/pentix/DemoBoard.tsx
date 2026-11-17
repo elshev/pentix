@@ -34,7 +34,9 @@ export function DemoBoard({ board, dispatch, canSwap }: DemoBoardProps) {
       onDoubleClick={() => dispatch({ type: 'swapBoard', boardId: board.id })}
     >
       <header className="demo-board__head">
-        <p className="demo-board__engine">{engine.name}</p>
+        <p className="demo-board__engine" title={engine.description}>
+          {engine.name}
+        </p>
         {status === 'game-over' && (
           <p className="demo-board__status">Game over</p>
         )}

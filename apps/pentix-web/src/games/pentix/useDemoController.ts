@@ -10,6 +10,7 @@ import {
 } from '#pentix/core'
 
 import {
+  advanceDemoPlan,
   nextDemoAction,
   resolveDemoPlan,
   type DemoPlan,
@@ -66,24 +67,26 @@ export function useDemoStepper({
     const timer = window.setInterval(() => {
       const current = sessionRef.current
       const plan = resolveDemoPlan(planRef.current, current, engine)
-      planRef.current = plan
+      const action = nextDemoAction(plan)
+      // The plan advances even past an exhausted log so the demo keeps ticking
+      // until the piece locks.
+      planRef.current = advanceDemoPlan(plan)
 
-      const action = nextDemoAction(current, plan.destination)
-      if (action === undefined) {
-        return
-      }
-
-      const step = {
-        action,
-        sessionId: current.id,
-        pieceIndex: current.nextPieceIndex,
-        angle: current.activePiece.angle,
-        column: current.activePiece.origin.column,
-      }
       dispatchRef.current(
         boardId === MAIN_BOARD_ID
-          ? { type: 'demoStep', ...step }
-          : { type: 'demoBoardStep', boardId, ...step },
+          ? {
+              type: 'demoStep',
+              action,
+              sessionId: current.id,
+              pieceIndex: current.nextPieceIndex,
+            }
+          : {
+              type: 'demoBoardStep',
+              boardId,
+              action,
+              sessionId: current.id,
+              pieceIndex: current.nextPieceIndex,
+            },
       )
     }, interval)
 

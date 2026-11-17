@@ -1,18 +1,18 @@
 /** Game state reducer — phase, settings, the main session, and the demo boards. */
 import {
-  canDemoPieceMoveDown,
   createPentixGame,
   createPentixGameSession,
+  demoEngineRegistry,
   gameSessionEngine,
   getDemoEngine,
   type AdvancePentixGameSessionResult,
+  type DemoAction,
   type DemoEngineId,
   type MoveDirection,
   type PentixGame,
   type PentixGameSession,
   type PieceIdSelector,
   type RotateDirection,
-  type RotationAngle,
 } from '#pentix/core'
 
 export type GamePhase = 'demo' | 'demo-over' | 'playing' | 'paused' | 'game-over'
@@ -33,13 +33,19 @@ export const MAIN_DEMO_ENGINE_ID: DemoEngineId = 'random'
 export const PLAYER_NAME = 'Player01'
 
 /**
- * The initial engine of each demo board, in rail order: slot one runs the
- * classic `delphi5` heuristic and slot two the `random` one. This is only the
- * assignment a fresh board set starts with — an engine travels with its session
- * when the player swaps a board with the main board. Adding a board to the rail
- * is one entry here.
+ * The rail's capacity: four slots per row and three rows, as measured by the
+ * demo-board layout. Engines registered beyond it stay resolvable through the
+ * registry but do not get a board until the rail is re-measured.
  */
-export const DEMO_BOARD_ENGINES = ['delphi5', 'random'] as const
+export const MAX_DEMO_BOARDS = 12
+
+/** The engine ids a fresh board set assigns to the rail, in registration order. */
+function demoBoardEngineIds(): readonly DemoEngineId[] {
+  return demoEngineRegistry
+    .list()
+    .slice(0, MAX_DEMO_BOARDS)
+    .map((engine) => engine.id)
+}
 
 
 export const MIN_LEVEL = 0
@@ -77,7 +83,7 @@ export interface DemoBoardState {
 /** The steering steps an auto-played session takes toward its destination. */
 export type DemoStepAction =
   | { type: 'move'; direction: MoveDirection }
-  | { type: 'rotate' }
+  | { type: 'rotate'; direction: RotateDirection }
   | { type: 'drop' }
 
 export interface GameState {
@@ -117,20 +123,16 @@ export type GameAction =
   | { type: 'swapBoard'; boardId: string }
   | {
       type: 'demoStep'
-      action: DemoStepAction
+      action: DemoAction | null
       sessionId: string
       pieceIndex: number
-      angle: RotationAngle
-      column: number
     }
   | {
       type: 'demoBoardStep'
       boardId: string
-      action: DemoStepAction
+      action: DemoAction | null
       sessionId: string
       pieceIndex: number
-      angle: RotationAngle
-      column: number
     }
 
 export interface GameDependencies {
@@ -261,7 +263,7 @@ function createBoardSet(deps: GameDependencies, startingLevel: number): BoardSet
     selectPieceId: deps.selectPieceId,
   })
   const session = createSessionForGame(game, deps, startingLevel)
-  const demoBoards = DEMO_BOARD_ENGINES.map((engineId, index) => ({
+  const demoBoards = demoBoardEngineIds().map((engineId, index) => ({
     id: demoBoardId(index),
     engineId,
     session: createSessionForGame(game, deps, startingLevel),
@@ -366,29 +368,40 @@ function applyAdvance(
   }
 }
 
-/** The placement an auto-play step was planned for. */
-interface DemoStepPlacement {
+/** The session and piece an auto-play step was planned for. */
+interface DemoStepOrigin {
   readonly sessionId: string
   readonly pieceIndex: number
-  readonly angle: RotationAngle
-  readonly column: number
 }
 
 /**
- * True while a planned step still belongs to the session's current piece and
- * placement. The row is not compared: a step is applied after its own gravity
- * descent.
+ * True while a planned step still belongs to the session's current piece. The
+ * placement is deliberately not compared: every replayed action changes it.
  */
-function isCurrentPlacement(
+function isCurrentDemoStep(
   session: PentixGameSession,
-  step: DemoStepPlacement,
+  step: DemoStepOrigin,
 ): boolean {
   return (
     session.id === step.sessionId &&
-    session.nextPieceIndex === step.pieceIndex &&
-    session.activePiece.angle === step.angle &&
-    session.activePiece.origin.column === step.column
+    session.nextPieceIndex === step.pieceIndex
   )
+}
+
+/** Maps a demo action code to the shared engine's steering step. */
+function demoActionToStep(action: DemoAction): DemoStepAction {
+  switch (action) {
+    case 'L':
+      return { type: 'move', direction: 'left' }
+    case 'R':
+      return { type: 'move', direction: 'right' }
+    case 'C':
+      return { type: 'rotate', direction: 'clockwise' }
+    case 'A':
+      return { type: 'rotate', direction: 'counterclockwise' }
+    case 'H':
+      return { type: 'drop' }
+  }
 }
 
 /**
@@ -398,7 +411,6 @@ function applyDemoAction(
   session: PentixGameSession,
   game: PentixGame,
   action: DemoStepAction,
-  rotateDirection: RotateDirection,
   selectPieceId?: PieceIdSelector,
 ): AdvancePentixGameSessionResult {
   switch (action.type) {
@@ -410,7 +422,7 @@ function applyDemoAction(
     case 'rotate':
       return {
         game,
-        session: gameSessionEngine.rotate(session, rotateDirection),
+        session: gameSessionEngine.rotate(session, action.direction),
       }
     case 'drop':
       return gameSessionEngine.drop(session, game, selectPieceId)
@@ -418,46 +430,27 @@ function applyDemoAction(
 }
 
 /**
- * Applies one auto-play step to a session: the gravity descent when the piece
- * can still fall, then the steering action, both through the shared engine.
- *
- * A resting piece whose steering step is blocked can never reach the planned
- * placement: it would wait for a column or angle that is out of reach and the
- * board would freeze. Such a step locks the piece instead, so the demo always
- * makes progress.
+ * Applies one auto-play step: the next action of the engine's log (when there is
+ * one), then exactly one gravity tick. The tick always runs, so a blocked action
+ * cannot freeze the demo and a resting piece always locks.
  */
-function runDemoStep(
+function applyDemoStep(
   session: PentixGameSession,
   game: PentixGame,
-  action: DemoStepAction,
-  rotateDirection: RotateDirection,
+  action: DemoAction | null,
   selectPieceId?: PieceIdSelector,
 ): AdvancePentixGameSessionResult {
-  const canDescend = canDemoPieceMoveDown(session)
-  const descended = canDescend
-    ? gameSessionEngine.tick(session, game, selectPieceId)
-    : { game, session }
+  const acted =
+    action === null
+      ? { game, session }
+      : applyDemoAction(
+          session,
+          game,
+          demoActionToStep(action),
+          selectPieceId,
+        )
 
-  // A descent can end the game; there is nothing left to steer on that tick.
-  if (descended.session.status !== 'active') {
-    return descended
-  }
-
-  const steered = applyDemoAction(
-    descended.session,
-    descended.game,
-    action,
-    rotateDirection,
-    selectPieceId,
-  )
-
-  // The engine returns the same session for a blocked move or rotation, so an
-  // unchanged session on a resting piece means the destination is unreachable.
-  if (!canDescend && steered.session === descended.session) {
-    return gameSessionEngine.tick(descended.session, descended.game, selectPieceId)
-  }
-
-  return steered
+  return gameSessionEngine.tick(acted.session, acted.game, selectPieceId)
 }
 
 /**
@@ -521,22 +514,20 @@ export function createGameReducer(deps: GameDependencies) {
         return state.phase === 'demo-over' ? restartDemoSession(state, deps) : state
 
       case 'demoStep': {
-        // Ignore a step planned from a stale snapshot (see `isCurrentPlacement`),
-        // so the demo cannot steer the wrong piece or placement.
-        if (state.phase !== 'demo' || !isCurrentPlacement(state.session, action)) {
+        // Ignore a step planned for another session or piece generation.
+        if (
+          state.phase !== 'demo' ||
+          !isCurrentDemoStep(state.session, action)
+        ) {
           return state
         }
 
-        // Mirror Delphi's `TimerExpired`: a piece that can still fall takes the
-        // gravity step before its steering step. A resting piece takes only the
-        // steering step, so a last-tick move lands before anything can lock it.
         return applyAdvance(
           state,
-          runDemoStep(
+          applyDemoStep(
             state.session,
             state.game,
             action.action,
-            state.settings.rotateDirection,
             deps.selectPieceId,
           ),
         )
@@ -551,16 +542,15 @@ export function createGameReducer(deps: GameDependencies) {
         if (
           board === undefined ||
           board.session.status !== 'active' ||
-          !isCurrentPlacement(board.session, action)
+          !isCurrentDemoStep(board.session, action)
         ) {
           return state
         }
 
-        const result = runDemoStep(
+        const result = applyDemoStep(
           board.session,
           state.game,
           action.action,
-          DEFAULT_SETTINGS.rotateDirection,
           deps.selectPieceId,
         )
         return {

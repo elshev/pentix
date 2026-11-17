@@ -2,27 +2,42 @@
 
 ## Purpose
 
-Define the demo-board rail beside the main board: two slot-addressed boards (`demo-slot-1` and `demo-slot-2`) that auto-play their own sessions from one shared `PentixGame`, keep running while the main board does not, follow the attract demo's level, show only their engine name and primary statistics at the mino size computed from the four-per-row wall, and can trade places with the main board on a double-click during the attract demo.
+Define the demo-board rail beside the main board: one slot-addressed board per registered demo engine (`demo-slot-1`, `demo-slot-2`, and so on up to the rail's twelve slots) that auto-play their own sessions by replaying their engine's action log, keep running while the main board does not, follow the attract demo's level, show only their engine name, description, and primary statistics at the mino size computed from the four-per-row wall, and can trade places with the main board on a double-click during the attract demo.
 ## Requirements
-### Requirement: A board set pairs the main session with two demo boards
+### Requirement: A board set pairs the main session with one demo board per registered engine
 
-Alongside the main board's session, the browser gameplay client SHALL keep exactly two demo boards, addressed by the stable rail-slot ids `demo-slot-1` and `demo-slot-2`. A board set SHALL assign the demo engine with id `delphi5` to slot 1 and the demo engine with id `random` to slot 2 when it is created, each resolved from the shared demo engine registry by id. Every board SHALL own its own `PentixGameSession`, and all three sessions created for one board set SHALL be created from one and the same `PentixGame`. The client SHALL identify a demo board by its slot id — never by its engine id — and SHALL address auto-play and engine operations to one board at a time, so a demo board keeps its slot id when the engine assigned to it changes. The main board's attract-demo engine SHALL be part of the board set and SHALL start as `random`.
+Alongside the main board's session, the browser gameplay client SHALL keep one demo board per engine registered in the shared demo engine registry, in registration order, addressed by the stable rail-slot ids `demo-slot-1`, `demo-slot-2`, and so on. The number of demo boards SHALL NOT exceed the rail's capacity of `12` boards; engines registered beyond that capacity SHALL NOT add boards. Every demo board's engine SHALL be resolved from the registry, so with the built-in engines slot 1 plays `delphi5` and slot 2 plays `random`. Every board SHALL own its own `PentixGameSession`, and all sessions created for one board set SHALL be created from one and the same `PentixGame`. The client SHALL identify a demo board by its slot id — never by its engine id — and SHALL address auto-play and engine operations to one board at a time, so a demo board keeps its slot id when the engine assigned to it changes. The main board's attract-demo engine SHALL be part of the board set and SHALL start as `random`.
 
-#### Scenario: The page load starts the main session and both demo boards
+#### Scenario: The page load starts the main session and every demo board
 
 - **GIVEN** a freshly loaded page with no player game in progress
 - **WHEN** the client initializes
 - **THEN** the main board enters the attract demo with its own session
-- **AND** two demo boards exist with distinct sessions
-- **AND** both demo-board sessions have `status` `active`
+- **AND** one demo board exists per registered engine with a distinct session each
+- **AND** every demo-board session has `status` `active`
 
-#### Scenario: The initial engine assignment follows the registry
+#### Scenario: The engine assignment follows the registry order
 
-- **GIVEN** a board set
+- **GIVEN** a board set and the registry's built-in engines
 - **WHEN** the client resolves the engine of each demo board
 - **THEN** `demo-slot-1` uses the registry engine with id `delphi5` and display name `Delphi 5`
 - **AND** `demo-slot-2` uses the registry engine with id `random` and display name `Random`
 - **AND** the main board uses the registry engine with id `random`
+
+#### Scenario: Registering another engine adds another rail board
+
+- **GIVEN** a registry that lists `delphi5`, `random`, and a third engine
+- **WHEN** a board set is created
+- **THEN** the rail contains `demo-slot-1`, `demo-slot-2`, and `demo-slot-3`
+- **AND** `demo-slot-3` plays the third engine
+- **AND** no browser-client code names that engine
+
+#### Scenario: The rail capacity bounds the board count
+
+- **GIVEN** a registry with more engines than the rail's capacity of `12`
+- **WHEN** a board set is created
+- **THEN** the rail contains exactly `12` boards
+- **AND** they play the first `12` registered engines in registration order
 
 #### Scenario: A board id names its rail slot, not its engine
 
@@ -65,15 +80,15 @@ The client SHALL keep a single `PentixGame` for a board set and SHALL pass it to
 
 ### Requirement: A new main session starts the demo boards in parallel
 
-When the main board starts a new session — on the initial page load, on `start`, on `restart`, on a level selection that starts a game from the game-over screen, and on choosing the attract demo from the game-over screen — the client SHALL create a fresh session for the main board and a fresh session for each demo board in the same state change, all from the new board set's game. Each new demo-board session SHALL open at the starting level applied to the main session, and each slot SHALL return to its initial engine (`delphi5` in slot 1, `random` in slot 2) with the main board returning to `random` as well. Player actions on the main board (`tick`, `move`, `rotate`, `drop`, `pause`, `resume`) SHALL NOT create or reset demo-board sessions.
+When the main board starts a new session — on the initial page load, on `start`, on `restart`, on a level selection that starts a game from the game-over screen, and on choosing the attract demo from the game-over screen — the client SHALL create a fresh session for the main board and a fresh session for each demo board in the same state change, all from the new board set's game. Each new demo-board session SHALL open at the starting level applied to the main session, and each slot SHALL return to the engine the registry assigns to its position (with the built-in engines `delphi5` in slot 1 and `random` in slot 2) while the main board returns to `random` as well. Player actions on the main board (`tick`, `move`, `rotate`, `drop`, `pause`, `resume`) SHALL NOT create or reset demo-board sessions.
 
-#### Scenario: Starting a player game starts both demo boards
+#### Scenario: Starting a player game starts every demo board
 
 - **GIVEN** the attract demo with a board set
 - **WHEN** the player starts a game
 - **THEN** the main session is new and in the playing phase
-- **AND** both demo-board sessions are new and `active`
-- **AND** all three sessions belong to the new board set's game
+- **AND** every demo-board session is new and `active`
+- **AND** all sessions belong to the new board set's game
 
 #### Scenario: Restarting replaces the demo-board sessions
 
@@ -88,14 +103,14 @@ When the main board starts a new session — on the initial page load, on `start
 - **GIVEN** a configured starting level of `4`
 - **WHEN** the player starts a game
 - **THEN** the main session reports level `4`
-- **AND** both demo-board sessions report level `4`
+- **AND** every demo-board session reports level `4`
 
 #### Scenario: A level pick on the game-over screen starts a fresh board set
 
 - **GIVEN** a game-over screen whose cooldown has elapsed and a configured level of `2`
 - **WHEN** the player activates the `6` level button
 - **THEN** a fresh player game starts at level `6`
-- **AND** both demo boards receive fresh sessions at level `6`
+- **AND** every demo board receives a fresh session at level `6`
 
 #### Scenario: Player actions leave the demo boards alone
 
@@ -103,7 +118,7 @@ When the main board starts a new session — on the initial page load, on `start
 - **WHEN** the player moves, rotates, hard-drops, pauses, or resumes
 - **THEN** each demo-board session keeps the same session id, board snapshot, and statistics
 
-#### Scenario: A fresh board set re-applies the initial engines
+#### Scenario: A fresh board set re-applies the registry assignment
 
 - **GIVEN** a board set whose slots were exchanged by a double-click, so slot 1 plays `random` and slot 2 plays `delphi5`
 - **WHEN** the player starts or restarts a game
@@ -161,55 +176,65 @@ The demo boards SHALL advance independently of the main board's phase and of any
 
 ### Requirement: A demo board auto-plays through its own engine and the shared session engine
 
-Each demo board SHALL advance once per gravity interval with a single step that applies the gravity descent, when its active piece can move down, followed by one steering step toward a destination planned by that board's own demo engine. The destination SHALL be planned once per spawned piece and reused across steering steps, and SHALL be re-targeted when that engine returns a last-tick side-step. Steering SHALL rotate toward the destination angle, then move laterally toward the destination column, then hard-drop once aligned. Every movement, rotation, lock, and game-over detection SHALL go through the shared `GameSessionEngine`; the demo boards SHALL NOT re-implement those operations, and a demo board SHALL plan only with its own engine. The interval SHALL follow that board's own `session.statistics.level`.
+Each demo board SHALL plan once per spawned piece with the engine assigned to it: that engine returns a `DemoActionLog` for the board's active piece, and the board SHALL replay the log one action per gravity interval, applying the next action through the shared `GameSessionEngine` and then exactly one gravity tick, so the cadence from the piece's spawn is Action, Tick, Action, Tick. Once the log is exhausted the board SHALL apply ticks only until its piece locks. An action the board blocks SHALL leave the placement unchanged while its paired tick still applies, and any unplayed actions SHALL be dropped when the piece locks. Every movement, rotation, lock, and game-over detection SHALL go through the shared `GameSessionEngine`; the demo boards SHALL NOT re-implement those operations, and a demo board SHALL plan only with its own engine. The interval SHALL follow that board's own `session.statistics.level`.
 
 #### Scenario: Each demo board plans with its own engine
 
 - **GIVEN** a demo board and the engine assigned to it
-- **WHEN** the board plans a destination for its active piece
-- **THEN** it calls that engine's destination operation
+- **WHEN** a piece spawns on that board
+- **THEN** the board calls that engine's `plan` with the board, the piece's orientations, and its rotation point, and receives the piece's action log
 - **AND** it does not consult another engine's planner for that piece
 
-#### Scenario: The random board never side-steps
+#### Scenario: A demo board replays its log as Action then Tick
 
-- **GIVEN** the `random` demo board whose active piece can no longer move down
-- **WHEN** the board's step is planned
-- **THEN** the `random` engine declines a last-tick move
+- **GIVEN** a demo board whose engine returned the log `"LH"` for its current piece
+- **WHEN** its next two gravity intervals elapse
+- **THEN** the first interval moves the piece left and then steps gravity once
+- **AND** the second interval hard-drops the piece and then steps gravity once
+
+#### Scenario: The random board lets gravity finish the piece
+
+- **GIVEN** the `random` demo board whose log has been fully replayed and whose piece has not locked
+- **WHEN** further intervals elapse
+- **THEN** each interval applies one gravity tick and no action
 - **AND** the piece locks through the shared engine
 
-#### Scenario: The Delphi 5 board may side-step on the last tick
+#### Scenario: The Delphi 5 board steers with its log
 
-- **GIVEN** the `delphi5` demo board whose resting piece has a strictly better placement one column away
-- **WHEN** the board's step is planned
-- **THEN** the board moves the piece that one column instead of locking it
-- **AND** its cached destination becomes the side-step column
+- **GIVEN** the `delphi5` demo board and a placed active piece
+- **WHEN** the board replays the engine's log
+- **THEN** the log rotates and moves the piece toward the engine's chosen destination
+- **AND** it ends with a hard drop
+- **AND** every step goes through the shared `GameSessionEngine`
 
-#### Scenario: A falling demo piece descends and steers in the same step
+#### Scenario: A blocked action still ticks
 
-- **GIVEN** a demo board whose active piece can move down
-- **WHEN** its gravity interval elapses
-- **THEN** the piece moves down one row and applies one steering step in that same interval
+- **GIVEN** a demo board whose next action the board blocks
+- **WHEN** its interval elapses
+- **THEN** the placement stays unchanged for the action
+- **AND** the paired gravity tick still applies
 
-#### Scenario: Each demo board keeps its own cadence
+#### Scenario: A new piece drops the old log
 
-- **GIVEN** two demo boards whose sessions have different levels
-- **WHEN** the client compares their gravity intervals
-- **THEN** each interval is derived from that board's own `session.statistics.level`
+- **GIVEN** a demo board whose piece locked with unplayed actions still in its log
+- **WHEN** the next piece spawns
+- **THEN** the board plans a fresh log for the new piece
+- **AND** no action from the old log is replayed
 
 ### Requirement: A demo-board step applies to one board and stale steps are ignored
 
-Every auto-play step SHALL name its board by slot id plus the session id, piece index, angle, and column it was planned for. The client SHALL apply a step only to a board whose session matches all of those values and whose status is `active`; otherwise it SHALL leave the whole board set unchanged. A demo board whose session has reached `status` `game-over` SHALL ignore further steps and keep its final board. Steps planned for one slot SHALL NOT be applied to another slot, whatever engines the two slots play.
+Every auto-play step SHALL name its board by slot id plus the session id and piece index it was planned for. The client SHALL apply a step only to a board whose session matches those values and whose status is `active`; otherwise it SHALL leave the whole board set unchanged. A demo board whose session has reached `status` `game-over` SHALL ignore further steps and keep its final board. Steps planned for one slot SHALL NOT be applied to another slot, whatever engines the slots play.
 
 #### Scenario: Only the addressed board advances
 
-- **GIVEN** a board set with two active demo boards
+- **GIVEN** a board set with several active demo boards
 - **WHEN** a step addressed to `demo-slot-2` is applied
 - **THEN** only the `demo-slot-2` session advances
 - **AND** the `demo-slot-1` session and the main session are unchanged
 
 #### Scenario: A stale step is ignored
 
-- **GIVEN** a step planned for a session id, piece index, angle, or column that no longer matches the addressed demo board
+- **GIVEN** a step planned for a session id or piece index that no longer matches the addressed demo board
 - **WHEN** that step is applied
 - **THEN** the addressed board's session is unchanged
 - **AND** no other board changes
@@ -230,7 +255,7 @@ Every auto-play step SHALL name its board by slot id plus the session id, piece 
 
 ### Requirement: A demo board shows only the primary statistics
 
-Each demo board SHALL render its own session's board at the session's stored `width`-by-`height` grid with its cells colored by `pieceKey` and its active piece overlaid. The demo-board minos SHALL be as large as the rail's four-column wall allows: four board slots plus the three horizontal gaps SHALL fit inside the rail column, with no cell smaller than `4` px and no cell larger than `11` px. Concretely, four boards of the stored `12` columns with `1` px cell gaps, `4` px board padding, `4` px card padding, and `2` px of borders per board occupy `12` times the mino size plus `31` px each, so the mino is `11` px at desktop widths, steps through `10`, `9`, `8`, and `7` px as the shell narrows, and is `6` px once four `7` px boards no longer fit side by side; the rail switches to two boards per row below `480` px. The horizontal gap between rail boards SHALL be the row gap plus `0.25rem` (`4` px at the default root). Above the board each demo board SHALL render the display name of the engine currently assigned to that board — `Random` or `Delphi 5` — followed by exactly three values read from its own session statistics: `Score` (`statistics.score`), `Lines` (`statistics.clearedLines`), and `Pieces` (`statistics.blocks`). It SHALL NOT render a next-piece preview, a pieces statistics popup, action counters, a level selector, on-screen controls, a pause overlay, or a game-over overlay, and SHALL read every value from the session snapshot rather than keeping client-side copies.
+Each demo board SHALL render its own session's board at the session's stored `width`-by-`height` grid with its cells colored by `pieceKey` and its active piece overlaid. The demo-board minos SHALL be as large as the rail's four-column wall allows: four board slots plus the three horizontal gaps SHALL fit inside the rail column, with no cell smaller than `4` px and no cell larger than `11` px. Concretely, four boards of the stored `12` columns with `1` px cell gaps, `4` px board padding, `4` px card padding, and `2` px of borders per board occupy `12` times the mino size plus `31` px each, so the mino is `11` px at desktop widths, steps through `10`, `9`, `8`, and `7` px as the shell narrows, and is `6` px once four `7` px boards no longer fit side by side; the rail switches to two boards per row below `480` px. The horizontal gap between rail boards SHALL be the row gap plus `0.25rem` (`4` px at the default root). Above the board each demo board SHALL render the display name of the engine currently assigned to that board and SHALL expose that engine's `description` as the label's tooltip, both read from the registry; the name SHALL NOT be limited to a fixed list of engines. Next to the name it SHALL render exactly three values read from its own session statistics: `Score` (`statistics.score`), `Lines` (`statistics.clearedLines`), and `Pieces` (`statistics.blocks`). It SHALL NOT render a next-piece preview, a pieces statistics popup, action counters, a level selector, on-screen controls, a pause overlay, or a game-over overlay, and SHALL read every value from the session snapshot rather than keeping client-side copies.
 
 #### Scenario: The primary statistics match the board's session
 
@@ -238,6 +263,12 @@ Each demo board SHALL render its own session's board at the session's stored `wi
 - **WHEN** the board renders
 - **THEN** it shows the engine display name and those three values
 - **AND** it renders no other statistic
+
+#### Scenario: The engine description is exposed by the board
+
+- **GIVEN** a demo board whose engine has a non-empty description in the registry
+- **WHEN** the board renders
+- **THEN** the engine label carries that description as its tooltip
 
 #### Scenario: A demo board renders no secondary statistics or controls
 
@@ -292,12 +323,12 @@ Each demo board SHALL render its own session's board at the session's stored `wi
 
 While the main board runs its attract demo, every level change that applies to the live demo session — a level button, the `+`/`-` keys, or a `0`-`9` key — SHALL also apply to every demo-board session, so the whole rail changes its gravity cadence together with the main demo. Such a change SHALL keep each demo board's session id, engine, board snapshot, statistics, and piece index, changing only the level. Level changes during a player game SHALL apply to the main session only, and a level chosen during the demo's post-game-over delay SHALL be applied to the main session and to every demo board by the next demo restart.
 
-#### Scenario: A demo level change retunes both demo boards
+#### Scenario: A demo level change retunes every demo board
 
 - **GIVEN** an attract demo whose main session and demo boards all report level `2`
 - **WHEN** the player activates the `5` level button
 - **THEN** the main session reports level `5`
-- **AND** both demo-board sessions report level `5`
+- **AND** every demo-board session reports level `5`
 - **AND** every session keeps its id, board snapshot, statistics, and piece index
 
 #### Scenario: The level step keys retune the rail too
@@ -308,10 +339,10 @@ While the main board runs its attract demo, every level change that applies to t
 
 #### Scenario: A player-game level change leaves the demo boards alone
 
-- **GIVEN** a running player game at level `2` with both demo boards playing
+- **GIVEN** a running player game at level `2` with every demo board playing
 - **WHEN** the player raises the level to `4`
 - **THEN** the main session reports level `4`
-- **AND** both demo-board sessions keep the level and the session state they had
+- **AND** every demo-board session keeps the level and the session state it had
 
 #### Scenario: A level chosen during the demo delay applies on the next restart
 
@@ -325,12 +356,12 @@ While the main board runs its attract demo, every level change that applies to t
 - **GIVEN** an attract demo after a double-click that exchanged the main board with `demo-slot-1`
 - **WHEN** the player activates the `7` level button
 - **THEN** the main session reports level `7`
-- **AND** both demo-board sessions report level `7`
+- **AND** every demo-board session reports level `7`
 - **AND** each slot keeps the engine it received from the swap
 
 ### Requirement: Double-clicking a demo board moves it to the main board
 
-While the main board runs its attract demo or shows its finished demo before the restart delay elapses, a double-click on a demo board SHALL exchange the two boards: the clicked board's session and engine SHALL become the main board's session and engine, and the main board's session and engine SHALL take that board's slot. The exchange SHALL keep both sessions unchanged — same session id, board snapshot, statistics, piece index, status, and level — SHALL NOT create a session, SHALL NOT touch the other demo board, and SHALL keep the single shared `PentixGame` as the board set's game. After the exchange the main board SHALL take the phase that matches the arriving session's status: `demo` for an `active` session and `demo-over` for a `game-over` session. A double-click SHALL be ignored while the main board runs a player game, and the rail SHALL NOT reorder its slots.
+While the main board runs its attract demo or shows its finished demo before the restart delay elapses, a double-click on a demo board SHALL exchange the two boards: the clicked board's session and engine SHALL become the main board's session and engine, and the main board's session and engine SHALL take that board's slot. The exchange SHALL keep both sessions unchanged — same session id, board snapshot, statistics, piece index, status, and level — SHALL NOT create a session, SHALL NOT touch any other demo board, and SHALL keep the single shared `PentixGame` as the board set's game. After the exchange the main board SHALL take the phase that matches the arriving session's status: `demo` for an `active` session and `demo-over` for a `game-over` session. A double-click SHALL be ignored while the main board runs a player game, and the rail SHALL NOT reorder its slots.
 
 #### Scenario: The clicked demo board takes over the main board
 
@@ -349,11 +380,12 @@ While the main board runs its attract demo or shows its finished demo before the
 - **AND** the demo-board slot advances the session it received with that session's engine
 - **AND** no session is created or reset by the exchange
 
-#### Scenario: The swap leaves the other demo board untouched
+#### Scenario: The swap leaves the other demo boards untouched
 
-- **GIVEN** an attract demo with two demo boards that have locked pieces
+- **GIVEN** an attract demo with several demo boards that have locked pieces
 - **WHEN** the player double-clicks `demo-slot-2`
 - **THEN** `demo-slot-1` keeps the same session id, board snapshot, statistics, and engine
+- **AND** every other slot that was not clicked keeps its session and engine
 
 #### Scenario: The swap is ignored during a player game
 

@@ -16,50 +16,71 @@ The browser gameplay client SHALL start demo mode when the page first loads with
 
 ### Requirement: The demo imitates player actions within the shared engine
 
-The demo SHALL plan the active piece's destination (rotation angle and column) with the demo engine selected from the shared demo engine registry, and SHALL use that same engine's last-tick operation to decide whether a resting piece side-steps instead of locking. The browser client SHALL keep the main board's selected engine in its game state as a demo engine id, SHALL resolve that engine from the registry by id, SHALL initialize it to `random` on the initial page load and on every fresh board set, and SHALL NOT keep a separate temporary or hard-coded engine override constant outside that state. The selected engine SHALL travel with the session it planned, so after the main board and a demo board exchange sessions each board plans with the engine that arrived with its session. The destination SHALL be planned once per spawned piece and reused across steering steps, and SHALL additionally be re-targeted when the selected engine returns a last-tick side-step. The demo SHALL then steer toward that destination by rotating, then moving left or right, then hard-dropping once aligned. All demo movement, rotation, locking, and game-over detection SHALL go through the shared `GameSessionEngine`; the demo SHALL NOT re-implement those operations. A steering step that the board blocks on a resting piece SHALL lock that piece through the same engine instead of waiting, so a destination the piece can no longer reach never freezes the demo.
+The demo SHALL plan the active piece's actions with the demo engine selected from the shared demo engine registry. That engine SHALL return one `DemoActionLog` per spawned piece, and the browser client SHALL replay the log one action per gravity interval: on each interval it SHALL apply the next action code through the shared `GameSessionEngine` and then apply exactly one gravity tick, so the cadence from the piece's spawn is Action, Tick, Action, Tick. Once the log is exhausted the client SHALL apply ticks only until the piece locks. An action the board blocks SHALL leave the placement unchanged while its paired tick still applies. The browser client SHALL keep the main board's selected engine in its game state as a demo engine id, SHALL resolve that engine from the registry by id, SHALL initialize it to `random` on the initial page load and on every fresh board set, and SHALL NOT keep a separate temporary or hard-coded engine override constant outside that state. The selected engine SHALL travel with the session it planned, so after the main board and a demo board exchange sessions each board plans with the engine that arrived with its session. The log SHALL be planned once per spawned piece and replayed across intervals; the demo SHALL NOT re-plan mid-piece, SHALL NOT ask the engine on the last tick, and SHALL drop any unplayed actions when the piece locks. All demo movement, rotation, locking, and game-over detection SHALL go through the shared `GameSessionEngine`; the demo SHALL NOT re-implement those operations.
 
 #### Scenario: The demo plans with the selected engine
 
 - **GIVEN** an active demo session and a demo engine selected from the registry
-- **WHEN** the demo plans a destination for the active piece
-- **THEN** it calls that engine's destination operation
+- **WHEN** a piece spawns
+- **THEN** the demo calls that engine's `plan` with the board, the piece's orientations, and its rotation point, and receives its action log
 - **AND** it does not consult another engine's planner for that piece
+
+#### Scenario: The demo replays the log as Action then Tick
+
+- **GIVEN** an active demo session whose engine returned the log `"LR"` for the current piece
+- **WHEN** the first two gravity intervals elapse
+- **THEN** the first interval moves the piece left and then steps gravity once
+- **AND** the second interval moves the piece right and then steps gravity once
+- **AND** the piece moves once and descends once per interval, in that order
+
+#### Scenario: The first action lands before the first tick
+
+- **GIVEN** a piece that has just spawned and a log that starts with `L`
+- **WHEN** the first gravity interval elapses
+- **THEN** the piece moves left before it descends
+- **AND** it does not descend before the action
+
+#### Scenario: Gravity continues after the log ends
+
+- **GIVEN** a piece whose log has been fully replayed and which has not locked
+- **WHEN** further gravity intervals elapse
+- **THEN** each interval applies one gravity tick and no action
+- **AND** the piece locks when a tick settles it
+
+#### Scenario: A blocked action does not stall the demo
+
+- **GIVEN** a resting piece and a log whose next action the board blocks
+- **WHEN** the interval elapses
+- **THEN** the blocked action leaves the placement unchanged
+- **AND** the paired gravity tick locks the piece and the next piece spawns
+- **AND** the unplayed actions of the old piece are dropped
 
 #### Scenario: The main board runs the Random engine
 
 - **GIVEN** a freshly loaded page, a freshly started player game that has ended, or a freshly started attract demo
-- **WHEN** the client selects the engine that plans the main board's destinations
+- **WHEN** the client selects the engine that plans the main board's actions
 - **THEN** it resolves the registry engine whose id is `random` and whose display name is `Random`
 - **AND** it reads that id from the game state instead of a hard-coded selection outside it
 
-#### Scenario: The demo plans a destination for the active piece
+#### Scenario: The log follows the classic placement preference
 
 - **GIVEN** an active demo session with a placeable active piece and the `delphi5` engine selected
-- **WHEN** the demo computes the destination for that piece
-- **THEN** the planner returns a rotation angle and column that are valid for the active piece
-- **AND** prefers placements that are lower, that reduce the number of column holes, and that complete more full rows
-- **AND** among placements with equal score, prefers a lower bottom, then a lower top, then more orthogonal contacts with settled minos or the board walls, then a placement that does not touch a side wall, with remaining ties chosen randomly
+- **WHEN** the engine returns the piece's log
+- **THEN** the log steers toward a placement that is lower, reduces the number of column holes, and completes more full rows
+- **AND** among placements with equal score it steers toward the one the classic tie-breaks prefer
 
-#### Scenario: The destination is held for the whole piece
+#### Scenario: The log is held for the whole piece
 
-- **GIVEN** an active demo session and a planned destination
-- **WHEN** the demo steers the same piece over several ticks
-- **THEN** the target angle and column stay the same until a last-tick side-step re-targets them or a new piece spawns
+- **GIVEN** an active demo session and a planned action log
+- **WHEN** the demo replays it over several ticks
+- **THEN** the log is not replaced until the piece locks or a new piece spawns
 
-#### Scenario: The demo steers and hard-drops toward the destination
+#### Scenario: An engine that returns an empty log lets the piece fall
 
-- **GIVEN** an active demo session and a computed destination
-- **WHEN** the demo advances
-- **THEN** it rotates the piece toward the destination angle, then moves it laterally toward the destination column, then hard-drops it once aligned
-- **AND** the first step toward a re-targeted destination is the single side-step
-- **AND** the resulting state is produced by the shared `GameSessionEngine`
-
-#### Scenario: An engine that declines a last-tick move lets the piece lock
-
-- **GIVEN** an active demo session whose selected engine returns `null` from its last-tick operation
-- **WHEN** the active piece can no longer move down
-- **THEN** the demo locks the piece through the shared `GameSessionEngine`
-- **AND** it does not move the piece sideways
+- **GIVEN** an active demo session whose selected engine returns an empty log
+- **WHEN** the gravity intervals elapse
+- **THEN** the demo applies no actions
+- **AND** the piece falls and locks through the shared `GameSessionEngine`
 
 #### Scenario: The selected engine follows a swapped session
 
@@ -80,14 +101,6 @@ The demo SHALL plan the active piece's destination (rotation angle and column) w
 - **WHEN** the `700` ms delay elapses and a fresh demo session starts on the main board
 - **THEN** the fresh main demo session is planned by the `delphi5` engine
 - **AND** no demo board's session or engine changes
-
-#### Scenario: An unreachable destination locks the resting piece
-
-- **GIVEN** a resting demo piece whose planned destination needs a lateral or rotational step that settled cells block
-- **WHEN** the demo takes that step
-- **THEN** it locks the piece through the shared `GameSessionEngine` and spawns the next piece
-- **AND** the demo keeps advancing instead of waiting for a placement it can never reach
-- **AND** a game over reached later is still detected through the shared engine, so the delayed restart follows
 
 ### Requirement: Starting a player game exits the demo
 
@@ -111,87 +124,26 @@ After a player game over, the final board SHALL remain visible, and pressing Spa
 - **THEN** the client starts a fresh demo session
 - **AND** auto-plays while the player's final board is replaced by the demo board
 
-### Requirement: The demo plans each placement together with its side-steps
+### Requirement: The demo advances one action and one gravity step per interval
 
-When the `delphi5` engine is selected, when planning a destination the demo SHALL score every candidate settled placement together with the placements one column to its left and one column to its right at the same row, because the demo can side-step there on its last tick. A placement, including a side-stepped one, SHALL be scored after being allowed to fall as far as it can, so a side-step that keeps the piece falling is scored at its further landing and is preferred over a side-step that merely parks the piece. The destination returned SHALL be the column the piece must be dropped in to reach the winning placement, and the usual score and tie-break precedence SHALL decide the winner.
+The browser gameplay client SHALL advance the demo exactly once per gravity interval with a single step that applies one action from the selected engine's log (when the log still has an unplayed action) followed by exactly one gravity tick, and SHALL NOT advance demo gravity from a separate gravity loop. Once the log has no unplayed actions the step SHALL apply the gravity tick alone. The step SHALL carry the session id and piece index it was planned for, and the client SHALL ignore a step that no longer matches the current demo session or piece.
 
-#### Scenario: A side-step into a deeper column drives the destination
+#### Scenario: The action and the tick share one interval
 
-- **GIVEN** the `delphi5` engine is selected and a board where the placement under a settled mino on the floor is only reachable by dropping in the neighbouring column and side-stepping right on the last tick
-- **WHEN** the demo plans the destination for a piece spawning on that board
-- **THEN** the destination column is the neighbouring column the piece must be dropped in
-- **AND** that placement is scored as the winning placement even though a straight drop into the mino's column cannot reach it
-
-#### Scenario: A side-step that parks the piece can still win
-
-- **GIVEN** the `delphi5` engine is selected and a candidate placement whose side-step cannot fall any further but scores better than staying where the piece would lock
-- **WHEN** the demo plans the destination
-- **THEN** the side-stepped placement is compared with the other candidates on score and tie-breaks
-- **AND** it wins when it is the best of them
-
-#### Scenario: A placement that needs no side-step is preferred when everything ties
-
-- **GIVEN** the `delphi5` engine is selected and two placements that are equal on score and on every tie-break, one reachable by a straight drop and one only by a side-step
-- **WHEN** the demo selects the winning placement
-- **THEN** the placement reachable by the straight drop is chosen
-
-### Requirement: The demo side-steps on its last tick instead of locking
-
-When the `delphi5` engine is selected, when the demo's active piece can no longer move down, the demo SHALL compare its resting placement with the placements one column left and one column right at the same row and SHALL move the piece one column to a neighbour when that neighbour is strictly better on the demo's placement ordering (score, then the tie-break precedence). The demo SHALL NOT require the side-step to enable further descent: parking the piece in a better placement counts. The demo SHALL NOT take a side-step that is not a strict improvement, and SHALL re-target its destination to the side-step column. The comparison SHALL repeat on every later last tick of the same piece, and the piece SHALL lock when no neighbour is better.
-
-#### Scenario: The demo side-steps into a better placement
-
-- **GIVEN** the `delphi5` engine is selected and a resting demo piece whose neighbour placement one column away scores better than where the piece rests
-- **WHEN** the demo advances on that last tick
-- **THEN** the demo moves the piece that one column through the shared engine
-- **AND** it does not lock the piece and does not spawn the next piece
-- **AND** the demo's destination becomes the side-step column
-
-#### Scenario: The demo parks the piece under a settled mino
-
-- **GIVEN** the `delphi5` engine is selected and a resting demo piece on the floor beside a settled mino one row above the side wall, where stepping toward the wall cannot fall any further but scores better
-- **WHEN** the demo advances on that last tick
-- **THEN** the demo steps toward the wall instead of locking
-
-#### Scenario: A side-step that scores worse is not taken
-
-- **GIVEN** the `delphi5` engine is selected and a resting demo piece with a legal side-step whose resulting placement scores worse than staying
-- **WHEN** the demo advances on that last tick
-- **THEN** the demo locks the piece through the shared engine
-
-#### Scenario: An indistinguishable side-step is not taken
-
-- **GIVEN** the `delphi5` engine is selected and a resting demo piece whose legal side-step is equal to the resting placement on the score and on every tie-break
-- **WHEN** the demo advances on that last tick
-- **THEN** the demo locks the piece instead of shuffling sideways
-
-#### Scenario: The last-tick check repeats as the piece descends
-
-- **GIVEN** the `delphi5` engine is selected and a demo piece that took a last-tick side-step and fell at least one row
-- **WHEN** that piece comes to rest again
-- **THEN** the demo compares its placement with its neighbours again
-- **AND** repeats until no neighbour is better, at which point it locks the piece
-
-### Requirement: The demo advances one gravity step and one steering step per interval
-
-The browser gameplay client SHALL advance the demo exactly once per gravity interval with a single step that applies the gravity descent (when the piece can move down) followed by one steering step, and SHALL NOT advance demo gravity from a separate gravity loop. A demo step planned for a different session, piece, or piece placement SHALL be ignored.
-
-#### Scenario: A falling piece descends and steers in the same step
-
-- **GIVEN** an active demo session whose piece can move down and a planned steering step
+- **GIVEN** an active demo session and a log with an unplayed action
 - **WHEN** the gravity interval elapses
-- **THEN** the piece moves down one row and applies the one steering step in that same interval
+- **THEN** the piece applies that one action and then moves down one row, or locks when it cannot
 - **AND** no other timer advances the demo
 
-#### Scenario: The last-tick check cannot be pre-empted
+#### Scenario: An exhausted log runs ticks only
 
-- **GIVEN** a demo piece that cannot move down and a better side-step available
+- **GIVEN** an active demo session whose log has no unplayed actions
 - **WHEN** the gravity interval elapses
-- **THEN** the demo applies the side-step instead of locking the piece
+- **THEN** the demo applies one gravity tick and no action
 
 #### Scenario: A stale demo step is ignored
 
-- **GIVEN** a demo step planned for a session, piece index, and placement that no longer match the current demo state
+- **GIVEN** a demo step planned for a session id or piece index that no longer matches the current demo state
 - **WHEN** the client applies that step
 - **THEN** the demo state is left unchanged
 

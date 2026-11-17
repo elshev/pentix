@@ -1,4 +1,4 @@
-# Pentix Architecture
+﻿# Pentix Architecture
 
 The repository uses an `apps/` and `packages/` layout so the browser client and `PentixServer` share common game-domain code instead of duplicating it.
 
@@ -67,6 +67,12 @@ The shared engine ports the Delphi playfield rules from [Tetris.pas](C:/ai/penti
 - Scoring: a lock scores `points × level`, a drop scores `points × (height − row) × level ÷ 10`, a cleared line scores `lineIndex × (10 + (height − row)) × level`, plus a `1000`-point empty-field bonus. Level rises every 30 locked pieces up to level 9.
 
 A session's `status` becomes `game-over` when a spawn is blocked.
+
+## Demo Engines
+
+The attract demo and every rail board are driven by demo engines from `packages/pentix-core/src/demo-engines/`. One engine is one module named `<engine-id>-demo-engine.ts` and exporting `id`, `name`, `description`, and `plan(board, piece, position)`. The engine sees only what it needs: the visible board as rows of `0`/`1`, the active piece's reachable orientations, and that rotation point. It returns a replayable action log over `L`, `R`, `C`, `A`, `H` and never contains `T`: the demo driver applies Action then Tick from the piece's spawn, then ticks alone until the piece locks.
+
+`demo-engines/index.ts` is the catalog: registering a module there adds a rail board through the registry, with no browser-client change. `DemoEngineRegistry` validates each module's shape and kebab-case id, resolves engines by id, lists them in registration order, and exposes `{ id, name, description }` summaries for the UI, which shows an engine's name on its board with its description as a tooltip. An authored plan function is standalone (no imports); its wrapper and the built-in engines use `demo-engine-toolkit.ts` for the minimal geometry helpers (`createDemoEngineInput`, `demoLandingRow`, `actionsToward`) and the classic planner. The shared brief for AI-authored engines is [demo-engine-task.md](./demo-engine-task.md).
 
 ## Next Likely Steps
 
