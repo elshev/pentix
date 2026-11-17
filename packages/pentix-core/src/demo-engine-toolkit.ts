@@ -10,15 +10,18 @@ export {
   actionsToward,
   createDemoEngineInput,
   demoCanPlace,
+  demoCanPlaceAt,
   demoLandingRow,
   demoPieceCells,
   isDemoAction,
+  isDemoLastTickMove,
 } from './demo-actions.js'
 export type {
   DemoAction,
   DemoActionLog,
   DemoBoard,
   DemoEngineInput,
+  DemoLastTickMove,
   DemoPiece,
   DemoPieceCell,
   DemoPieceOrientation,

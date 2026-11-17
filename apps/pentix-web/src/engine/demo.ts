@@ -1,10 +1,13 @@
 /** Browser demo steering — replays the selected engine's per-piece action log. */
 import {
+  DEMO_ACTION_CODES,
   createDemoEngineInput,
   isDemoAction,
+  isDemoLastTickMove,
   type DemoAction,
   type DemoActionLog,
   type DemoEngine,
+  type DemoLastTickMove,
   type PentixGameSession,
 } from '#pentix/core'
 
@@ -63,4 +66,35 @@ export function advanceDemoPlan(plan: DemoPlan): DemoPlan {
     return plan
   }
   return { ...plan, index: plan.index + 1 }
+}
+
+/** One replayed step: the action, its post-drop side-step, and the rest of the log. */
+export interface DemoStepPlan {
+  readonly action: DemoAction | null
+  readonly lastTickAction: DemoLastTickMove | null
+  readonly plan: DemoPlan
+}
+
+/**
+ * The next step of the plan. A hard drop consumes the code after it as the
+ * piece's last-tick move, because the driver applies that side-step in the same
+ * interval, after the drop and before the interval's tick. Any other code
+ * consumes one position, and an exhausted or invalid log consumes nothing new.
+ */
+export function nextDemoStep(plan: DemoPlan): DemoStepPlan {
+  const action = nextDemoAction(plan)
+  let next = advanceDemoPlan(plan)
+
+  if (action !== DEMO_ACTION_CODES.hardDrop) {
+    return { action, lastTickAction: null, plan: next }
+  }
+
+  const followUp = nextDemoAction(next)
+  next = advanceDemoPlan(next)
+  return {
+    action,
+    lastTickAction:
+      followUp !== null && isDemoLastTickMove(followUp) ? followUp : null,
+    plan: next,
+  }
 }

@@ -1,38 +1,51 @@
-import type { BoardSnapshot } from './board.js'
+import {
+  DEMO_ACTION_CODES,
+  demoBoardOf,
+  demoCanPlaceAt,
+  demoLandingRow,
+  demoOffsetCells,
+  type DemoBoard,
+  type DemoLastTickMove,
+  type DemoPieceOrientation,
+} from './demo-actions.js'
+import { canPlace, getActivePiece, getOccupiedCells } from './placement.js'
 import {
   getOccupiedOffsets,
   normalizeAngle,
-  type Offset,
   type RotationAngle,
   type RotationMode,
 } from './piece.js'
-import { canPlace, getActivePiece, getOccupiedCells } from './placement.js'
 import type { BoardPosition, PentixGameSession } from './session.js'
 
 /**
  * Demo (attract-mode) auto-play. Ports the Delphi `CalcDemoDest` destination
  * heuristic so the browser demo imitates the classic client's self-play.
- * `planDemoDestination` chooses where to steer the active piece, and
+ *
+ * `planDemoDestination` chooses where to steer the active piece and
  * `planDemoLastTickMove` chooses the side-step a resting piece takes instead of
  * locking when the neighbouring placement scores better. Both compare the
  * placement itself with its immediate side-steps, so a placement that is only
- * reachable on the last tick is planned like any other.
+ * reachable on the last tick is planned like any other. The destination also
+ * reports that side-step as a last-tick move, which is what a `plan` log
+ * appends after its hard drop.
  */
 
-/** The demo's chosen rotation angle and origin column for the active piece. */
+/** The demo's chosen rotation angle and origin column. */
 export interface DemoDestination {
   readonly angle: RotationAngle
   readonly column: number
+  /** The side-step the piece takes after its hard drop, or `null`. */
+  readonly lastTickMove: DemoLastTickMove | null
 }
 
 const HOLES_COEF = 1.5
 const ALL_ANGLES = [0, 90, 180, 270] as const
 
 interface PieceExtents {
-  readonly minX: number
-  readonly maxX: number
-  readonly minY: number
-  readonly maxY: number
+  readonly minColumn: number
+  readonly maxColumn: number
+  readonly minRow: number
+  readonly maxRow: number
 }
 
 interface DemoChoice extends PlacementScore {
@@ -57,43 +70,76 @@ interface PlacementScore {
   readonly contacts: number
 }
 
-function pieceExtents(offsets: readonly Offset[]): PieceExtents {
-  let minX = 0
-  let maxX = 0
-  let minY = 0
-  let maxY = 0
+/**
+ * The visible board as a scratch grid, plus the per-column hole counts and the
+ * already-full rows a score needs. A candidate writes its cells into the grid,
+ * scores them, and clears them again, so no candidate copies the board.
+ */
+interface DemoGrid {
+  readonly grid: boolean[][]
+  readonly width: number
+  readonly height: number
+  readonly columnHoles: readonly number[]
+  readonly fullRows: readonly boolean[]
+}
 
-  for (const offset of offsets) {
-    if (offset.x < minX) {
-      minX = offset.x
+function pieceExtents(cells: DemoPieceOrientation): PieceExtents {
+  let minColumn = 0
+  let maxColumn = 0
+  let minRow = 0
+  let maxRow = 0
+
+  for (const cell of cells) {
+    if (cell.column < minColumn) {
+      minColumn = cell.column
     }
-    if (offset.x > maxX) {
-      maxX = offset.x
+    if (cell.column > maxColumn) {
+      maxColumn = cell.column
     }
-    if (offset.y < minY) {
-      minY = offset.y
+    if (cell.row < minRow) {
+      minRow = cell.row
     }
-    if (offset.y > maxY) {
-      maxY = offset.y
+    if (cell.row > maxRow) {
+      maxRow = cell.row
     }
   }
 
-  return { minX, maxX, minY, maxY }
+  return { minColumn, maxColumn, minRow, maxRow }
 }
 
-/** The board cells occupied by `offsets` anchored at `origin`. */
-function cellsAt(
-  offsets: readonly Offset[],
-  origin: BoardPosition,
-): BoardPosition[] {
-  return offsets.map((offset) => ({
-    row: origin.row + offset.y,
-    column: origin.column + offset.x,
-  }))
+/** The scratch grid and the base-board facts a placement score needs. */
+function createDemoGrid(board: DemoBoard): DemoGrid {
+  const height = board.length
+  const width = height > 0 ? board[0].length : 0
+  const grid = board.map((row) => row.map((value) => value === 1))
+  const columnHoles: number[] = new Array<number>(width).fill(0)
+
+  for (let column = 0; column < width; column += 1) {
+    let hasBlock = false
+    let holes = 0
+    for (let row = 0; row < height; row += 1) {
+      if (grid[row][column]) {
+        hasBlock = true
+      } else if (hasBlock) {
+        holes += 1
+      }
+    }
+    columnHoles[column] = holes
+  }
+
+  return {
+    grid,
+    width,
+    height,
+    columnHoles,
+    fullRows: grid.map((row) => row.every((occupied) => occupied)),
+  }
 }
 
-/** The rotation angles to try, normalized for the piece's rotation mode. */
-export function candidateAngles(rotationMode: RotationMode): RotationAngle[] {
+/**
+ * The rotation angles to try, normalized for the piece's rotation mode.
+ */
+function candidateAngles(rotationMode: RotationMode): RotationAngle[] {
   const angles = new Set<RotationAngle>()
   for (const raw of ALL_ANGLES) {
     angles.add(normalizeAngle(raw, rotationMode))
@@ -102,22 +148,20 @@ export function candidateAngles(rotationMode: RotationMode): RotationAngle[] {
 }
 
 /**
- * Walks a piece straight down from `origin` and returns its landing origin, or
+ * Walks `cells` straight down from `origin` and returns its resting origin, or
  * `null` when the piece cannot be placed at `origin` at all.
  */
-function descend(
-  board: BoardSnapshot,
-  offsets: readonly Offset[],
+function settle(
+  board: DemoBoard,
+  cells: DemoPieceOrientation,
   origin: BoardPosition,
 ): BoardPosition | null {
-  if (!canPlace(board, cellsAt(offsets, origin))) {
+  if (!demoCanPlaceAt(board, cells, origin.row, origin.column)) {
     return null
   }
 
   let row = origin.row
-  while (
-    canPlace(board, cellsAt(offsets, { row: row + 1, column: origin.column }))
-  ) {
+  while (demoCanPlaceAt(board, cells, row + 1, origin.column)) {
     row += 1
   }
 
@@ -125,87 +169,28 @@ function descend(
 }
 
 /**
- * Finds where a piece dropped straight down in `column` comes to rest, or
- * `null` when the column's shaft is blocked at the top so the piece can never
- * reach it.
+ * Counts the orthogonal contacts of `cells` at `origin` with settled minos and
+ * the board walls. The piece cells are not yet written into the grid, so it
+ * never counts the piece's own cells.
  */
-export function findLandingRow(
-  board: BoardSnapshot,
-  offsets: readonly Offset[],
-  column: number,
-): number | null {
-  const { minY } = pieceExtents(offsets)
-  const landing = descend(board, offsets, { row: -minY, column })
-  return landing === null ? null : landing.row
-}
-
-function countHoles(
-  grid: readonly (readonly boolean[])[],
-  width: number,
-  height: number,
-): number {
-  let holes = 0
-  for (let column = 0; column < width; column += 1) {
-    let hasBlock = false
-    for (let row = 0; row < height; row += 1) {
-      if (grid[row][column]) {
-        hasBlock = true
-      } else if (hasBlock) {
-        holes += 1
-      }
-    }
-  }
-  return holes
-}
-
-function countFullLines(
-  grid: readonly (readonly boolean[])[],
-  width: number,
-  height: number,
-): number {
-  let lines = 0
-  for (let row = 0; row < height; row += 1) {
-    let full = true
-    for (let column = 0; column < width; column += 1) {
-      if (!grid[row][column]) {
-        full = false
-        break
-      }
-    }
-    if (full) {
-      lines += 1
-    }
-  }
-  return lines
-}
-
-const NEIGHBOR_OFFSETS = [
-  { dx: 0, dy: -1 },
-  { dx: 0, dy: 1 },
-  { dx: -1, dy: 0 },
-  { dx: 1, dy: 0 },
-] as const
-
 function countContacts(
-  baseGrid: readonly (readonly boolean[])[],
-  width: number,
-  height: number,
-  cells: readonly { readonly row: number; readonly column: number }[],
+  demoGrid: DemoGrid,
+  cells: DemoPieceOrientation,
+  origin: BoardPosition,
 ): number {
+  const { grid, width, height } = demoGrid
   let contacts = 0
+
   for (const cell of cells) {
-    for (const { dx, dy } of NEIGHBOR_OFFSETS) {
-      const row = cell.row + dy
-      const column = cell.column + dx
-      if (row < 0 || row >= height || column < 0 || column >= width) {
-        // Wall contact: a side wall, the floor, or the ceiling.
-        contacts += 1
-      } else if (baseGrid[row][column]) {
-        // Mino contact: touches an already-settled mino.
-        contacts += 1
-      }
-    }
+    const row = origin.row + cell.row
+    const column = origin.column + cell.column
+    // Wall contact: a side wall, the floor, or the ceiling.
+    contacts += row - 1 < 0 || grid[row - 1][column] ? 1 : 0
+    contacts += row + 1 >= height || grid[row + 1][column] ? 1 : 0
+    contacts += column - 1 < 0 || grid[row][column - 1] ? 1 : 0
+    contacts += column + 1 >= width || grid[row][column + 1] ? 1 : 0
   }
+
   return contacts
 }
 
@@ -225,6 +210,77 @@ function bankersRound(value: number): number {
     return Math.ceil(value)
   }
   return floor % 2 === 0 ? floor : floor + 1
+}
+
+/**
+ * Scores one settled placement: `row + round((holesBefore − holesAfter) × 1.5) +
+ * fullLines²`, plus the values the tie-breaks compare. Both demo planners score
+ * through this helper so their candidates stay comparable.
+ *
+ * Only the columns the piece touches can change their hole count, and only the
+ * rows it touches can become full, so the score is computed locally and the
+ * piece cells are cleared from the shared grid afterwards.
+ */
+function scorePlacement(
+  demoGrid: DemoGrid,
+  cells: DemoPieceOrientation,
+  origin: BoardPosition,
+): PlacementScore {
+  const { grid, width, height, columnHoles, fullRows } = demoGrid
+  const { minColumn, maxColumn, minRow, maxRow } = pieceExtents(cells)
+  // Contacts compare with the board without this piece, so count them first.
+  const contacts = countContacts(demoGrid, cells, origin)
+
+  const touchedColumns = new Set<number>()
+  const touchedRows = new Set<number>()
+  for (const cell of cells) {
+    const row = origin.row + cell.row
+    const column = origin.column + cell.column
+    grid[row][column] = true
+    touchedColumns.add(column)
+    touchedRows.add(row)
+  }
+
+  let holesDelta = 0
+  for (const column of touchedColumns) {
+    let hasBlock = false
+    let holes = 0
+    for (let row = 0; row < height; row += 1) {
+      if (grid[row][column]) {
+        hasBlock = true
+      } else if (hasBlock) {
+        holes += 1
+      }
+    }
+    holesDelta += holes - columnHoles[column]
+  }
+
+  let fullLines = 0
+  for (const row of touchedRows) {
+    if (grid[row].every((occupied) => occupied)) {
+      fullLines += 1
+    }
+  }
+  for (let row = 0; row < height; row += 1) {
+    if (fullRows[row] && !touchedRows.has(row)) {
+      fullLines += 1
+    }
+  }
+
+  for (const cell of cells) {
+    grid[origin.row + cell.row][origin.column + cell.column] = false
+  }
+
+  return {
+    priority:
+      origin.row + bankersRound(-holesDelta * HOLES_COEF) + fullLines * fullLines,
+    bottom: origin.row + maxRow,
+    top: origin.row + minRow,
+    touchesWall:
+      origin.column + minColumn === 0 ||
+      origin.column + maxColumn === width - 1,
+    contacts,
+  }
 }
 
 /**
@@ -278,42 +334,6 @@ function preferCandidate(candidate: DemoChoice, best: DemoChoice): boolean {
   return Math.random() < 0.5
 }
 
-/**
- * Scores one settled placement: `row + round((holesBefore − holesAfter) × 1.5) +
- * fullLines²`, plus the values the tie-breaks compare. Both demo planners score
- * through this helper so their candidates stay comparable.
- */
-function scorePlacement(
-  baseGrid: readonly (readonly boolean[])[],
-  width: number,
-  height: number,
-  holesBefore: number,
-  offsets: readonly Offset[],
-  origin: BoardPosition,
-): PlacementScore {
-  const { minX, maxX, minY, maxY } = pieceExtents(offsets)
-  const cells = cellsAt(offsets, origin)
-  const grid = baseGrid.map((gridRow) => gridRow.slice())
-  for (const cell of cells) {
-    grid[cell.row][cell.column] = true
-  }
-
-  const holesAfter = countHoles(grid, width, height)
-  const delLines = countFullLines(grid, width, height)
-
-  return {
-    priority:
-      origin.row +
-      bankersRound((holesBefore - holesAfter) * HOLES_COEF) +
-      delLines * delLines,
-    bottom: origin.row + maxY,
-    top: origin.row + minY,
-    touchesWall:
-      origin.column + minX === 0 || origin.column + maxX === width - 1,
-    contacts: countContacts(baseGrid, width, height, cells),
-  }
-}
-
 /** A scored placement together with where the piece settles. */
 interface SettledPlacement extends PlacementScore {
   readonly row: number
@@ -321,30 +341,46 @@ interface SettledPlacement extends PlacementScore {
 }
 
 /**
- * Scores the placement of `piece` at `origin` after letting it fall as far as it
- * can. A placement that can still move down is therefore scored at its further
- * landing, which is what makes a side-step that keeps the piece falling outrank a
- * side-step that merely parks it.
+ * Scores the placement of `cells` at `origin` after letting the piece fall as
+ * far as it can. A placement that can still move down is therefore scored at its
+ * further landing, which is what makes a side-step that keeps the piece falling
+ * outrank a side-step that merely parks it.
  */
 function scoreSettledPlacement(
-  board: BoardSnapshot,
-  baseGrid: readonly (readonly boolean[])[],
-  width: number,
-  height: number,
-  holesBefore: number,
-  offsets: readonly Offset[],
+  board: DemoBoard,
+  demoGrid: DemoGrid,
+  cells: DemoPieceOrientation,
   origin: BoardPosition,
 ): SettledPlacement | null {
-  const landing = descend(board, offsets, origin)
+  const landing = settle(board, cells, origin)
   if (landing === null) {
     return null
   }
 
-  return {
-    row: landing.row,
-    column: landing.column,
-    ...scorePlacement(baseGrid, width, height, holesBefore, offsets, landing),
+  return { ...landing, ...scorePlacement(demoGrid, cells, landing) }
+}
+
+/** The one-column side-step that turns the drop column into the settled one. */
+function lastTickMoveOf(choice: DemoChoice): DemoLastTickMove | null {
+  if (!choice.shifted) {
+    return null
   }
+  if (choice.column > choice.landingColumn) {
+    return DEMO_ACTION_CODES.right
+  }
+  if (choice.column < choice.landingColumn) {
+    return DEMO_ACTION_CODES.left
+  }
+  return null
+}
+
+
+/** The chosen reachable orientation index and origin column. */
+export interface DemoOrientationDestination {
+  readonly orientation: number
+  readonly column: number
+  /** The side-step the piece takes after its hard drop, or `null`. */
+  readonly lastTickMove: DemoLastTickMove | null
 }
 
 /**
@@ -362,8 +398,8 @@ function scoreSettledPlacement(
  * Every candidate at a column's resting row is additionally compared with the
  * placements one column to its left and right, because the demo can side-step
  * there on its last tick. The destination is then the column the piece must be
- * dropped in to reach the winning placement — the side-step itself is executed by
- * `planDemoLastTickMove` once the piece comes to rest.
+ * dropped in to reach the winning placement — the side-step itself travels back
+ * in `lastTickMove` and is appended to the piece's action log after its drop.
  */
 export function planDemoDestination(
   session: PentixGameSession,
@@ -371,22 +407,22 @@ export function planDemoDestination(
   const piece = getActivePiece(session)
   const angles = candidateAngles(piece.rotationMode)
   const orientations = angles.map((angle) =>
-    getOccupiedOffsets(piece.definition.offsets, angle, piece.rotationMode),
+    demoOffsetCells(
+      getOccupiedOffsets(piece.definition.offsets, angle, piece.rotationMode),
+    ),
   )
   const destination = planDemoDestinationForOrientations(
-    session.board,
+    demoBoardOf(session.board),
     orientations,
   )
 
   return destination === null
     ? null
-    : { angle: angles[destination.orientation], column: destination.column }
-}
-
-/** The chosen reachable orientation index and origin column. */
-export interface DemoOrientationDestination {
-  readonly orientation: number
-  readonly column: number
+    : {
+        angle: angles[destination.orientation],
+        column: destination.column,
+        lastTickMove: destination.lastTickMove,
+      }
 }
 
 /**
@@ -395,13 +431,11 @@ export interface DemoOrientationDestination {
  * `delphi5` engine plans through this entry point.
  */
 export function planDemoDestinationForOrientations(
-  board: BoardSnapshot,
-  orientations: readonly (readonly Offset[])[],
+  board: DemoBoard,
+  orientations: readonly DemoPieceOrientation[],
 ): DemoOrientationDestination | null {
-  const { width, height } = board
-  const baseGrid = board.rows.map((row) => row.map((cell) => cell.isOccupied))
-  const holesBefore = countHoles(baseGrid, width, height)
-
+  const demoGrid = createDemoGrid(board)
+  const { width } = demoGrid
   const candidates: DemoChoice[] = []
 
   for (
@@ -409,28 +443,23 @@ export function planDemoDestinationForOrientations(
     orientation < orientations.length;
     orientation += 1
   ) {
-    const rotated = orientations[orientation]
-    const topExtent = -pieceExtents(rotated).minY
+    const cells = orientations[orientation]
+    const topExtent = -pieceExtents(cells).minRow
 
     for (let column = 0; column < width; column += 1) {
-      // `findLandingRow` returns null when the column's shaft is blocked at the
+      // `demoLandingRow` returns null when the column's shaft is blocked at the
       // top, otherwise the lowest reachable row; every row above it down to the
       // spawn top is also reachable, matching the Delphi `CheckUp` scan.
-      const landingRow = findLandingRow(board, rotated, column)
+      const landingRow = demoLandingRow(board, cells, column)
       if (landingRow === null) {
         continue
       }
 
       for (let row = landingRow; row >= topExtent; row -= 1) {
-        const settled = scoreSettledPlacement(
-          board,
-          baseGrid,
-          width,
-          height,
-          holesBefore,
-          rotated,
-          { row, column },
-        )
+        const settled = scoreSettledPlacement(board, demoGrid, cells, {
+          row,
+          column,
+        })
         if (settled === null) {
           continue
         }
@@ -448,15 +477,10 @@ export function planDemoDestinationForOrientations(
         }
 
         for (const shift of [-1, 1] as const) {
-          const sideStep = scoreSettledPlacement(
-            board,
-            baseGrid,
-            width,
-            height,
-            holesBefore,
-            rotated,
-            { row, column: column + shift },
-          )
+          const sideStep = scoreSettledPlacement(board, demoGrid, cells, {
+            row,
+            column: column + shift,
+          })
           if (sideStep === null) {
             continue
           }
@@ -475,7 +499,8 @@ export function planDemoDestinationForOrientations(
   // Iterate in a stable order (bottom-up by row, then left-to-right by column,
   // then by orientation); indistinguishable tied candidates are picked at random.
   candidates.sort(
-    (a, b) => b.row - a.row || a.column - b.column || a.orientation - b.orientation,
+    (a, b) =>
+      b.row - a.row || a.column - b.column || a.orientation - b.orientation,
   )
 
   let best: DemoChoice | null = null
@@ -487,8 +512,13 @@ export function planDemoDestinationForOrientations(
 
   return best === null
     ? null
-    : { orientation: best.orientation, column: best.landingColumn }
+    : {
+        orientation: best.orientation,
+        column: best.landingColumn,
+        lastTickMove: lastTickMoveOf(best),
+      }
 }
+
 
 /**
  * True while the active demo piece can still be placed one row lower, i.e. it is
@@ -521,38 +551,22 @@ export function planDemoLastTickMove(
     return null
   }
 
-  const { board } = session
-  const { width, height } = board
-  const baseGrid = board.rows.map((row) => row.map((cell) => cell.isOccupied))
-  const holesBefore = countHoles(baseGrid, width, height)
-
+  const board = demoBoardOf(session.board)
+  const demoGrid = createDemoGrid(board)
   const piece = getActivePiece(session)
-  const offsets = piece.occupiedOffsets
+  const cells = demoOffsetCells(piece.occupiedOffsets)
   const origin = session.activePiece.origin
-  const current = scoreSettledPlacement(
-    board,
-    baseGrid,
-    width,
-    height,
-    holesBefore,
-    offsets,
-    origin,
-  )
+  const current = scoreSettledPlacement(board, demoGrid, cells, origin)
   if (current === null) {
     return null
   }
 
   let best: DemoChoice | null = null
   for (const shift of [-1, 1] as const) {
-    const sideStep = scoreSettledPlacement(
-      board,
-      baseGrid,
-      width,
-      height,
-      holesBefore,
-      offsets,
-      { row: origin.row, column: origin.column + shift },
-    )
+    const sideStep = scoreSettledPlacement(board, demoGrid, cells, {
+      row: origin.row,
+      column: origin.column + shift,
+    })
     if (sideStep === null) {
       continue
     }
@@ -574,6 +588,6 @@ export function planDemoLastTickMove(
     return null
   }
 
-  return { angle: piece.angle, column: best.landingColumn }
+  return { angle: piece.angle, column: best.landingColumn, lastTickMove: null }
 }
 

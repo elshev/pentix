@@ -3,7 +3,8 @@
  *
  * It exists to exercise the demo-engine seam and to give the rail a second
  * baseline strategy. It deliberately implements no heuristic beyond picking a
- * reachable orientation and column at random.
+ * reachable orientation and column at random, so it never plans a last-tick
+ * move: its logs end at the hard drop.
  */
 import {
   actionsToward,

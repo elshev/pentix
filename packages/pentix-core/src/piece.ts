@@ -95,10 +95,18 @@ export function getOccupiedOffsets(
 export class Piece {
   readonly definition: PieceDefinition
   readonly angle: RotationAngle
+  private readonly rotatedOffsets: readonly Offset[]
 
   constructor(definition: PieceDefinition, angle = 0) {
     this.definition = definition
     this.angle = normalizeAngle(angle, definition.rotationMode)
+    this.rotatedOffsets = Object.freeze(
+      getOccupiedOffsets(
+        definition.offsets,
+        this.angle,
+        definition.rotationMode,
+      ),
+    )
   }
 
   get id(): number {
@@ -129,12 +137,8 @@ export class Piece {
     return this.minoCount
   }
 
-  get occupiedOffsets(): Offset[] {
-    return getOccupiedOffsets(
-      this.definition.offsets,
-      this.angle,
-      this.definition.rotationMode,
-    )
+  get occupiedOffsets(): readonly Offset[] {
+    return this.rotatedOffsets
   }
 
   withAngle(angle: number): Piece {

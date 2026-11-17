@@ -7,7 +7,12 @@
  * It returns a `DemoActionLog`: the per-piece sequence of actions the demo
  * should replay. The alphabet is the one session action vocabulary without the
  * tick: ticks belong to the demo driver, which applies Action then Tick.
+ *
+ * A log may end with one code after its hard drop: that code is the piece's
+ * last-tick move, a one-column side-step the driver applies after the drop and
+ * before that interval's tick.
  */
+import type { BoardSnapshot } from './board.js'
 import { getActivePiece } from './placement.js'
 import { getOccupiedOffsets, normalizeAngle } from './piece.js'
 import type { Offset, RotationAngle, RotationMode } from './piece.js'
@@ -19,6 +24,14 @@ export type DemoAction = Exclude<
   SessionAction,
   (typeof SESSION_ACTIONS)['tick']
 >
+
+/**
+ * The one-column side-step a demo may take after its hard drop: the code that
+ * follows `H` in a `DemoActionLog`.
+ */
+export type DemoLastTickMove =
+  | (typeof DEMO_ACTION_CODES)['left']
+  | (typeof DEMO_ACTION_CODES)['right']
 
 /** The demo action codes, derived from the one session action vocabulary. */
 export const DEMO_ACTION_CODES = Object.freeze({
@@ -39,6 +52,13 @@ const DEMO_ACTION_VALUES: readonly string[] = Object.freeze(
 /** True when `code` is one of the demo's action codes. */
 export function isDemoAction(code: string): code is DemoAction {
   return DEMO_ACTION_VALUES.includes(code)
+}
+
+/** True when `code` is a legal last-tick move (a one-column side-step). */
+export function isDemoLastTickMove(code: string): code is DemoLastTickMove {
+  return (
+    code === DEMO_ACTION_CODES.left || code === DEMO_ACTION_CODES.right
+  )
 }
 
 /** The visible board: one row per line, `1` occupied and `0` free. */
@@ -81,6 +101,18 @@ function orientationKey(cells: DemoPieceOrientation): string {
     .join(';')
 }
 
+/** The piece geometry as planning cells, relative to the rotation point. */
+export function demoOffsetCells(offsets: readonly Offset[]): DemoPieceCell[] {
+  return offsets.map((offset) => ({ row: offset.y, column: offset.x }))
+}
+
+/** The visible board of a session snapshot, as rows of `0` and `1`. */
+export function demoBoardOf(board: BoardSnapshot): DemoBoard {
+  return board.rows.map((row) =>
+    row.map((cell): 0 | 1 => (cell.isOccupied ? 1 : 0)),
+  )
+}
+
 /**
  * Every distinct orientation the game reaches by repeatedly rotating clockwise,
  * current first. The game rotates by `-90` and normalizes for the piece mode, so
@@ -97,8 +129,8 @@ function reachableOrientations(
   let currentAngle = angle
 
   for (let turn = 0; turn <= turns; turn += 1) {
-    const cells = getOccupiedOffsets(offsets, currentAngle, rotationMode).map(
-      (offset) => ({ row: offset.y, column: offset.x }),
+    const cells = demoOffsetCells(
+      getOccupiedOffsets(offsets, currentAngle, rotationMode),
     )
     const key = orientationKey(cells)
     if (!seen.has(key)) {
@@ -119,9 +151,7 @@ export function createDemoEngineInput(
   const { offsets, rotationMode } = piece.definition
 
   return {
-    board: session.board.rows.map((row) =>
-      row.map((cell): 0 | 1 => (cell.isOccupied ? 1 : 0)),
-    ),
+    board: demoBoardOf(session.board),
     piece: reachableOrientations(
       session.activePiece.angle,
       offsets,
@@ -146,6 +176,34 @@ export function demoPieceCells(
 }
 
 /**
+ * True when every cell fits the board columns and the board height, and no
+ * settled cell is occupied. Rows above the board are allowed: pieces enter from
+ * the top.
+ */
+export function demoCanPlaceAt(
+  board: DemoBoard,
+  cells: DemoPieceOrientation,
+  row: number,
+  column: number,
+): boolean {
+  const width = board[0]?.length ?? 0
+  const height = board.length
+
+  for (const cell of cells) {
+    const cellRow = row + cell.row
+    const cellColumn = column + cell.column
+    if (cellColumn < 0 || cellColumn >= width || cellRow >= height) {
+      return false
+    }
+    if (cellRow >= 0 && board[cellRow][cellColumn] === 1) {
+      return false
+    }
+  }
+
+  return true
+}
+
+/**
  * True when every cell is inside the board columns and above the bottom, and no
  * settled cell is occupied. Rows above the board are allowed: pieces enter from
  * the top.
@@ -155,19 +213,7 @@ export function demoCanPlace(
   cells: DemoPieceOrientation,
   position: DemoPosition,
 ): boolean {
-  const width = board[0]?.length ?? 0
-  const height = board.length
-
-  for (const cell of demoPieceCells(cells, position)) {
-    if (cell.column < 0 || cell.column >= width || cell.row >= height) {
-      return false
-    }
-    if (cell.row >= 0 && board[cell.row][cell.column] === 1) {
-      return false
-    }
-  }
-
-  return true
+  return demoCanPlaceAt(board, cells, position.row, position.column)
 }
 
 /**
@@ -179,14 +225,24 @@ export function demoLandingRow(
   cells: DemoPieceOrientation,
   column: number,
 ): number | null {
-  const top = Math.min(...cells.map((cell) => cell.row))
-  const start = { row: -top, column }
-  if (!demoCanPlace(board, cells, start)) {
+  if (cells.length === 0) {
     return null
   }
 
-  let row = start.row
-  while (demoCanPlace(board, cells, { row: row + 1, column })) {
+  let top = cells[0].row
+  for (const cell of cells) {
+    if (cell.row < top) {
+      top = cell.row
+    }
+  }
+
+  const start = -top
+  if (!demoCanPlaceAt(board, cells, start, column)) {
+    return null
+  }
+
+  let row = start
+  while (demoCanPlaceAt(board, cells, row + 1, column)) {
     row += 1
   }
 
@@ -195,12 +251,14 @@ export function demoLandingRow(
 
 /**
  * The log that rotates the piece clockwise `orientation` times, moves its
- * rotation point to `column`, and hard-drops it.
+ * rotation point to `column`, hard-drops it, and — when given — applies the
+ * last-tick side-step after the drop.
  */
 export function actionsToward(
   orientation: number,
   position: DemoPosition,
   column: number,
+  lastTickMove: DemoLastTickMove | null = null,
 ): DemoActionLog {
   const delta = column - position.column
   const lateral = delta < 0 ? DEMO_ACTION_CODES.left : DEMO_ACTION_CODES.right
@@ -208,6 +266,7 @@ export function actionsToward(
   return (
     DEMO_ACTION_CODES.clockwise.repeat(orientation) +
     lateral.repeat(Math.abs(delta)) +
-    DEMO_ACTION_CODES.hardDrop
+    DEMO_ACTION_CODES.hardDrop +
+    (lastTickMove ?? '')
   )
 }
