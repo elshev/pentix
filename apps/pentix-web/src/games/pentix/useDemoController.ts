@@ -10,8 +10,7 @@ import {
 } from '#pentix/core'
 
 import {
-  advanceDemoPlan,
-  nextDemoAction,
+  nextDemoStep,
   resolveDemoPlan,
   type DemoPlan,
 } from '../../engine/demo.ts'
@@ -34,9 +33,11 @@ export interface DemoStepperOptions {
  * last-tick side-step can never be pre-empted by a separate gravity loop.
  *
  * The destination is planned once per spawned piece and reused across ticks, so
- * a randomly chosen tied destination does not flip while the piece falls. A
- * last-tick side-step re-targets the destination, and the step carries the
- * placement it was planned for so the reducer can drop stale steps.
+ * a randomly chosen tied destination does not flip while the piece falls. A hard
+ * drop consumes the log's following code as the piece's last-tick move, and the
+ * step carries that pair plus the session and piece it was planned for, so the
+ * reducer can drop stale steps and can discard the side-step of a drop that
+ * already settled the piece.
  */
 export function useDemoStepper({
   boardId,
@@ -67,27 +68,19 @@ export function useDemoStepper({
     const timer = window.setInterval(() => {
       const current = sessionRef.current
       const plan = resolveDemoPlan(planRef.current, current, engine)
-      const action = nextDemoAction(plan)
+      const step = nextDemoStep(plan)
       // The plan advances even past an exhausted log so the demo keeps ticking
       // until the piece locks.
-      planRef.current = advanceDemoPlan(plan)
+      planRef.current = step.plan
 
-      dispatchRef.current(
-        boardId === MAIN_BOARD_ID
-          ? {
-              type: 'demoStep',
-              action,
-              sessionId: current.id,
-              pieceIndex: current.nextPieceIndex,
-            }
-          : {
-              type: 'demoBoardStep',
-              boardId,
-              action,
-              sessionId: current.id,
-              pieceIndex: current.nextPieceIndex,
-            },
-      )
+      dispatchRef.current({
+        type: 'demoStep',
+        boardId,
+        action: step.action,
+        lastTickAction: step.lastTickAction,
+        sessionId: current.id,
+        pieceIndex: current.nextPieceIndex,
+      })
     }, interval)
 
     return () => window.clearInterval(timer)

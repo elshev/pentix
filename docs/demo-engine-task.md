@@ -1,28 +1,157 @@
-# Pentix demo engine: write one planning function
+# Pentix demo engine: write one TypeScript planning function
 
-You are writing **one function** that plans the moves of one falling piece in
-Pentix, a Tetris-like game. Everything you need is in this document: no other
-file, repository, package, or documentation is required. Return only the
-function; do not return metadata, a file name, or a module.
+You are writing **one TypeScript function** that plans the moves of one falling
+piece in Pentix, a Tetris-like game. The goal is the highest score: the caller
+scores every action and lock, and your plan decides where each piece goes.
+Everything you need is in this document: no other file, repository, package, or
+documentation is required. Return only the function; do not return metadata, a
+file name, or a module.
 
 ## The game
 
 - The board is a rectangle of `height` rows and `width` columns.
-- One piece falls at a time. A piece is a small set of occupied cells that
-  rotates around a fixed cell called the **rotation point**.
+- One piece falls at a time. A piece is a small set of occupied cells called
+  **minos** that rotates around a fixed cell called the **rotation point**.
 - Settled cells stay on the board. A row that becomes completely occupied is
   cleared and the rows above it move down.
 - A piece locks when it cannot move down any further and a tick occurs. Then the
   next piece appears at the top.
 - The game is over when a new piece cannot appear. That is not your concern.
 
+## The blocks
+
+The piece set is fixed. There are 29 blocks: `1` to `4` minos in the small ones
+and `5` minos in the rest. Every block's cells are given as `(column, row)`
+offsets from its rotation point, and the drawing below shows the orientation the
+piece has when it appears.
+
+- `X` is a mino, `@` is the mino that is the rotation point, `o` is a rotation
+  point on an empty cell, `.` is an empty cell.
+
+| Key | ID | Minos | Rotation | Colour | Offsets `(column, row)` |
+| --- | --- | --- | --- | --- | --- |
+| `1Line` | 0 | 1 | none | blue | `(0,0)` |
+| `2Line` | 1 | 2 | half | red | `(0,0) (0,1)` |
+| `3Line` | 2 | 3 | half | red | `(0,0) (-1,0) (1,0)` |
+| `3Corner` | 3 | 3 | full | silver | `(0,0) (0,-1) (1,0)` |
+| `4Line` | 4 | 4 | half | red | `(0,0) (-2,0) (-1,0) (1,0)` |
+| `4Square` | 5 | 4 | none | blue | `(0,0) (0,1) (1,1) (1,0)` |
+| `4T` | 6 | 4 | full | yellow | `(0,0) (-1,0) (1,0) (0,-1)` |
+| `4L` | 7 | 4 | full | fuchsia | `(0,0) (-1,0) (1,0) (1,-1)` |
+| `4LMir` | 8 | 4 | full | silver | `(0,0) (-1,-1) (-1,0) (1,0)` |
+| `4S` | 9 | 4 | half | lime | `(0,0) (-1,0) (0,-1) (1,-1)` |
+| `4SMir` | 10 | 4 | half | aqua | `(0,0) (-1,-1) (0,-1) (1,0)` |
+| `5Line` | 11 | 5 | half | red | `(0,0) (-2,0) (-1,0) (1,0) (2,0)` |
+| `5Corner` | 12 | 5 | full | silver | `(-1,-1) (-1,0) (-1,1) (0,1) (1,1)` |
+| `5Cross` | 13 | 5 | none | silver | `(0,0) (0,-1) (-1,0) (0,1) (1,0)` |
+| `5T` | 14 | 5 | full | yellow | `(0,0) (1,-1) (0,-1) (-1,-1) (0,1)` |
+| `5W` | 15 | 5 | full | yellow | `(0,0) (-1,1) (0,1) (1,0) (1,-1)` |
+| `5U` | 16 | 5 | full | fuchsia | `(0,0) (-1,-1) (-1,0) (1,0) (1,-1)` |
+| `5L` | 17 | 5 | full | fuchsia | `(0,0) (-2,0) (-1,0) (1,0) (1,-1)` |
+| `5LMir` | 18 | 5 | full | yellow | `(0,0) (-1,-1) (-1,0) (1,0) (2,0)` |
+| `5S` | 19 | 5 | full | aqua | `(0,0) (0,-1) (-2,0) (-1,0) (1,-1)` |
+| `5SMir` | 20 | 5 | full | lime | `(0,0) (0,-1) (-1,-1) (1,0) (2,0)` |
+| `5F` | 21 | 5 | full | lime | `(0,0) (0,-1) (-1,1) (0,1) (1,0)` |
+| `5FMir` | 22 | 5 | full | aqua | `(0,0) (0,-1) (-1,0) (0,1) (1,1)` |
+| `5P` | 23 | 5 | full | blue | `(0,0) (1,0) (1,-1) (0,-1) (0,1)` |
+| `5PMir` | 24 | 5 | full | blue | `(0,0) (0,-1) (-1,-1) (-1,0) (0,1)` |
+| `5Z` | 25 | 5 | half | lime | `(0,0) (0,-1) (-1,-1) (0,1) (1,1)` |
+| `5ZMir` | 26 | 5 | half | fuchsia | `(0,0) (1,-1) (0,-1) (-1,1) (0,1)` |
+| `5R` | 27 | 5 | full | silver | `(0,0) (2,0) (1,0) (0,-1) (-1,0)` |
+| `5RMir` | 28 | 5 | full | yellow | `(0,0) (1,0) (0,-1) (-2,0) (-1,0)` |
+
+The shapes, in the orientation the piece appears in (rows top to bottom):
+
+```
+1Line   @
+2Line   @
+        X
+3Line   X@X
+3Corner X.
+        @X
+4Line   XX@X
+4Square @X
+        XX
+4T      .X.
+        X@X
+4L      ..X
+        X@X
+4LMir   X..
+        X@X
+4S      .XX
+        X@.
+4SMir   XX.
+        .@X
+5Line   XX@XX
+5Corner X..
+        Xo.
+        XXX
+5Cross  .X.
+        X@X
+        .X.
+5T      XXX
+        .@.
+        .X.
+5W      ..X
+        .@X
+        XX.
+5U      X.X
+        X@X
+5L      ...X
+        XX@X
+5LMir   X...
+        X@XX
+5S      ..XX
+        XX@.
+5SMir   XX..
+        .@XX
+5F      .X.
+        .@X
+        XX.
+5FMir   .X.
+        X@.
+        .XX
+5P      XX
+        @X
+        X.
+5PMir   XX
+        X@
+        .X
+5Z      XX.
+        .@.
+        .XX
+5ZMir   .XX
+        .@.
+        XX.
+5R      .X..
+        X@XX
+5RMir   ..X.
+        XX@X
+```
+The table above is the authoritative list; the drawing is only a quick
+reference.
+
+A **rotation** turns the piece a quarter turn clockwise (`C`) or anticlockwise
+(`A`) around its rotation point. A block's rotation mode limits what you can
+reach:
+
+- `none` вЂ” the piece cannot rotate: `piece.length` is `1`.
+- `half` вЂ” half turns only: `piece.length` is `2`.
+- `full` вЂ” quarter turns: `piece.length` is `4` for most blocks, but shapes that
+  look the same after a half turn repeat, so read `piece.length` instead of
+  assuming four.
+
 ## Your function
 
-```
-plan(board, piece, position) -> string
+```ts
+function plan(
+  board: number[][],
+  piece: { row: number; column: number }[][],
+  position: { row: number; column: number },
+): string
 ```
 
-Three parameters, one result:
+Three parameters, one result.
 
 ### `board`
 
@@ -36,8 +165,8 @@ The visible board, including settled cells but **not** the falling piece.
 Example of a `6 x 4` board (6 rows, 4 columns), with a settled cell at the
 bottom-left corner:
 
-```js
-[
+```ts
+const board: number[][] = [
   [0, 0, 0, 0],
   [0, 0, 0, 0],
   [0, 0, 0, 0],
@@ -52,9 +181,9 @@ bottom-left corner:
 The piece's **reachable orientations**. Each orientation is a list of the piece's
 cells relative to its rotation point:
 
-```js
-[
-  [{ row: 0, column: 0 }, { row: 0, column: 1 }],  // current orientation
+```ts
+const piece: { row: number; column: number }[][] = [
+  [{ row: 0, column: 0 }, { row: 0, column: 1 }], // current orientation
   [{ row: 0, column: 0 }, { row: -1, column: 0 }], // after one C
 ]
 ```
@@ -72,13 +201,13 @@ cells relative to its rotation point:
 
 Where the rotation point currently is on the board:
 
-```js
-{ row: 3, column: 5 }
+```ts
+const position: { row: number; column: number } = { row: 3, column: 5 }
 ```
 
 To get a piece cell's absolute board cell, add the two:
 
-```js
+```ts
 const row = position.row + cell.row
 const column = position.column + cell.column
 ```
@@ -109,11 +238,14 @@ applies them itself (see below). Never return any other character either.
 The caller replays your string for the current piece with this rule:
 
 1. Apply the first character.
-2. Apply one **tick** (gravity).
-3. Apply the second character.
-4. Apply one tick.
-5. Continue until your string ends.
-6. After the string ends, apply ticks only, until the piece locks.
+2. If that character was `H` and one more character follows, apply that one too:
+   it is the piece's **last-tick move** (see below).
+3. Apply one **tick** (gravity).
+4. Apply the next character.
+5. If that character was `H` and one more character follows, apply that one too.
+6. Apply one tick.
+7. Continue until your string ends.
+8. After the string ends, apply ticks only, until the piece locks.
 
 So the cadence from the moment a piece appears is:
 
@@ -131,7 +263,9 @@ Consequences you must respect:
 - An impossible action (for example, moving into a wall) is ignored, but its
   tick still happens.
 - `H` moves the piece to its lowest possible position; the tick after `H` locks
-  it.
+  it there, unless the last-tick move has just shifted it over a drop.
+- A character after `H` is applied in the same interval as the drop: the drop,
+  then the side-step, then the tick. Nothing else can follow it in that plan.
 - If the piece locks before your string ends, the remaining characters are
   discarded. Put the important actions first.
 - A rotation that would overlap a wall or settled cells may be shifted sideways
@@ -151,19 +285,110 @@ Rotations cost ticks: every `C` or `A` is one action, followed by one tick, so
 the piece also falls while it turns. Prefer the fewest rotations that reach the
 orientation you want.
 
+## The last-tick move after the hard drop
+
+Some useful placements cannot be reached by a straight drop at all: they sit
+under an overhang, with a settled cell above them. The demo engine is allowed one
+**side-step after the hard drop**, which is exactly what these placements need.
+
+Add **one** `L` or `R` after the `H`:
+
+- The drop happens first, so the piece comes to rest as low as it can in the
+  column you steered to.
+- The side-step then moves it one column at that same row — into the pocket, if
+  the pocket is beside it.
+- The tick that ends the interval then locks the piece in its new column, or
+  lets it fall one more row when the side-step uncovered a drop.
+- Nothing else may follow: no rotation, no second drop, and never more than one
+  side-step. A log with no side-step simply ends at `H`.
+
+### Worked example
+
+A `12 x 22` board whose only settled cells are one mino at row `20`, column `7`
+(row `21` is the last row). The active piece is the single-cell `1Line` at row
+`1`, column `6`. The best placement is row `21`, column `7`: the floor, directly
+under the settled mino.
+
+```
+          col 6  7  8  9
+  row 19    .  .  .  .
+  row 20    .  X  .  .      X = the settled mino
+  row 21    .  *  .  .      * = where the piece should end up
+```
+
+A straight drop in column `7` would stop on top of the mino at row `19`, so the
+piece has to drop in column `8` and step left on the last tick:
+
+1. `R` — move from column `6` to `7`, then a tick.
+2. `R` — move from column `7` to `8`, then a tick.
+3. `H` — hard drop to row `21`, column `8`.
+4. `L` — the last-tick move, one column left, into row `21`, column `7`.
+5. The tick that ends this interval locks the piece there, under the mino.
+
+So the log is `"RRHL"`. Without the trailing `L` the piece would lock at row
+`21`, column `8` and the pocket would stay empty.
+
+If the side-step is blocked, the caller ignores it but still applies the tick, so
+the piece locks where it was dropped. Plan the side-step only when the target
+cell is free.
+
+## Scoring
+
+Your function never adds points itself: the caller scores every action it
+applies. The score is the goal, so plan the piece that scores most.
+
+| Event | Points |
+| --- | --- |
+| Locking a piece | `minos × level` |
+| Hard drop | `floor(minos × (height − dropRow) × level ÷ 10)` |
+| Each cleared row | `clearedIndex × (10 + (height − row)) × level` |
+| Emptying the board | `1000` extra |
+
+`minos` is the block's size, `1` to `5`. `dropRow` is the row of the rotation
+point at the moment `H` is applied, `row` is a cleared row (`0` at the top), and
+`clearedIndex` counts the rows this lock clears, from the top one (`1`) down.
+Every term except the `1000` bonus is multiplied by the level.
+
+- **Drop the piece as early as you can.** The drop score counts the rows between
+  the piece and the bottom, so a piece dropped near the top is worth far more
+  than one that has already fallen. Every action costs one tick and therefore one
+  row — even an action the board blocks — so keep the plan short: reach the
+  placement with as few rotations and moves as it takes, then `H`.
+- A drop with no free row below scores nothing for the fall; the piece just
+  locks. The lock score still applies.
+- Larger blocks earn more: a five-mino block is worth five times a single mino,
+  both per lock and per row of drop.
+- A cleared row scores by its height: `height − row` is the number of rows from
+  that row down to the floor, so a line cleared higher up is worth more than one
+  cleared on the floor. Clearing several rows with one piece also multiplies the
+  later ones (the second cleared row ×2, the third ×3, and so on), so a double or
+  triple clear is worth much more than the same rows cleared one at a time.
+- Emptying the whole board by clearing the bottom row adds a flat `1000`.
+- The level is the level the caller chose, raised by one every 30 locked pieces
+  up to `9`. It multiplies everything, so a long, clean game is worth far more
+  than a short one.
+
+Example, on an empty `12 x 22` board at level `1`: emitting `H` for the
+single-mino `1Line` from row `1` scores `floor(1 × 21 ÷ 10) = 2` for the drop,
+and locking it scores another `1`, so the piece is worth `3` points. The same
+piece dropped from row `11` scores `1` for the fall, and a piece that is already
+resting scores nothing for the fall.
+
 ## What a good plan looks like
 
-Aim for a useful, playable plan: keep settled cells low, avoid creating covered
-holes (an empty cell with an occupied cell above it in the same column), and
-prefer placements that complete rows. Any strategy is acceptable as long as it
-returns a valid action string; simple heuristics are welcome.
+The score is the goal, and three things you control decide it: how high the piece
+is when you drop it, how many rows the placement clears, and how long the game
+keeps running. So keep settled cells low, avoid covered holes (an empty cell with
+an occupied cell above it in the same column), and prefer placements that
+complete rows. Any strategy is acceptable as long as it returns a valid action
+string; simple heuristics are welcome.
 
 ## Rules for your function
 
 You **can**:
 
 - read `board`, `piece`, and `position`;
-- compute with plain JavaScript or TypeScript;
+- compute with plain TypeScript in the function body;
 - call `Math.random()` if your strategy is random;
 - define small helper functions inside your answer;
 - return any number of actions, including none.
@@ -176,6 +401,8 @@ You **cannot**:
 - depend on data from previous pieces or on anything outside the arguments;
 - return a character other than `L`, `R`, `C`, `A`, or `H`;
 - return `T` (ticks) or an array/object instead of a string;
+- return more than one action after `H`, or anything other than `L`/`R` there;
+- write JavaScript instead of TypeScript, or leave a parameter unannotated;
 - throw for a valid board, piece, and position.
 
 The function must be pure: the same arguments and the same `Math.random()`
@@ -183,17 +410,27 @@ sequence must produce the same string.
 
 ## Answer format
 
-Return exactly one function, named `plan`, with the three parameters described
-above. No imports, no exports, no metadata (the caller supplies the engine name
-and description itself), no explanation outside the code. If you use
-TypeScript, annotate the parameters as shown. Put the whole answer in a single
-code block.
+Return exactly one **TypeScript** function, named `plan`, with the three
+parameters described above, each annotated, and a `string` return type:
+
+```ts
+function plan(
+  board: number[][],
+  piece: { row: number; column: number }[][],
+  position: { row: number; column: number },
+): string
+```
+
+No imports, no exports, no metadata (the caller supplies the engine name and
+description itself), no explanation outside the code. JavaScript answers are not
+accepted: the function is compiled by a strict TypeScript build, so annotate the
+parameters and the return type. Put the whole answer in a single code block.
 
 ## Example answer
 
 This example is deliberately simple: it drops the piece straight down in the
-reachable column whose landing row is lowest, without rotating. It is valid, not
-optimal. Write your own strategy.
+reachable column whose landing row is lowest, without rotating, and adds no
+last-tick move. It is valid, not optimal. Write your own strategy.
 
 ```ts
 function plan(
@@ -220,7 +457,12 @@ function plan(
   }
 
   function landingRow(column: number): number | null {
-    const top = Math.min(...cells.map((cell) => cell.row))
+    let top = 0
+    for (const cell of cells) {
+      if (cell.row < top) {
+        top = cell.row
+      }
+    }
     let row = -top
     if (!canPlace(row, column)) {
       return null
@@ -250,9 +492,15 @@ function plan(
 ## Self-check before you answer
 
 - There is exactly one function named `plan`, taking `board`, `piece`, and
-  `position`.
+  `position`, all annotated, returning `string`.
 - It returns a **string** such as `"LLCH"`.
 - The string contains only `L`, `R`, `C`, `A`, and `H` — never `T`.
 - It returns `""` when it has no actions.
+- Any action after `H` is a single `L` or `R`, placed last.
+- It plans for points: it drops the piece early and prefers placements that clear
+  rows.
 - It does not mutate the arguments, keep state, or use imports, I/O, or timers.
 - It defines no engine name, description, id, file path, or module.
+- The whole answer is TypeScript, with no JavaScript-only syntax.
+
+

@@ -1,5 +1,6 @@
 /** Game state reducer — phase, settings, the main session, and the demo boards. */
 import {
+  DEMO_ACTION_CODES,
   createPentixGame,
   createPentixGameSession,
   demoEngineRegistry,
@@ -8,10 +9,12 @@ import {
   type AdvancePentixGameSessionResult,
   type DemoAction,
   type DemoEngineId,
+  type DemoLastTickMove,
   type MoveDirection,
   type PentixGame,
   type PentixGameSession,
   type PieceIdSelector,
+  type PieceKey,
   type RotateDirection,
 } from '#pentix/core'
 
@@ -21,8 +24,9 @@ export type GamePhase = 'demo' | 'demo-over' | 'playing' | 'paused' | 'game-over
 export const MAIN_BOARD_ID = 'main'
 
 /**
- * The engine driving the main board's attract demo. The main board is the
- * showcase board, so it runs the `random` engine from the registry by id.
+ * The engine the main board's attract demo starts with. A swap replaces it, and
+ * the state then keeps the arriving engine across player sessions and demo
+ * restarts, so the player's choice survives.
  */
 export const MAIN_DEMO_ENGINE_ID: DemoEngineId = 'random'
 
@@ -123,14 +127,11 @@ export type GameAction =
   | { type: 'swapBoard'; boardId: string }
   | {
       type: 'demoStep'
-      action: DemoAction | null
-      sessionId: string
-      pieceIndex: number
-    }
-  | {
-      type: 'demoBoardStep'
+      /** The board the step belongs to: `MAIN_BOARD_ID` or a rail slot id. */
       boardId: string
       action: DemoAction | null
+      /** The piece's post-drop side-step, applied in the same interval. */
+      lastTickAction: DemoLastTickMove | null
       sessionId: string
       pieceIndex: number
     }
@@ -254,10 +255,72 @@ function createSessionForGame(
 }
 
 /**
- * Creates one `PentixGame` and the whole board set that plays it, so the main
- * session and every demo board draw from the same piece list.
+ * The single cell a demo board starts with. It is a settled mino, not a locked
+ * piece, so it never counts towards the score, the piece statistics, or the
+ * level.
  */
-function createBoardSet(deps: GameDependencies, startingLevel: number): BoardSet {
+const DEMO_SEED_PIECE_KEY: PieceKey = '1Line'
+
+/**
+ * Adds the demo's starting mino: one settled cell in a random column of the row
+ * before last. Every demo therefore begins with an overhang to plan around, and
+ * the cell stays on the board — it only disappears when its row is completed —
+ * for as long as that demo runs.
+ */
+export function withSeededDemoMino(
+  session: PentixGameSession,
+): PentixGameSession {
+  const { width, height } = session.board
+  const seedRow = height - 2
+  if (seedRow < 0 || width === 0) {
+    return session
+  }
+
+  const seedColumn = Math.floor(Math.random() * width)
+  return Object.freeze({
+    ...session,
+    board: Object.freeze({
+      width,
+      height,
+      rows: Object.freeze(
+        session.board.rows.map((cells, row) =>
+          Object.freeze(
+            row === seedRow
+              ? cells.map((cell, column) =>
+                  column === seedColumn
+                    ? Object.freeze({
+                        row: cell.row,
+                        column: cell.column,
+                        isOccupied: true,
+                        pieceKey: DEMO_SEED_PIECE_KEY,
+                      })
+                    : cell,
+                )
+              : cells.slice(),
+          ),
+        ),
+      ),
+    }),
+  })
+}
+
+/** True when the phase runs a demo (not a player) session on the main board. */
+function isDemoPhase(phase: GamePhase): boolean {
+  return phase === 'demo' || phase === 'demo-over'
+}
+
+/**
+ * Creates one `PentixGame` and the whole board set that plays it, so the main
+ * session and every demo board draw from the same piece list. The main session
+ * gets the demo's seeded mino only when it is a demo session; every demo board
+ * always does.
+ */
+function createBoardSet(
+  deps: GameDependencies,
+  startingLevel: number,
+  mainEngineId: DemoEngineId,
+  seedMainSession: boolean,
+): BoardSet {
   const game = createPentixGame({
     id: deps.createId(),
     selectPieceId: deps.selectPieceId,
@@ -266,13 +329,13 @@ function createBoardSet(deps: GameDependencies, startingLevel: number): BoardSet
   const demoBoards = demoBoardEngineIds().map((engineId, index) => ({
     id: demoBoardId(index),
     engineId,
-    session: createSessionForGame(game, deps, startingLevel),
+    session: withSeededDemoMino(createSessionForGame(game, deps, startingLevel)),
   }))
 
   return {
     game,
-    mainEngineId: MAIN_DEMO_ENGINE_ID,
-    session,
+    mainEngineId,
+    session: seedMainSession ? withSeededDemoMino(session) : session,
     demoBoards: Object.freeze(demoBoards),
   }
 }
@@ -296,7 +359,9 @@ function isGameOverCoolingDown(state: GameState): boolean {
 
 /**
  * Starts a new session on the main board and a fresh session on every demo
- * board, all from one new game: the whole board set starts in parallel.
+ * board, all from one new game: the whole board set starts in parallel. The main
+ * board keeps the demo engine it currently plays, so a swapped-in engine survives
+ * the player's next game, and only a demo session gets the seeded mino.
  */
 function startSession(
   state: GameState,
@@ -306,6 +371,8 @@ function startSession(
   const { game, mainEngineId, session, demoBoards } = createBoardSet(
     deps,
     state.settings.startingLevel,
+    state.mainEngineId,
+    phase === 'demo',
   )
   return {
     ...state,
@@ -331,7 +398,8 @@ function startDemo(state: GameState, deps: GameDependencies): GameState {
  * Starts the next attract demo while leaving the demo boards alone. Their
  * sessions keep playing, so the piece list they share must stay the same game.
  * The main board also keeps the engine it currently plays, so a swapped-in demo
- * engine survives its own automatic restart.
+ * engine survives its own automatic restart, and the new demo session starts
+ * with the seeded mino again.
  */
 function restartDemoSession(
   state: GameState,
@@ -342,7 +410,9 @@ function restartDemoSession(
     phase: 'demo',
     gameOverReady: true,
     gravityEpoch: state.gravityEpoch + 1,
-    session: createSessionForGame(state.game, deps, state.settings.startingLevel),
+    session: withSeededDemoMino(
+      createSessionForGame(state.game, deps, state.settings.startingLevel),
+    ),
   }
 }
 
@@ -431,13 +501,15 @@ function applyDemoAction(
 
 /**
  * Applies one auto-play step: the next action of the engine's log (when there is
- * one), then exactly one gravity tick. The tick always runs, so a blocked action
- * cannot freeze the demo and a resting piece always locks.
+ * one), then that action's last-tick move when it was a hard drop and the piece
+ * is still falling, then exactly one gravity tick. The tick always runs, so a
+ * blocked action cannot freeze the demo and a resting piece always locks.
  */
 function applyDemoStep(
   session: PentixGameSession,
   game: PentixGame,
   action: DemoAction | null,
+  lastTickAction: DemoLastTickMove | null,
   selectPieceId?: PieceIdSelector,
 ): AdvancePentixGameSessionResult {
   const acted =
@@ -450,7 +522,23 @@ function applyDemoStep(
           selectPieceId,
         )
 
-  return gameSessionEngine.tick(acted.session, acted.game, selectPieceId)
+  // The one-column side-step plans a placement a straight drop cannot reach. It
+  // runs after the drop and before this interval's tick, and only while the same
+  // piece is still falling: a drop that already settled the piece discards it.
+  const stepped =
+    action === DEMO_ACTION_CODES.hardDrop &&
+    lastTickAction !== null &&
+    acted.session.status === 'active' &&
+    acted.session.nextPieceIndex === session.nextPieceIndex
+      ? applyDemoAction(
+          acted.session,
+          acted.game,
+          demoActionToStep(lastTickAction),
+          selectPieceId,
+        )
+      : acted
+
+  return gameSessionEngine.tick(stepped.session, stepped.game, selectPieceId)
 }
 
 /**
@@ -472,6 +560,8 @@ export function createInitialState(
   const { game, mainEngineId, session, demoBoards } = createBoardSet(
     deps,
     settings.startingLevel,
+    MAIN_DEMO_ENGINE_ID,
+    isDemoPhase(phase),
   )
   return {
     phase,
@@ -514,26 +604,28 @@ export function createGameReducer(deps: GameDependencies) {
         return state.phase === 'demo-over' ? restartDemoSession(state, deps) : state
 
       case 'demoStep': {
-        // Ignore a step planned for another session or piece generation.
-        if (
-          state.phase !== 'demo' ||
-          !isCurrentDemoStep(state.session, action)
-        ) {
-          return state
+        if (action.boardId === MAIN_BOARD_ID) {
+          // Ignore a step planned for another session or piece generation, or
+          // one that arrives while the attract demo is not running.
+          if (
+            state.phase !== 'demo' ||
+            !isCurrentDemoStep(state.session, action)
+          ) {
+            return state
+          }
+
+          return applyAdvance(
+            state,
+            applyDemoStep(
+              state.session,
+              state.game,
+              action.action,
+              action.lastTickAction,
+              deps.selectPieceId,
+            ),
+          )
         }
 
-        return applyAdvance(
-          state,
-          applyDemoStep(
-            state.session,
-            state.game,
-            action.action,
-            deps.selectPieceId,
-          ),
-        )
-      }
-
-      case 'demoBoardStep': {
         const board = state.demoBoards.find(
           (entry) => entry.id === action.boardId,
         )
@@ -551,6 +643,7 @@ export function createGameReducer(deps: GameDependencies) {
           board.session,
           state.game,
           action.action,
+          action.lastTickAction,
           deps.selectPieceId,
         )
         return {

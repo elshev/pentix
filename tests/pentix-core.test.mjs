@@ -20,6 +20,7 @@ import {
   normalizeAngle,
   canDemoPieceMoveDown,
   planDemoDestination,
+  planDemoDestinationForOrientations,
   planDemoLastTickMove,
   DEFAULT_DEMO_ENGINE_ID,
   DEMO_ACTION_CODES,
@@ -28,6 +29,7 @@ import {
   actionsToward,
   builtInDemoEngines,
   createDemoEngineInput,
+  demoCanPlaceAt,
   demoEngineRegistry,
   demoLandingRow,
   demoPieceCells,
@@ -1053,9 +1055,14 @@ test('demo planner completes a line when one placement would clear it', () => {
 
   const destination = planDemoDestination(session)
 
-  // Dropping into column 2 fills the bottom row; the `fullLinesВІ` term makes
-  // that placement beat the shallower columns 0 and 1.
-  assert.deepEqual(destination, { angle: 0, column: 2 })
+  // Dropping into column 2 fills the bottom row; the `fullLines²` term makes
+  // that placement beat the shallower columns 0 and 1. The row completes either
+  // way, so the planner prefers the straight drop over the side-step into it.
+  assert.deepEqual(destination, {
+    angle: 0,
+    column: 2,
+    lastTickMove: null,
+  })
 })
 
 test('demo planner returns null when the active piece cannot be placed', () => {
@@ -1095,8 +1102,13 @@ test('demo planner prefers the equal-scoring placement with more contacts', () =
   // score. Column 1 lands beside the settled mino at (1,0) for two contacts,
   // while a drop in column 2 can side-step right on the last tick into the
   // column-3 pocket, touching the floor, the side wall, and the mino at (0,3)
-  // for three contacts — so the planner steers to column 2.
-  assert.deepEqual(destination, { angle: 0, column: 2 })
+  // for three contacts — so the planner steers to column 2 and side-steps right
+  // after its hard drop.
+  assert.deepEqual(destination, {
+    angle: 0,
+    column: 2,
+    lastTickMove: 'R',
+  })
 })
 
 test('demo planner counts contacts per mino and prefers settled-mino contacts', () => {
@@ -1114,8 +1126,13 @@ test('demo planner counts contacts per mino and prefers settled-mino contacts', 
 
   // Columns 1 and 2 settle at the same depth with no score difference. The
   // column-1 2x2 block rests against the two settled minos on its left while
-  // the column-2 block touches only one, so the planner prefers column 1.
-  assert.deepEqual(destination, { angle: 0, column: 1 })
+  // the column-2 block touches only one, so the planner prefers column 1 with no
+  // side-step.
+  assert.deepEqual(destination, {
+    angle: 0,
+    column: 1,
+    lastTickMove: null,
+  })
 })
 
 test('demo planner prefers non-wall placements when contacts tie', () => {
@@ -1216,6 +1233,7 @@ test('the last-tick planner slides a resting piece onto a deeper ledge', () => {
   assert.deepEqual(planDemoLastTickMove(session), {
     angle: 0,
     column: 1,
+    lastTickMove: null,
   })
 })
 
@@ -1236,7 +1254,11 @@ test('the last-tick planner takes the side-step that keeps the piece falling', (
   // right lets it fall to the floor in column 1, so that side-step is scored at
   // the deeper landing and wins.
   assert.equal(canDemoPieceMoveDown(session), false)
-  assert.deepEqual(planDemoLastTickMove(session), { angle: 0, column: 1 })
+  assert.deepEqual(planDemoLastTickMove(session), {
+    angle: 0,
+    column: 1,
+    lastTickMove: null,
+  })
 })
 
 test('the last-tick planner side-steps under a settled mino even without falling', () => {
@@ -1254,7 +1276,11 @@ test('the last-tick planner side-steps under a settled mino even without falling
   // placement touches the floor, the side wall, and the settled mino, so it is
   // the better position.
   assert.equal(canDemoPieceMoveDown(session), false)
-  assert.deepEqual(planDemoLastTickMove(session), { angle: 0, column: 11 })
+  assert.deepEqual(planDemoLastTickMove(session), {
+    angle: 0,
+    column: 11,
+    lastTickMove: null,
+  })
 
   const parked = {
     ...session,
@@ -1322,8 +1348,13 @@ test('the destination planner steers to the column the side-step starts from', (
 
   // The best placement is on the floor under the settled mino, which is only
   // reachable by dropping in the column beside it and side-stepping right on the
-  // last tick — so the destination is that neighbour column, not the far corner.
-  assert.deepEqual(planDemoDestination(session), { angle: 0, column: 10 })
+  // last tick — so the destination is that neighbour column, not the far corner,
+  // and it reports the side-step for the log to append after its drop.
+  assert.deepEqual(planDemoDestination(session), {
+    angle: 0,
+    column: 10,
+    lastTickMove: 'R',
+  })
 })
 
 test('the destination planner prefers the placement that needs no side-step', () => {
@@ -1354,7 +1385,11 @@ test('a taken side-step ends the last-tick loop', () => {
     column: 10,
   })
 
-  assert.deepEqual(planDemoLastTickMove(session), { angle: 0, column: 11 })
+  assert.deepEqual(planDemoLastTickMove(session), {
+    angle: 0,
+    column: 11,
+    lastTickMove: null,
+  })
 
   // After the side-step the piece is in the better placement and cannot be
   // improved again, so the repeat-on-every-last-tick loop ends there.
@@ -1790,11 +1825,130 @@ function sessionWithBoard(pieceId, boardRows) {
             row: rowIndex,
             column,
             isOccupied: value === 1,
+            // A settled cell needs its piece key, otherwise locking the piece
+            // would drop it when the board is rebuilt.
+            pieceKey: value === 1 ? '4Square' : undefined,
           })),
         ),
       },
     },
   }
+}
+
+// --- Replaying a demo log the way the driver does ---------------------------
+
+/** Applies one demo code to a demo replay state through the shared engine. */
+function applyDemoCode(state, code) {
+  switch (code) {
+    case 'L':
+      return {
+        game: state.game,
+        session: gameSessionEngine.move(state.session, 'left'),
+      }
+    case 'R':
+      return {
+        game: state.game,
+        session: gameSessionEngine.move(state.session, 'right'),
+      }
+    case 'C':
+      return {
+        game: state.game,
+        session: gameSessionEngine.rotate(state.session, 'clockwise'),
+      }
+    case 'A':
+      return {
+        game: state.game,
+        session: gameSessionEngine.rotate(state.session, 'counterclockwise'),
+      }
+    case 'H':
+      return gameSessionEngine.drop(state.session, state.game)
+    default:
+      assert.fail(`unexpected demo action: ${code}`)
+  }
+}
+
+/**
+ * Replays a demo action log with the driver's rule: one action, then the log's
+ * last-tick move when that action is a hard drop that left the same piece
+ * falling, then exactly one gravity tick.
+ */
+function replayDemoLog(current, log) {
+  let state = { game: current.game, session: current.session }
+
+  for (let index = 0; index < log.length; index += 1) {
+    const code = log[index]
+    const pieceIndex = state.session.nextPieceIndex
+    let next = applyDemoCode(state, code)
+
+    if (code === 'H') {
+      const lastTickMove = log[index + 1]
+      if (
+        next.session.status === 'active' &&
+        next.session.nextPieceIndex === pieceIndex &&
+        (lastTickMove === 'L' || lastTickMove === 'R')
+      ) {
+        index += 1
+        next = applyDemoCode(next, lastTickMove)
+      }
+    }
+
+    state = gameSessionEngine.tick(next.session, next.game)
+  }
+
+  return state
+}
+
+/** Applies ticks until the replay's piece locks. */
+function settleDemoPiece(current, limit = 40) {
+  let state = current
+  for (let ticks = 0; ticks < limit; ticks += 1) {
+    if (
+      state.session.status !== 'active' ||
+      state.session.statistics.blocks > 0
+    ) {
+      break
+    }
+    state = gameSessionEngine.tick(state.session, state.game)
+  }
+  return state
+}
+
+/** The column the log's lateral moves reach before its hard drop. */
+function dropColumnOf(position, log) {
+  let column = position.column
+  for (const code of log.slice(0, log.indexOf('H'))) {
+    if (code === 'L') {
+      column -= 1
+    } else if (code === 'R') {
+      column += 1
+    }
+  }
+  return column
+}
+
+/** The board cells a destination settles, following its post-drop side-step. */
+function settledCellsOf(board, cells, destination) {
+  const landing = demoLandingRow(board, cells, destination.column)
+  if (landing === null) {
+    return null
+  }
+
+  let row = landing
+  let column = destination.column
+  if (destination.lastTickMove !== null) {
+    const shifted =
+      destination.lastTickMove === 'L' ? column - 1 : column + 1
+    if (demoCanPlaceAt(board, cells, row, shifted)) {
+      column = shifted
+      while (demoCanPlaceAt(board, cells, row + 1, column)) {
+        row += 1
+      }
+    }
+  }
+
+  return demoPieceCells(cells, { row, column })
+    .map((cell) => `${cell.row},${cell.column}`)
+    .sort()
 }
 
 test('the delphi5 engine rotates 4T and 4S as planned next to a corner mono', () => {
@@ -1831,12 +1985,11 @@ test('the delphi5 engine rotates 4T and 4S as planned next to a corner mono', ()
       )
 
       const rotations = [...log].filter((code) => code === 'C').length
-      const lateral = [...log].filter((code) => code === 'L' || code === 'R')
-      const targetColumn =
-        input.position.column +
-        lateral.reduce((sum, code) => sum + (code === 'L' ? -1 : 1), 0)
+      const dropColumn = dropColumnOf(input.position, log)
+      const lastTickMove = log.slice(log.indexOf('H') + 1)
 
-      // The engine must choose the classic planner's orientation and column.
+      // The engine must choose the classic planner's orientation and column, and
+      // append the side-step the planner reports.
       const classicShape = getOccupiedOffsets(
         piece.offsets,
         classic.angle,
@@ -1847,61 +2000,31 @@ test('the delphi5 engine rotates 4T and 4S as planned next to a corner mono', ()
         sortCells(classicShape),
         `wrong orientation for ${label}`,
       )
-      assert.equal(targetColumn, classic.column, `wrong column for ${label}`)
+      assert.equal(dropColumn, classic.column, `wrong column for ${label}`)
+      assert.equal(
+        lastTickMove,
+        classic.lastTickMove ?? '',
+        `wrong last-tick move for ${label}`,
+      )
 
       // ...and replaying the log must settle the same cells the plan describes.
-      let current = { game, session }
+      const settled = settleDemoPiece(
+        replayDemoLog({ game, session }, log),
+      )
 
-      for (const code of log) {
-        if (code === 'L') {
-          current.session = gameSessionEngine.move(current.session, 'left')
-        } else if (code === 'R') {
-          current.session = gameSessionEngine.move(current.session, 'right')
-        } else if (code === 'C') {
-          current.session = gameSessionEngine.rotate(
-            current.session,
-            'clockwise',
-          )
-        } else if (code === 'A') {
-          current.session = gameSessionEngine.rotate(
-            current.session,
-            'counterclockwise',
-          )
-        } else if (code === 'H') {
-          current = gameSessionEngine.drop(current.session, current.game)
-        }
-        current = gameSessionEngine.tick(current.session, current.game)
-      }
-
-      let ticks = 0
-      while (
-        current.session.status === 'active' &&
-        current.session.statistics.blocks === 0 &&
-        ticks < 40
-      ) {
-        ticks += 1
-        current = gameSessionEngine.tick(current.session, current.game)
-      }
-
-      const landing = demoLandingRow(
+      const plannedCells = settledCellsOf(
         input.board,
         input.piece[rotations],
-        targetColumn,
+        classic,
       )
       assert.notEqual(
-        landing,
+        plannedCells,
         null,
         `planned placement is unreachable for ${label}`,
       )
-      const plannedCells = demoPieceCells(input.piece[rotations], {
-        row: landing,
-        column: targetColumn,
-      })
-        .map((cell) => `${cell.row},${cell.column}`)
-        .sort()
 
       const isFixture = (cell) => boardRows[cell.row][cell.column] === 1
-      const actualCells = current.session.board.rows
+      const actualCells = settled.session.board.rows
         .flat()
         .filter((cell) => cell.isOccupied && !isFixture(cell))
         .map((cell) => `${cell.row},${cell.column}`)
@@ -1931,59 +2054,113 @@ test('replaying a delphi5 log as Action then Tick lands at the planned column', 
     delphi5DemoEngine.plan(input.board, input.piece, input.position),
   )
 
-  let current = { game, session }
-  for (const code of log) {
-    switch (code) {
-      case 'L':
-        current = {
-          ...current,
-          session: gameSessionEngine.move(current.session, 'left'),
-        }
-        break
-      case 'R':
-        current = {
-          ...current,
-          session: gameSessionEngine.move(current.session, 'right'),
-        }
-        break
-      case 'C':
-        current = {
-          ...current,
-          session: gameSessionEngine.rotate(current.session, 'clockwise'),
-        }
-        break
-      case 'A':
-        current = {
-          ...current,
-          session: gameSessionEngine.rotate(
-            current.session,
-            'counterclockwise',
-          ),
-        }
-        break
-      case 'H':
-        current = gameSessionEngine.drop(current.session, current.game)
-        break
-      default:
-        assert.fail(`unexpected demo action: ${code}`)
-    }
-    // The driver's rule: every action is followed by exactly one tick.
-    current = gameSessionEngine.tick(current.session, current.game)
-  }
+  const settled = settleDemoPiece(replayDemoLog({ game, session }, log))
 
   assert.equal(log.includes('T'), false)
-  assert.equal(current.session.statistics.blocks, 1)
-  assert.equal(current.session.activePiece.key, session.nextPieceKey)
+  assert.equal(settled.session.statistics.blocks, 1)
+  assert.equal(settled.session.activePiece.key, session.nextPieceKey)
 
-  // 1Line is one cell, so the settled cell's column is the rotation point's
-  // column after the lateral moves the log planned.
-  const lateral = [...log].filter((code) => code === 'L' || code === 'R')
-  const delta = lateral.reduce((sum, code) => sum + (code === 'L' ? -1 : 1), 0)
-  const expectedColumn = session.activePiece.origin.column + delta
+  // 1Line is one cell, so the settled cell's column is the drop column plus the
+  // log's last-tick move.
+  const dropColumn = dropColumnOf(input.position, log)
+  const lastTickMove = log.slice(log.indexOf('H') + 1)
+  const expectedColumn =
+    lastTickMove === 'L'
+      ? dropColumn - 1
+      : lastTickMove === 'R'
+        ? dropColumn + 1
+        : dropColumn
 
-  const bottom = current.session.board.rows[current.session.board.height - 1]
+  const bottom = settled.session.board.rows[settled.session.board.height - 1]
   const occupied = bottom.filter((cell) => cell.isOccupied)
   assert.equal(occupied.length, 1)
   assert.equal(occupied[0].column, expectedColumn)
+})
+
+
+// --- The last-tick move in the action log -----------------------------------
+
+test('actionsToward appends the last-tick move after the hard drop', () => {
+  const position = { row: 1, column: 5 }
+
+  assert.equal(actionsToward(0, position, 5), 'H')
+  assert.equal(actionsToward(2, position, 3), 'CCLLH')
+  assert.equal(actionsToward(0, position, 5, 'R'), 'HR')
+  assert.equal(actionsToward(1, position, 7, 'L'), 'CRRHL')
+})
+
+test('the delphi5 engine side-steps under a mino on the row before last', () => {
+  const width = 12
+  const height = 22
+  const minoRow = height - 2
+
+  for (let column = 0; column < width; column += 1) {
+    const rows = Array.from({ length: height }, () => Array(width).fill(0))
+    rows[minoRow][column] = 1
+
+    const { game, session } = sessionWithBoard(0, rows)
+    const input = createDemoEngineInput(session)
+    const log = withFixedRandom(0.5, () => planWith(delphi5DemoEngine, input))
+
+    // A straight drop in the mino's column would stop on top of it, so the log
+    // steers to a neighbour column and side-steps into the pocket on its last
+    // tick.
+    const dropColumn = dropColumnOf(input.position, log)
+    assert.equal(actionAlphabetOnly(log), true, `alphabet for column ${column}`)
+    assert.equal(Math.abs(dropColumn - column), 1, `drop column ${column}`)
+    assert.equal(log.at(-2), 'H', `hard drop before the side-step ${column}`)
+    assert.equal(
+      log.at(-1),
+      dropColumn < column ? 'R' : 'L',
+      `side-step direction ${column}`,
+    )
+
+    const settled = settleDemoPiece(replayDemoLog({ game, session }, log))
+    const occupied = settled.session.board.rows
+      .flat()
+      .filter((cell) => cell.isOccupied)
+    const fixture = occupied.filter(
+      (cell) => cell.row === minoRow && cell.column === column,
+    )
+    const locked = occupied.filter(
+      (cell) => !(cell.row === minoRow && cell.column === column),
+    )
+
+    // The settled mino is still there and the piece stays in the pocket below it.
+    assert.equal(fixture.length, 1, `the settled mino stays for ${column}`)
+    assert.deepEqual(
+      locked.map((cell) => `${cell.row},${cell.column}`),
+      [`${minoRow + 1},${column}`],
+      `pocket placement for ${column}`,
+    )
+  }
+})
+
+test('the destination planner reports the side-step it plans', () => {
+  const board = Array.from({ length: 22 }, () => Array(12).fill(0))
+  board[20][7] = 1
+
+  const destination = planDemoDestinationForOrientations(board, [
+    [{ row: 0, column: 0 }],
+  ])
+
+  assert.notEqual(destination, null)
+  assert.equal(Math.abs(destination.column - 7), 1)
+  assert.equal(destination.lastTickMove, destination.column < 7 ? 'R' : 'L')
+})
+
+test('a straight-drop destination carries no last-tick move', () => {
+  const session = demoSession({
+    width: 12,
+    height: 22,
+    key: '1Line',
+    row: 1,
+    column: 6,
+  })
+
+  const destination = planDemoDestination(session)
+
+  assert.notEqual(destination, null)
+  assert.equal(destination.lastTickMove, null)
 })
 

@@ -6,12 +6,18 @@ import { PIECE_CATALOG, demoEngineRegistry, delphi5DemoEngine, getPieceDefinitio
 import { buildRenderGrid, getActiveCells } from '../apps/pentix-web/src/engine/projection.ts'
 import {
   DEFAULT_SETTINGS,
+  MAIN_BOARD_ID,
   MAX_DEMO_BOARDS,
   createGameReducer,
   createInitialState,
   mainBoardName,
 } from '../apps/pentix-web/src/engine/gameReducer.ts'
-import { advanceDemoPlan, nextDemoAction, resolveDemoPlan } from '../apps/pentix-web/src/engine/demo.ts'
+import {
+  advanceDemoPlan,
+  nextDemoAction,
+  nextDemoStep,
+  resolveDemoPlan,
+} from '../apps/pentix-web/src/engine/demo.ts'
 import { getTickInterval } from '../apps/pentix-web/src/engine/gameLoop.ts'
 import { mapKeyToAction } from '../apps/pentix-web/src/engine/keyMap.ts'
 
@@ -359,7 +365,9 @@ function demoStateWith(deps, overrides) {
 function demoStepAction(state, action, overrides = {}) {
   return {
     type: 'demoStep',
+    boardId: MAIN_BOARD_ID,
     action,
+    lastTickAction: null,
     sessionId: state.session.id,
     pieceIndex: state.session.nextPieceIndex,
     ...overrides,
@@ -484,6 +492,53 @@ test('a null action applies ticks only and settles the resting piece', () => {
   assert.equal(settled.session.activePiece.key, demo.session.nextPieceKey)
   assert.equal(settled.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
   assert.equal(settled.session.id, demo.session.id)
+})
+
+test('a demo step side-steps after the drop and locks in the pocket', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  // A mino on the row before last leaves a pocket beneath it on the floor. The
+  // piece drops in the neighbouring column, side-steps into the pocket on the
+  // same interval, and the interval's tick locks it there.
+  const demo = demoStateWith(deps, {
+    board: boardWith(12, 22, [[20, 7]]),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 8 } },
+  })
+
+  const stepped = reducer(
+    demo,
+    demoStepAction(demo, 'H', { lastTickAction: 'L' }),
+  )
+
+  assert.equal(stepped.session.statistics.blocks, 1)
+  assert.equal(stepped.session.board.rows[21][7].isOccupied, true)
+  assert.equal(stepped.session.board.rows[21][8].isOccupied, false)
+  assert.equal(stepped.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
+})
+
+test('a settling drop discards the last-tick move', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  // The piece already rests on the floor, so the drop settles it immediately.
+  const demo = demoStateWith(deps, {
+    board: boardWith(12, 22, []),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 21, column: 5 } },
+  })
+
+  const stepped = reducer(
+    demo,
+    demoStepAction(demo, 'H', { lastTickAction: 'R' }),
+  )
+
+  assert.equal(stepped.session.statistics.blocks, 1)
+  // The spawned piece keeps its spawn column: the side-step belonged to the
+  // settled piece and must not steer its successor.
+  assert.equal(
+    stepped.session.activePiece.origin.column,
+    Math.floor(stepped.session.board.width / 2),
+  )
+  assert.equal(stepped.session.board.rows[21][5].isOccupied, true)
+  assert.equal(stepped.session.board.rows[21][6].isOccupied, false)
 })
 
 test('a demo step that ends the demo game keeps the final board until the delay elapses', () => {
@@ -741,6 +796,55 @@ test('nextDemoAction ignores characters outside the demo alphabet', () => {
   assert.equal(nextDemoAction(advanceDemoPlan(plan)), null)
 })
 
+test('nextDemoStep consumes the drop and its last-tick move in one step', () => {
+  const plan = {
+    sessionId: 'session-1',
+    pieceIndex: 1,
+    actions: 'RHR',
+    index: 0,
+  }
+
+  const first = nextDemoStep(plan)
+  assert.equal(first.action, 'R')
+  assert.equal(first.lastTickAction, null)
+  assert.equal(first.plan.index, 1)
+
+  const second = nextDemoStep(first.plan)
+  assert.equal(second.action, 'H')
+  assert.equal(second.lastTickAction, 'R')
+  assert.equal(second.plan.index, 3)
+
+  // An exhausted log yields no action and no side-step; the demo keeps ticking.
+  const exhausted = nextDemoStep(second.plan)
+  assert.equal(exhausted.action, null)
+  assert.equal(exhausted.lastTickAction, null)
+  assert.equal(exhausted.plan.index, 3)
+})
+
+test('nextDemoStep keeps a non-lateral code out of the last-tick slot', () => {
+  // A hard drop followed by another drop is not a side-step.
+  const doubleDrop = nextDemoStep({
+    sessionId: 'session-1',
+    pieceIndex: 1,
+    actions: 'HH',
+    index: 0,
+  })
+  assert.equal(doubleDrop.action, 'H')
+  assert.equal(doubleDrop.lastTickAction, null)
+  assert.equal(doubleDrop.plan.index, 2)
+
+  // Neither is a character outside the demo alphabet.
+  const invalid = nextDemoStep({
+    sessionId: 'session-1',
+    pieceIndex: 1,
+    actions: 'HX',
+    index: 0,
+  })
+  assert.equal(invalid.action, 'H')
+  assert.equal(invalid.lastTickAction, null)
+  assert.equal(invalid.plan.index, 2)
+})
+
 test('resolveDemoPlan asks the engine once per piece and keeps the log', () => {
   const session = {
     id: 'session-1',
@@ -808,9 +912,10 @@ test('resolveDemoPlan re-plans when a new piece spawns or the session changes', 
 /** A `demoBoardStep` action carrying one code from the board's engine log. */
 function demoBoardStepAction(board, action, overrides = {}) {
   return {
-    type: 'demoBoardStep',
+    type: 'demoStep',
     boardId: board.id,
     action,
+    lastTickAction: null,
     sessionId: board.session.id,
     pieceIndex: board.session.nextPieceIndex,
     ...overrides,
@@ -938,8 +1043,82 @@ test('restarting replaces the demo-board sessions', () => {
     assert.notEqual(board.session.id, advanced.demoBoards[index].session.id)
     assert.equal(board.session.statistics.blocks, 0)
     assert.equal(board.session.statistics.score, 0)
-    assert.equal(filledCellCount(board.session.board), 0)
+    // A fresh demo board carries only its seeded mino.
+    assert.equal(filledCellCount(board.session.board), 1)
   })
+})
+
+test('a demo session starts with one mino on the row before last', () => {
+  const deps = createDeps([0, 1])
+  const seeded = withFixedRandom(0.5, () => createInitialState(deps, 'demo'))
+  const { width, height } = seeded.session.board
+  const seedColumn = Math.floor(0.5 * width)
+
+  const seedCells = seeded.session.board.rows
+    .flat()
+    .filter((cell) => cell.isOccupied)
+  assert.equal(seedCells.length, 1)
+  assert.equal(seedCells[0].row, height - 2)
+  assert.equal(seedCells[0].column, seedColumn)
+  // The seed is a settled mino, not a locked piece: it scores nothing.
+  assert.equal(seeded.session.statistics.blocks, 0)
+  assert.equal(seeded.session.statistics.score, 0)
+
+  // Every rail demo board starts with its own seeded mino too.
+  seeded.demoBoards.forEach((board) => {
+    const occupied = board.session.board.rows
+      .flat()
+      .filter((cell) => cell.isOccupied)
+    assert.equal(occupied.length, 1)
+    assert.equal(occupied[0].row, height - 2)
+  })
+})
+
+test('a player session starts on an empty main board', () => {
+  const deps = createDeps([0, 1])
+  const playing = withFixedRandom(0.5, () => createInitialState(deps, 'playing'))
+
+  assert.equal(filledCellCount(playing.session.board), 0)
+  // The rail keeps auto-playing, so its demo boards are still seeded.
+  playing.demoBoards.forEach((board) => {
+    assert.equal(filledCellCount(board.session.board), 1)
+  })
+})
+
+test('the seeded mino stays on the demo board while it plays', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const demo = withFixedRandom(0.5, () => createInitialState(deps, 'demo'))
+  const { width, height } = demo.session.board
+  const seedColumn = Math.floor(0.5 * width)
+
+  let state = demo
+  for (let step = 0; step < 6; step += 1) {
+    state = reducer(state, demoStepAction(state, 'H'))
+  }
+
+  // Pieces have locked and the seeded mino is still on the board.
+  assert.ok(state.session.statistics.blocks > 0)
+  assert.equal(state.session.board.rows[height - 2][seedColumn].isOccupied, true)
+})
+
+test('a demo start after a player game still runs the swapped engine', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+  const swapped = reducer(demo, { type: 'swapBoard', boardId: 'demo-slot-1' })
+
+  const playing = reducer(swapped, { type: 'start' })
+  assert.equal(playing.mainEngineId, 'delphi5')
+
+  // The game-over screen hands back to the demo with the same engine.
+  const over = { ...playing, phase: 'game-over', gameOverReady: true }
+  const demoAgain = reducer(over, { type: 'demo' })
+
+  assert.equal(demoAgain.phase, 'demo')
+  assert.equal(demoAgain.mainEngineId, 'delphi5')
+  // The fresh demo session starts with its seeded mino as well.
+  assert.equal(filledCellCount(demoAgain.session.board), 1)
 })
 
 test('a level pick on the game-over screen starts a fresh board set', () => {
@@ -1344,7 +1523,7 @@ test('a finished demo board can be swapped in and restarts after the delay', () 
   )
 })
 
-test('a fresh board set restores the Random engine and the initial slots', () => {
+test('a fresh board set keeps the swapped engine and re-applies the rail slots', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
@@ -1353,7 +1532,8 @@ test('a fresh board set restores the Random engine and the initial slots', () =>
 
   const started = reducer(swapped, { type: 'start' })
   assert.equal(started.phase, 'playing')
-  assert.equal(started.mainEngineId, 'random')
+  // A player game must not throw the player's chosen demo engine away.
+  assert.equal(started.mainEngineId, 'delphi5')
   assert.deepEqual(
     started.demoBoards.map((board) => board.engineId),
     ['delphi5', 'random'],
@@ -1364,7 +1544,7 @@ test('a fresh board set restores the Random engine and the initial slots', () =>
   )
 
   const restarted = reducer(swapped, { type: 'restart' })
-  assert.equal(restarted.mainEngineId, 'random')
+  assert.equal(restarted.mainEngineId, 'delphi5')
   assert.deepEqual(
     restarted.demoBoards.map((board) => board.engineId),
     ['delphi5', 'random'],
