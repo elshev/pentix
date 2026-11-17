@@ -10,12 +10,13 @@ import {
   MAX_DEMO_BOARDS,
   createGameReducer,
   createInitialState,
+  isDemoCycleOver,
   mainBoardName,
 } from '../apps/pentix-web/src/engine/gameReducer.ts'
 import {
   advanceDemoPlan,
   nextDemoAction,
-  nextDemoStep,
+  nextDemoSlot,
   resolveDemoPlan,
 } from '../apps/pentix-web/src/engine/demo.ts'
 import { getTickInterval } from '../apps/pentix-web/src/engine/gameLoop.ts'
@@ -361,17 +362,27 @@ function demoStateWith(deps, overrides) {
   return { ...state, session: { ...state.session, ...overrides } }
 }
 
-/** A `demoStep` action carrying one code from the engine's log. */
-function demoStepAction(state, action, overrides = {}) {
+/** A `demoAction` steering step carrying one code from the engine's log. */
+function demoActionStep(state, action, overrides = {}) {
   return {
-    type: 'demoStep',
+    type: 'demoAction',
     boardId: MAIN_BOARD_ID,
     action,
-    lastTickAction: null,
     sessionId: state.session.id,
     pieceIndex: state.session.nextPieceIndex,
     ...overrides,
   }
+}
+
+/** A `demoTick` gravity step addressed to one board. */
+function demoTickAction(boardId = MAIN_BOARD_ID) {
+  return { type: 'demoTick', boardId }
+}
+
+/** Replays one action and the gravity tick that follows it, in the hook's order. */
+function replayDemoStep(reducer, state, action, overrides = {}) {
+  const steered = reducer(state, demoActionStep(state, action, overrides))
+  return reducer(steered, demoTickAction())
 }
 
 test('the initial phase is the demo', () => {
@@ -399,7 +410,7 @@ test('a stale demo step does not steer a different piece', () => {
   // applied the demo has already spawned the next piece.
   const stale = reducer(
     demo,
-    demoStepAction(demo, 'H', {
+    demoActionStep(demo, 'H', {
       pieceIndex: demo.session.nextPieceIndex - 1,
     }),
   )
@@ -414,24 +425,37 @@ test('a demo step for another session is ignored', () => {
 
   const stale = reducer(
     demo,
-    demoStepAction(demo, 'L', { sessionId: 'session-missing' }),
+    demoActionStep(demo, 'L', { sessionId: 'session-missing' }),
   )
 
   assert.equal(stale, demo)
 })
 
-test('a demo step applies the action and then one gravity tick', () => {
+test('a steering step moves the piece without stepping gravity', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
   const { row, column } = demo.session.activePiece.origin
 
-  const stepped = reducer(demo, demoStepAction(demo, 'L'))
+  const steered = reducer(demo, demoActionStep(demo, 'L'))
 
-  // Action then Tick: the move lands first, then gravity descends the piece.
-  assert.equal(stepped.session.activePiece.origin.row, row + 1)
-  assert.equal(stepped.session.activePiece.origin.column, column - 1)
-  assert.equal(stepped.session.statistics.actions.moves, 1)
+  // The action lands on its own; the interval's tick is a separate step.
+  assert.equal(steered.session.activePiece.origin.row, row)
+  assert.equal(steered.session.activePiece.origin.column, column - 1)
+  assert.equal(steered.session.statistics.actions.moves, 1)
+})
+
+test('a gravity step descends the piece without steering it', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+  const { row, column } = demo.session.activePiece.origin
+
+  const ticked = reducer(demo, demoTickAction())
+
+  assert.equal(ticked.session.activePiece.origin.row, row + 1)
+  assert.equal(ticked.session.activePiece.origin.column, column)
+  assert.equal(ticked.session.statistics.actions.moves, 0)
 })
 
 test('a resting piece takes one legal action and then locks', () => {
@@ -446,13 +470,19 @@ test('a resting piece takes one legal action and then locks', () => {
     activePiece: { key: '1Line', angle: 0, origin: { row: 20, column: 5 } },
   })
 
-  const stepped = reducer(demo, demoStepAction(demo, 'R'))
+  const steered = reducer(demo, demoActionStep(demo, 'R'))
 
-  // The move applies at the resting placement, and the paired tick locks it.
-  assert.equal(stepped.session.statistics.blocks, 1)
-  assert.equal(stepped.session.activePiece.key, demo.session.nextPieceKey)
-  assert.equal(stepped.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
-  assert.equal(stepped.session.board.rows[20][6].isOccupied, true)
+  // The move applies at the resting placement and the piece stays unlocked.
+  assert.equal(steered.session.statistics.blocks, 0)
+  assert.equal(steered.session.activePiece.origin.column, 6)
+
+  const locked = reducer(steered, demoTickAction())
+
+  // The tick that follows the action is the one that locks the piece.
+  assert.equal(locked.session.statistics.blocks, 1)
+  assert.equal(locked.session.activePiece.key, demo.session.nextPieceKey)
+  assert.equal(locked.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
+  assert.equal(locked.session.board.rows[20][6].isOccupied, true)
 })
 
 test('a blocked action still ticks and locks the resting piece', () => {
@@ -468,14 +498,20 @@ test('a blocked action still ticks and locks the resting piece', () => {
     activePiece: { key: '1Line', angle: 0, origin: { row: 20, column: 5 } },
   })
 
-  const stepped = reducer(demo, demoStepAction(demo, 'L'))
+  const steered = reducer(demo, demoActionStep(demo, 'L'))
 
-  // The action is a no-op, but its paired tick still settles the piece.
-  assert.equal(stepped.session.statistics.blocks, 1)
-  assert.equal(stepped.session.activePiece.key, demo.session.nextPieceKey)
-  assert.equal(stepped.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
-  assert.equal(stepped.session.id, demo.session.id)
-  assert.equal(stepped.session.board.rows[20][5].isOccupied, true)
+  // The action is a no-op and the piece is still where it was.
+  assert.equal(steered.session.statistics.blocks, 0)
+  assert.equal(steered.session.activePiece.origin.column, 5)
+
+  const locked = reducer(steered, demoTickAction())
+
+  // The tick that follows still settles the piece.
+  assert.equal(locked.session.statistics.blocks, 1)
+  assert.equal(locked.session.activePiece.key, demo.session.nextPieceKey)
+  assert.equal(locked.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
+  assert.equal(locked.session.id, demo.session.id)
+  assert.equal(locked.session.board.rows[20][5].isOccupied, true)
 })
 
 test('a null action applies ticks only and settles the resting piece', () => {
@@ -486,7 +522,11 @@ test('a null action applies ticks only and settles the resting piece', () => {
     activePiece: { key: '1Line', angle: 0, origin: { row: 2, column: 1 } },
   })
 
-  const settled = reducer(demo, demoStepAction(demo, null))
+  const steered = reducer(demo, demoActionStep(demo, null))
+  assert.equal(steered.session.statistics.blocks, 0)
+  assert.equal(steered.session.activePiece.origin.row, 2)
+
+  const settled = reducer(steered, demoTickAction())
 
   assert.equal(settled.session.statistics.blocks, 1)
   assert.equal(settled.session.activePiece.key, demo.session.nextPieceKey)
@@ -498,25 +538,71 @@ test('a demo step side-steps after the drop and locks in the pocket', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   // A mino on the row before last leaves a pocket beneath it on the floor. The
-  // piece drops in the neighbouring column, side-steps into the pocket on the
-  // same interval, and the interval's tick locks it there.
+  // piece drops in the neighbouring column, side-steps into the pocket on its
+  // own step, and the tick a full interval after the drop locks it there.
   const demo = demoStateWith(deps, {
     board: boardWith(12, 22, [[20, 7]]),
     activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 8 } },
   })
 
-  const stepped = reducer(
-    demo,
-    demoStepAction(demo, 'H', { lastTickAction: 'L' }),
-  )
+  const dropped = reducer(demo, demoActionStep(demo, 'H'))
 
-  assert.equal(stepped.session.statistics.blocks, 1)
-  assert.equal(stepped.session.board.rows[21][7].isOccupied, true)
-  assert.equal(stepped.session.board.rows[21][8].isOccupied, false)
-  assert.equal(stepped.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
+  // The drop lands on the floor and locks nothing: its side-step is still ahead.
+  assert.equal(dropped.session.statistics.blocks, 0)
+  assert.equal(dropped.session.activePiece.origin.row, 21)
+  assert.equal(dropped.session.activePiece.origin.column, 8)
+
+  const steered = reducer(dropped, demoActionStep(dropped, 'L'))
+
+  // The side-step is its own step, so it never rides the drop's instant.
+  assert.equal(steered.session.statistics.blocks, 0)
+  assert.equal(steered.session.activePiece.origin.row, 21)
+  assert.equal(steered.session.activePiece.origin.column, 7)
+
+  const locked = reducer(steered, demoTickAction())
+
+  assert.equal(locked.session.statistics.blocks, 1)
+  assert.equal(locked.session.board.rows[21][7].isOccupied, true)
+  assert.equal(locked.session.board.rows[21][8].isOccupied, false)
+  assert.equal(locked.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
 })
 
-test('a settling drop discards the last-tick move', () => {
+test('a hard drop leaves the piece resting before the next one appears', () => {
+  const deps = createDeps([0])
+  const reducer = createGameReducer(deps)
+  const demo = demoStateWith(deps, {
+    board: boardWith(12, 22, [[20, 7]]),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 8 } },
+  })
+
+  const dropped = reducer(demo, demoActionStep(demo, 'H'))
+
+  // Right after the drop the piece rests on the floor and is still the same
+  // piece: nothing has locked and no new piece has spawned.
+  assert.equal(dropped.session.nextPieceIndex, demo.session.nextPieceIndex)
+  assert.equal(dropped.session.activePiece.origin.row, 21)
+  assert.equal(dropped.session.statistics.blocks, 0)
+
+  // The step after the drop is an action, not the locking tick.
+  const steered = reducer(dropped, demoActionStep(dropped, 'L'))
+  assert.equal(steered.session.statistics.blocks, 0)
+
+  // Only the tick that follows the side-step locks it and spawns the next piece.
+  const locked = reducer(steered, demoTickAction())
+
+  assert.equal(locked.session.statistics.blocks, 1)
+  assert.equal(locked.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
+
+  // The spawned piece is not steered in the instant it appears: only its own
+  // steering step moves it, and that step does not descend it.
+  const spawned = locked.session.activePiece.origin
+  const nextSteered = reducer(locked, demoActionStep(locked, 'R'))
+
+  assert.equal(nextSteered.session.activePiece.origin.row, spawned.row)
+  assert.equal(nextSteered.session.activePiece.origin.column, spawned.column + 1)
+})
+
+test('a settling drop leaves the side-step to the next piece only', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   // The piece already rests on the floor, so the drop settles it immediately.
@@ -525,23 +611,29 @@ test('a settling drop discards the last-tick move', () => {
     activePiece: { key: '1Line', angle: 0, origin: { row: 21, column: 5 } },
   })
 
-  const stepped = reducer(
-    demo,
-    demoStepAction(demo, 'H', { lastTickAction: 'R' }),
+  const settled = reducer(demo, demoActionStep(demo, 'H'))
+
+  assert.equal(settled.session.statistics.blocks, 1)
+  assert.equal(settled.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
+  // The spawned piece keeps its spawn column.
+  assert.equal(
+    settled.session.activePiece.origin.column,
+    Math.floor(settled.session.board.width / 2),
   )
 
-  assert.equal(stepped.session.statistics.blocks, 1)
-  // The spawned piece keeps its spawn column: the side-step belonged to the
-  // settled piece and must not steer its successor.
-  assert.equal(
-    stepped.session.activePiece.origin.column,
-    Math.floor(stepped.session.board.width / 2),
+  // A side-step still addressed to the settled piece is ignored, so it cannot
+  // steer the piece that replaced it.
+  const stale = reducer(
+    settled,
+    demoActionStep(settled, 'R', { pieceIndex: demo.session.nextPieceIndex }),
   )
-  assert.equal(stepped.session.board.rows[21][5].isOccupied, true)
-  assert.equal(stepped.session.board.rows[21][6].isOccupied, false)
+
+  assert.equal(stale, settled)
+  assert.equal(stale.session.board.rows[21][5].isOccupied, true)
+  assert.equal(stale.session.board.rows[21][6].isOccupied, false)
 })
 
-test('a demo step that ends the demo game keeps the final board until the delay elapses', () => {
+test('a demo step that ends the demo game keeps the final board until every board ends', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
@@ -553,19 +645,32 @@ test('a demo step that ends the demo game keeps the final board until the delay 
     activePiece: demo.session.activePiece,
   })
 
-  const over = reducer(
-    blocked,
-    demoStepAction(blocked, 'H'),
-  )
+  const over = reducer(blocked, demoActionStep(blocked, 'H'))
 
   assert.equal(over.phase, 'demo-over')
   assert.equal(over.session.status, 'game-over')
   assert.equal(over.session.id, blocked.session.id)
 
-  const restarted = reducer(over, { type: 'demoRestart' })
+  // The rail is still playing, so the cycle keeps the finished board.
+  assert.equal(reducer(over, { type: 'demoRestart' }), over)
+
+  // Once every board has ended, the next cycle replaces the whole board set.
+  const finished = {
+    ...over,
+    demoBoards: over.demoBoards.map((board) => ({
+      ...board,
+      session: { ...board.session, status: 'game-over' },
+    })),
+  }
+  const restarted = reducer(finished, { type: 'demoRestart' })
+
   assert.equal(restarted.phase, 'demo')
   assert.equal(restarted.session.status, 'active')
   assert.notEqual(restarted.session.id, over.session.id)
+  restarted.demoBoards.forEach((board, index) => {
+    assert.equal(board.session.status, 'active')
+    assert.notEqual(board.session.id, finished.demoBoards[index].session.id)
+  })
 })
 
 test('starting from the demo enters a fresh player game', () => {
@@ -585,9 +690,9 @@ test('space enters the demo after game over and starts a game from the demo', ()
   assert.deepEqual(mapKeyToAction('Enter', 'game-over'), { type: 'start' })
   assert.deepEqual(mapKeyToAction('Enter', 'demo'), { type: 'start' })
   assert.deepEqual(mapKeyToAction(' ', 'playing'), { type: 'drop' })
-  // The demo's post-game-over delay still lets the player take over or pick a
-  // level instead of waiting for the next demo.
-  assert.deepEqual(mapKeyToAction(' ', 'demo-over'), { type: 'start' })
+  // A finished demo waits for the whole board set, so Space asks for the next
+  // demo while Enter still takes the player to a game.
+  assert.deepEqual(mapKeyToAction(' ', 'demo-over'), { type: 'demo' })
   assert.deepEqual(mapKeyToAction('Enter', 'demo-over'), { type: 'start' })
   assert.deepEqual(mapKeyToAction('4', 'demo-over'), {
     type: 'setStartingLevel',
@@ -608,15 +713,114 @@ test('a demo game over waits for the demo restart action', () => {
   assert.equal(next.phase, 'demo-over')
   assert.equal(next.session.status, 'game-over')
   assert.equal(next.session.id, demo.session.id)
-  // The attract loop is only restarted by the delay's own action.
+  // The attract loop is only restarted by the delay's own action, and only once
+  // every board has ended.
   assert.equal(reducer(demo, { type: 'demoRestart' }), demo)
+  assert.equal(reducer(next, { type: 'demoRestart' }), next)
 
-  const restarted = reducer(next, { type: 'demoRestart' })
+  const finished = {
+    ...next,
+    demoBoards: next.demoBoards.map((board) => ({
+      ...board,
+      session: { ...board.session, status: 'game-over' },
+    })),
+  }
+  const restarted = reducer(finished, { type: 'demoRestart' })
   assert.equal(restarted.phase, 'demo')
   assert.equal(restarted.session.status, 'active')
   assert.notEqual(restarted.session.id, demo.session.id)
   // No player-facing cooldown is armed for the attract loop.
   assert.equal(restarted.gameOverReady, true)
+})
+
+test('the demo cycle is over only once every board has ended', () => {
+  const deps = createDeps([0, 1])
+  const demo = createInitialState(deps, 'demo')
+  const mainOver = {
+    ...demo,
+    phase: 'demo-over',
+    session: { ...demo.session, status: 'game-over' },
+  }
+
+  // The rail is still playing, so the finished demo holds its board.
+  assert.equal(isDemoCycleOver(demo), false)
+  assert.equal(isDemoCycleOver(mainOver), false)
+
+  const allOver = {
+    ...mainOver,
+    demoBoards: mainOver.demoBoards.map((board) => ({
+      ...board,
+      session: { ...board.session, status: 'game-over' },
+    })),
+  }
+  assert.equal(isDemoCycleOver(allOver), true)
+
+  // A player game never counts, even with every session finished.
+  assert.equal(isDemoCycleOver({ ...allOver, phase: 'game-over' }), false)
+})
+
+test('the demo restart starts a fresh board set with the main engine kept', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+  const swapped = reducer(demo, { type: 'swapBoard', boardId: 'demo-slot-1' })
+  const finished = {
+    ...swapped,
+    phase: 'demo-over',
+    session: { ...swapped.session, status: 'game-over' },
+    demoBoards: swapped.demoBoards.map((board) => ({
+      ...board,
+      session: { ...board.session, status: 'game-over' },
+    })),
+  }
+
+  const restarted = reducer(finished, { type: 'demoRestart' })
+
+  assert.equal(restarted.phase, 'demo')
+  assert.equal(restarted.mainEngineId, 'delphi5')
+  assert.notEqual(restarted.game.id, finished.game.id)
+  // Every board is alive again, including the slot that had been dead.
+  restarted.demoBoards.forEach((board, index) => {
+    assert.equal(board.session.status, 'active')
+    assert.equal(board.session.gameId, restarted.game.id)
+    assert.notEqual(board.session.id, finished.demoBoards[index].session.id)
+  })
+  assert.deepEqual(
+    restarted.demoBoards.map((board) => board.id),
+    ['demo-slot-1', 'demo-slot-2'],
+  )
+  assert.deepEqual(
+    restarted.demoBoards.map((board) => board.engineId),
+    ['delphi5', 'random'],
+  )
+  // Each new demo session starts with the seeded mino, not an empty board.
+  restarted.demoBoards.forEach((board) => {
+    assert.equal(filledCellCount(board.session.board), 1)
+  })
+})
+
+test('the demo action starts a fresh board set from a finished demo', () => {
+  const deps = createDeps([0, 1])
+  const reducer = createGameReducer(deps)
+  const demo = createInitialState(deps, 'demo')
+
+  // The main demo is over while the rail still plays: a manual Space restart
+  // replaces the whole set instead of waiting for the gate.
+  const over = {
+    ...demo,
+    phase: 'demo-over',
+    session: { ...demo.session, status: 'game-over' },
+  }
+
+  const restarted = reducer(over, { type: 'demo' })
+
+  assert.equal(restarted.phase, 'demo')
+  assert.equal(restarted.session.status, 'active')
+  assert.notEqual(restarted.session.id, over.session.id)
+  restarted.demoBoards.forEach((board, index) => {
+    assert.equal(board.session.status, 'active')
+    assert.notEqual(board.session.id, over.demoBoards[index].session.id)
+  })
 })
 
 test('choosing a level on the game-over screen starts that level', () => {
@@ -689,7 +893,15 @@ test('a level chosen during the demo delay applies to the next demo', () => {
   // The finished demo keeps the level it played at.
   assert.equal(chosen.session.statistics.level, 2)
 
-  const restarted = reducer(chosen, { type: 'demoRestart' })
+  // The rail reaches its own end, so the next cycle may start.
+  const finished = {
+    ...chosen,
+    demoBoards: chosen.demoBoards.map((board) => ({
+      ...board,
+      session: { ...board.session, status: 'game-over' },
+    })),
+  }
+  const restarted = reducer(finished, { type: 'demoRestart' })
   assert.equal(restarted.phase, 'demo')
   assert.equal(restarted.session.statistics.level, 7)
 })
@@ -796,53 +1008,17 @@ test('nextDemoAction ignores characters outside the demo alphabet', () => {
   assert.equal(nextDemoAction(advanceDemoPlan(plan)), null)
 })
 
-test('nextDemoStep consumes the drop and its last-tick move in one step', () => {
-  const plan = {
-    sessionId: 'session-1',
-    pieceIndex: 1,
-    actions: 'RHR',
-    index: 0,
-  }
+test('a hard drop restarts the demo clock so the lock comes a full tick later', () => {
+  // Every other action hands the clock back to the tick that closes the interval.
+  assert.equal(nextDemoSlot('L'), 'tick')
+  assert.equal(nextDemoSlot('R'), 'tick')
+  assert.equal(nextDemoSlot('C'), 'tick')
+  assert.equal(nextDemoSlot('A'), 'tick')
+  assert.equal(nextDemoSlot(null), 'tick')
 
-  const first = nextDemoStep(plan)
-  assert.equal(first.action, 'R')
-  assert.equal(first.lastTickAction, null)
-  assert.equal(first.plan.index, 1)
-
-  const second = nextDemoStep(first.plan)
-  assert.equal(second.action, 'H')
-  assert.equal(second.lastTickAction, 'R')
-  assert.equal(second.plan.index, 3)
-
-  // An exhausted log yields no action and no side-step; the demo keeps ticking.
-  const exhausted = nextDemoStep(second.plan)
-  assert.equal(exhausted.action, null)
-  assert.equal(exhausted.lastTickAction, null)
-  assert.equal(exhausted.plan.index, 3)
-})
-
-test('nextDemoStep keeps a non-lateral code out of the last-tick slot', () => {
-  // A hard drop followed by another drop is not a side-step.
-  const doubleDrop = nextDemoStep({
-    sessionId: 'session-1',
-    pieceIndex: 1,
-    actions: 'HH',
-    index: 0,
-  })
-  assert.equal(doubleDrop.action, 'H')
-  assert.equal(doubleDrop.lastTickAction, null)
-  assert.equal(doubleDrop.plan.index, 2)
-
-  // Neither is a character outside the demo alphabet.
-  const invalid = nextDemoStep({
-    sessionId: 'session-1',
-    pieceIndex: 1,
-    actions: 'HX',
-    index: 0,
-  })
-  assert.equal(invalid.action, 'H')
-  assert.equal(invalid.lastTickAction, null)
-  assert.equal(invalid.plan.index, 2)
+  // The drop's next slot is an action again: the log's last-tick move lands
+  // halfway after the drop and the locking tick a full interval after it.
+  assert.equal(nextDemoSlot('H'), 'action')
 })
 
 test('resolveDemoPlan asks the engine once per piece and keeps the log', () => {
@@ -909,17 +1085,23 @@ test('resolveDemoPlan re-plans when a new piece spawns or the session changes', 
   assert.equal(planned, 3)
 })
 
-/** A `demoBoardStep` action carrying one code from the board's engine log. */
-function demoBoardStepAction(board, action, overrides = {}) {
+/** A `demoAction` steering step for one demo board, carrying one code from its log. */
+function demoBoardActionStep(board, action, overrides = {}) {
   return {
-    type: 'demoStep',
+    type: 'demoAction',
     boardId: board.id,
     action,
-    lastTickAction: null,
     sessionId: board.session.id,
     pieceIndex: board.session.nextPieceIndex,
     ...overrides,
   }
+}
+
+/** Replays one action on a demo board and the tick that follows it. */
+function replayDemoBoardStep(reducer, state, boardId, action, overrides = {}) {
+  const board = state.demoBoards.find((entry) => entry.id === boardId)
+  const steered = reducer(state, demoBoardActionStep(board, action, overrides))
+  return reducer(steered, demoTickAction(boardId))
 }
 
 /** The catalog key of the piece at `index` in the shared game. */
@@ -972,8 +1154,8 @@ test('every board draws from the one shared piece list', () => {
   assert.equal(delphi.session.activePiece.key, random.session.activePiece.key)
 
   // A demo-board lock extends the one list; the main session keeps matching it.
-  // One Action-Tick step hard-drops and settles the piece.
-  const stepped = reducer(playing, demoBoardStepAction(delphi, 'H'))
+  // A hard drop followed by its tick settles the piece.
+  const stepped = replayDemoBoardStep(reducer, playing, delphi.id, 'H')
   const advanced = stepped.demoBoards[0]
 
   assert.equal(stepped.game.id, playing.game.id)
@@ -1029,9 +1211,11 @@ test('restarting replaces the demo-board sessions', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const playing = createInitialState(deps, 'playing')
-  const advanced = reducer(
+  const advanced = replayDemoBoardStep(
+    reducer,
     playing,
-    demoBoardStepAction(playing.demoBoards[0], 'H'),
+    playing.demoBoards[0].id,
+    'H',
   )
 
   assert.equal(advanced.demoBoards[0].session.statistics.blocks, 1)
@@ -1094,7 +1278,7 @@ test('the seeded mino stays on the demo board while it plays', () => {
 
   let state = demo
   for (let step = 0; step < 6; step += 1) {
-    state = reducer(state, demoStepAction(state, 'H'))
+    state = replayDemoStep(reducer, state, 'H')
   }
 
   // Pieces have locked and the seeded mino is still on the board.
@@ -1142,30 +1326,28 @@ test('a level pick on the game-over screen starts a fresh board set', () => {
   })
 })
 
-test('the attract demo restart leaves the demo boards untouched', () => {
+test('a finished main demo keeps the rail playing and waits for it', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
-  const advanced = reducer(
-    demo,
-    demoBoardStepAction(demo.demoBoards[1], 'H'),
-  )
+  const advanced = replayDemoBoardStep(reducer, demo, demo.demoBoards[1].id, 'H')
   const over = {
     ...advanced,
     phase: 'demo-over',
     session: { ...advanced.session, status: 'game-over' },
   }
 
-  const restarted = reducer(over, { type: 'demoRestart' })
+  // The rail is still playing, so the restart delay cannot start a new cycle and
+  // the finished main demo keeps its session and board.
+  assert.equal(reducer(over, { type: 'demoRestart' }), over)
 
-  assert.equal(restarted.phase, 'demo')
-  assert.notEqual(restarted.session.id, over.session.id)
-  assert.equal(restarted.settings.startingLevel, demo.settings.startingLevel)
-  // Same piece list and the same demo-board sessions: only the main demo restarted.
-  assert.equal(restarted.game, advanced.game)
-  assert.deepEqual(restarted.demoBoards, advanced.demoBoards)
+  // The rail keeps advancing while the main board holds its final board.
+  const stepped = reducer(over, demoBoardActionStep(over.demoBoards[1], 'L'))
+
+  assert.notEqual(stepped.demoBoards[1].session, over.demoBoards[1].session)
+  assert.equal(stepped.session, over.session)
+  assert.equal(stepped.phase, 'demo-over')
 })
-
 
 test('a demo-board step advances only the addressed board', () => {
   const deps = createDeps([0, 1])
@@ -1173,9 +1355,11 @@ test('a demo-board step advances only the addressed board', () => {
   const demo = createInitialState(deps, 'demo')
   const [delphi] = demo.demoBoards
 
-  const stepped = reducer(
+  const stepped = replayDemoBoardStep(
+    reducer,
     demo,
-    demoBoardStepAction(demo.demoBoards[1], 'H'),
+    demo.demoBoards[1].id,
+    'H',
   )
 
   assert.notEqual(stepped.demoBoards[1].session, demo.demoBoards[1].session)
@@ -1197,10 +1381,13 @@ test('a stale demo-board step is ignored', () => {
     { boardId: 'demo-missing' },
   ]) {
     assert.equal(
-      reducer(demo, demoBoardStepAction(delphi, 'H', overrides)),
+      reducer(demo, demoBoardActionStep(delphi, 'H', overrides)),
       demo,
     )
   }
+
+  // A gravity step for a board that does not exist changes nothing either.
+  assert.equal(reducer(demo, demoTickAction('demo-missing')), demo)
 })
 
 test('a finished demo board keeps its final board and ignores steps', () => {
@@ -1218,10 +1405,15 @@ test('a finished demo board keeps its final board and ignores steps', () => {
 
   const stepped = reducer(
     finished,
-    demoBoardStepAction(finished.demoBoards[0], 'H'),
+    demoBoardActionStep(finished.demoBoards[0], 'H'),
   )
 
   assert.equal(stepped, finished)
+  // Gravity is ignored for the finished board as well.
+  assert.equal(
+    reducer(finished, demoTickAction(finished.demoBoards[0].id)),
+    finished,
+  )
   assert.equal(stepped.demoBoards[0].session.status, 'game-over')
 })
 
@@ -1232,10 +1424,7 @@ test('demo-board steps run through the engine at the board’s own level', () =>
   const board = playing.demoBoards[1]
   const { row, column } = board.session.activePiece.origin
 
-  const stepped = reducer(
-    playing,
-    demoBoardStepAction(board, 'L'),
-  )
+  const stepped = replayDemoBoardStep(reducer, playing, board.id, 'L')
 
   // One action plus one gravity tick, on that board's own session.
   assert.equal(stepped.demoBoards[1].session.activePiece.origin.row, row + 1)
@@ -1486,7 +1675,7 @@ test('a swap is ignored while a player game owns the main board', () => {
   assert.equal(reducer(demo, { type: 'swapBoard', boardId: 'demo-slot-9' }), demo)
 })
 
-test('a finished demo board can be swapped in and restarts after the delay', () => {
+test('a finished demo board can be swapped in and waits for the rail', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
@@ -1510,16 +1699,26 @@ test('a finished demo board can be swapped in and restarts after the delay', () 
   assert.equal(swapped.demoBoards[0].session.status, 'active')
   assert.equal(swapped.demoBoards[0].engineId, 'random')
 
-  const restarted = reducer(swapped, { type: 'demoRestart' })
+  // That session now holds the gate: the finished demo cannot restart yet.
+  assert.equal(reducer(swapped, { type: 'demoRestart' }), swapped)
+
+  const allOver = {
+    ...swapped,
+    demoBoards: swapped.demoBoards.map((board) => ({
+      ...board,
+      session: { ...board.session, status: 'game-over' },
+    })),
+  }
+  const restarted = reducer(allOver, { type: 'demoRestart' })
 
   assert.equal(restarted.phase, 'demo')
   assert.equal(restarted.session.status, 'active')
   assert.notEqual(restarted.session.id, swapped.session.id)
   assert.equal(restarted.mainEngineId, 'delphi5')
-  assert.equal(restarted.demoBoards[0].session.id, demo.session.id)
-  assert.equal(
-    restarted.demoBoards[0].session.nextPieceIndex,
-    demo.session.nextPieceIndex,
+  // The new cycle reassigns the rail in registry order.
+  assert.deepEqual(
+    restarted.demoBoards.map((board) => board.engineId),
+    ['delphi5', 'random'],
   )
 })
 
@@ -1556,8 +1755,8 @@ test('steps planned before a swap are ignored after it', () => {
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
   const [delphi] = demo.demoBoards
-  const mainStep = demoStepAction(demo, 'H')
-  const slotStep = demoBoardStepAction(delphi, 'H')
+  const mainStep = demoActionStep(demo, 'H')
+  const slotStep = demoBoardActionStep(delphi, 'H')
 
   const swapped = reducer(demo, { type: 'swapBoard', boardId: delphi.id })
 
@@ -1566,7 +1765,7 @@ test('steps planned before a swap are ignored after it', () => {
   assert.equal(reducer(swapped, slotStep), swapped)
 
   // A step planned for the swapped-in session advances only its slot.
-  const forSlot = demoBoardStepAction(swapped.demoBoards[0], 'H')
+  const forSlot = demoBoardActionStep(swapped.demoBoards[0], 'H')
   const stepped = reducer(swapped, forSlot)
 
   assert.notEqual(stepped.demoBoards[0].session, swapped.demoBoards[0].session)
@@ -1595,7 +1794,7 @@ test('a level change after a swap retunes the rail and keeps the engines', () =>
   )
 })
 
-test('a swapped-in main demo still restarts after its game over delay', () => {
+test('a swapped-in main demo restarts after the whole board set ends', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
@@ -1612,14 +1811,22 @@ test('a swapped-in main demo still restarts after its game over delay', () => {
   assert.equal(next.session.id, swapped.session.id)
   // No player-facing cooldown is armed for the attract loop.
   assert.equal(next.gameOverReady, true)
+  // The rail is still playing, so the finished demo keeps its board.
+  assert.equal(reducer(next, { type: 'demoRestart' }), next)
 
-  const restarted = reducer(next, { type: 'demoRestart' })
+  const finished = {
+    ...next,
+    demoBoards: next.demoBoards.map((board) => ({
+      ...board,
+      session: { ...board.session, status: 'game-over' },
+    })),
+  }
+  const restarted = reducer(finished, { type: 'demoRestart' })
 
   assert.equal(restarted.phase, 'demo')
   assert.equal(restarted.session.status, 'active')
   assert.notEqual(restarted.session.id, swapped.session.id)
   assert.equal(restarted.mainEngineId, 'delphi5')
-  assert.equal(restarted.demoBoards[0].session, swapped.demoBoards[0].session)
 })
 
 test('the main board names the player or the demo engine', () => {

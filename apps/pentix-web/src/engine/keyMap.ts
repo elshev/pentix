@@ -19,13 +19,15 @@ export function mapKeyToAction(
     return { type: 'start' }
   }
 
-  // Space starts a player game from the demo (and from the demo's post-game-over
-  // delay), re-enters the demo after a game over, and hard-drops while playing.
+  // Space starts a player game from the demo, asks for the next demo from a
+  // finished one, re-enters the demo after a game over, and hard-drops while
+  // playing. A finished demo otherwise waits for the whole board set to end, so
+  // Space is the way to skip straight to the next cycle.
   if (key === ' ' || key === 'Spacebar') {
-    if (phase === 'demo' || phase === 'demo-over') {
+    if (phase === 'demo') {
       return { type: 'start' }
     }
-    if (phase === 'game-over') {
+    if (phase === 'demo-over' || phase === 'game-over') {
       return { type: 'demo' }
     }
   }

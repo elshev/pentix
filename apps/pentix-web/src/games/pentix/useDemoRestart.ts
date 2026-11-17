@@ -9,7 +9,9 @@ import {
 
 /**
  * Waits out the same delay a player game over uses while `active` is true, then
- * dispatches `demoRestart` so the attract demo starts a fresh session.
+ * dispatches `demoRestart` so the attract demo starts a fresh board set. The
+ * caller arms it only while the whole board set is over, so the main panel keeps
+ * its finished demo until the rail's last board ends.
  */
 export function useDemoRestart(
   active: boolean,

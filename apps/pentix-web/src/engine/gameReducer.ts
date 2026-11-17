@@ -1,6 +1,5 @@
 /** Game state reducer — phase, settings, the main session, and the demo boards. */
 import {
-  DEMO_ACTION_CODES,
   createPentixGame,
   createPentixGameSession,
   demoEngineRegistry,
@@ -9,7 +8,6 @@ import {
   type AdvancePentixGameSessionResult,
   type DemoAction,
   type DemoEngineId,
-  type DemoLastTickMove,
   type MoveDirection,
   type PentixGame,
   type PentixGameSession,
@@ -126,12 +124,16 @@ export type GameAction =
   | { type: 'drop' }
   | { type: 'swapBoard'; boardId: string }
   | {
-      type: 'demoStep'
-      /** The board the step belongs to: `MAIN_BOARD_ID` or a rail slot id. */
+      type: 'demoTick'
+      /** The board the gravity step belongs to: `MAIN_BOARD_ID` or a rail slot id. */
       boardId: string
+    }
+  | {
+      type: 'demoAction'
+      /** The board the steering step belongs to: `MAIN_BOARD_ID` or a rail slot id. */
+      boardId: string
+      /** The next code of the engine's log, or `null` when the log is exhausted. */
       action: DemoAction | null
-      /** The piece's post-drop side-step, applied in the same interval. */
-      lastTickAction: DemoLastTickMove | null
       sessionId: string
       pieceIndex: number
     }
@@ -395,25 +397,15 @@ function startDemo(state: GameState, deps: GameDependencies): GameState {
 }
 
 /**
- * Starts the next attract demo while leaving the demo boards alone. Their
- * sessions keep playing, so the piece list they share must stay the same game.
- * The main board also keeps the engine it currently plays, so a swapped-in demo
- * engine survives its own automatic restart, and the new demo session starts
- * with the seeded mino again.
+ * True while the attract demo holds its finished board because the rest of the
+ * board set is still playing. The whole cycle restarts once every board's
+ * session has ended, so the panels cycle together instead of drifting apart.
  */
-function restartDemoSession(
-  state: GameState,
-  deps: GameDependencies,
-): GameState {
-  return {
-    ...state,
-    phase: 'demo',
-    gameOverReady: true,
-    gravityEpoch: state.gravityEpoch + 1,
-    session: withSeededDemoMino(
-      createSessionForGame(state.game, deps, state.settings.startingLevel),
-    ),
-  }
+export function isDemoCycleOver(state: GameState): boolean {
+  return (
+    state.phase === 'demo-over' &&
+    state.demoBoards.every((board) => board.session.status === 'game-over')
+  )
 }
 
 function applyAdvance(
@@ -458,8 +450,38 @@ function isCurrentDemoStep(
   )
 }
 
+/** The demo board a step addresses, when its session can still advance. */
+function activeDemoBoard(
+  state: GameState,
+  boardId: string,
+): DemoBoardState | undefined {
+  const board = state.demoBoards.find((entry) => entry.id === boardId)
+  return board !== undefined && board.session.status === 'active'
+    ? board
+    : undefined
+}
+
+/**
+ * Commits a step that belongs to one demo board: the shared piece list is merged
+ * and only that slot's session is replaced. The phase and every other board stay
+ * as they are, so a finished rail board keeps its final board.
+ */
+function applyDemoBoardAdvance(
+  state: GameState,
+  boardId: string,
+  result: AdvancePentixGameSessionResult,
+): GameState {
+  return {
+    ...state,
+    game: mergeGame(state.game, result.game),
+    demoBoards: state.demoBoards.map((entry) =>
+      entry.id === boardId ? { ...entry, session: result.session } : entry,
+    ),
+  }
+}
+
 /** Maps a demo action code to the shared engine's steering step. */
-function demoActionToStep(action: DemoAction): DemoStepAction {
+function demoCodeToEngineStep(action: DemoAction): DemoStepAction {
   switch (action) {
     case 'L':
       return { type: 'move', direction: 'left' }
@@ -477,7 +499,7 @@ function demoActionToStep(action: DemoAction): DemoStepAction {
 /**
  * Applies one steering step to a session through the shared engine.
  */
-function applyDemoAction(
+function applyEngineStep(
   session: PentixGameSession,
   game: PentixGame,
   action: DemoStepAction,
@@ -500,45 +522,26 @@ function applyDemoAction(
 }
 
 /**
- * Applies one auto-play step: the next action of the engine's log (when there is
- * one), then that action's last-tick move when it was a hard drop and the piece
- * is still falling, then exactly one gravity tick. The tick always runs, so a
- * blocked action cannot freeze the demo and a resting piece always locks.
+ * Applies one auto-play steering step: one action from the engine's log (when
+ * there is one), through the shared engine. The step deliberately applies no
+ * gravity tick, so the piece is never moved and descended in the same instant.
+ * A hard drop's last-tick move is just the log's next code and arrives in the
+ * following step, which is what separates the side-step from the drop.
  */
-function applyDemoStep(
+function applyDemoActionStep(
   session: PentixGameSession,
   game: PentixGame,
   action: DemoAction | null,
-  lastTickAction: DemoLastTickMove | null,
   selectPieceId?: PieceIdSelector,
 ): AdvancePentixGameSessionResult {
-  const acted =
-    action === null
-      ? { game, session }
-      : applyDemoAction(
-          session,
-          game,
-          demoActionToStep(action),
-          selectPieceId,
-        )
-
-  // The one-column side-step plans a placement a straight drop cannot reach. It
-  // runs after the drop and before this interval's tick, and only while the same
-  // piece is still falling: a drop that already settled the piece discards it.
-  const stepped =
-    action === DEMO_ACTION_CODES.hardDrop &&
-    lastTickAction !== null &&
-    acted.session.status === 'active' &&
-    acted.session.nextPieceIndex === session.nextPieceIndex
-      ? applyDemoAction(
-          acted.session,
-          acted.game,
-          demoActionToStep(lastTickAction),
-          selectPieceId,
-        )
-      : acted
-
-  return gameSessionEngine.tick(stepped.session, stepped.game, selectPieceId)
+  return action === null
+    ? { game, session }
+    : applyEngineStep(
+        session,
+        game,
+        demoCodeToEngineStep(action),
+        selectPieceId,
+      )
 }
 
 /**
@@ -598,12 +601,40 @@ export function createGameReducer(deps: GameDependencies) {
         return { ...state, gameOverReady: true }
 
       case 'demoRestart':
-        // Only the finished demo waits on this action; it starts the next demo
-        // once the post-demo delay has elapsed. The demo boards keep playing, so
-        // they are deliberately left untouched.
-        return state.phase === 'demo-over' ? restartDemoSession(state, deps) : state
+        // The finished demo waits until the whole board set has ended, then the
+        // next cycle starts from one new game: the rail's dead boards come back
+        // instead of staying frozen. A stale timer cannot start an extra cycle.
+        return isDemoCycleOver(state) ? startDemo(state, deps) : state
 
-      case 'demoStep': {
+      case 'demoTick': {
+        if (action.boardId === MAIN_BOARD_ID) {
+          // Gravity is not planned, so only the phase decides whether the main
+          // board's demo may take it. A settling tick still ends the demo.
+          if (state.phase !== 'demo') {
+            return state
+          }
+          return applyAdvance(
+            state,
+            gameSessionEngine.tick(
+              state.session,
+              state.game,
+              deps.selectPieceId,
+            ),
+          )
+        }
+
+        const board = activeDemoBoard(state, action.boardId)
+        if (board === undefined) {
+          return state
+        }
+        return applyDemoBoardAdvance(
+          state,
+          board.id,
+          gameSessionEngine.tick(board.session, state.game, deps.selectPieceId),
+        )
+      }
+
+      case 'demoAction': {
         if (action.boardId === MAIN_BOARD_ID) {
           // Ignore a step planned for another session or piece generation, or
           // one that arrives while the attract demo is not running.
@@ -616,44 +647,32 @@ export function createGameReducer(deps: GameDependencies) {
 
           return applyAdvance(
             state,
-            applyDemoStep(
+            applyDemoActionStep(
               state.session,
               state.game,
               action.action,
-              action.lastTickAction,
               deps.selectPieceId,
             ),
           )
         }
 
-        const board = state.demoBoards.find(
-          (entry) => entry.id === action.boardId,
-        )
         // A finished demo board keeps its final board and ignores further steps;
         // a stale step leaves the whole board set unchanged.
-        if (
-          board === undefined ||
-          board.session.status !== 'active' ||
-          !isCurrentDemoStep(board.session, action)
-        ) {
+        const board = activeDemoBoard(state, action.boardId)
+        if (board === undefined || !isCurrentDemoStep(board.session, action)) {
           return state
         }
 
-        const result = applyDemoStep(
-          board.session,
-          state.game,
-          action.action,
-          action.lastTickAction,
-          deps.selectPieceId,
-        )
-        return {
-          ...state,
-          // Only the addressed board and the shared piece list change.
-          game: mergeGame(state.game, result.game),
-          demoBoards: state.demoBoards.map((entry) =>
-            entry.id === board.id ? { ...entry, session: result.session } : entry,
+        return applyDemoBoardAdvance(
+          state,
+          board.id,
+          applyDemoActionStep(
+            board.session,
+            state.game,
+            action.action,
+            deps.selectPieceId,
           ),
-        }
+        )
       }
 
       case 'swapBoard': {

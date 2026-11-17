@@ -235,37 +235,46 @@ applies them itself (see below). Never return any other character either.
 
 ## How the caller executes your string
 
-The caller replays your string for the current piece with this rule:
-
-1. Apply the first character.
-2. If that character was `H` and one more character follows, apply that one too:
-   it is the piece's **last-tick move** (see below).
-3. Apply one **tick** (gravity).
-4. Apply the next character.
-5. If that character was `H` and one more character follows, apply that one too.
-6. Apply one tick.
-7. Continue until your string ends.
-8. After the string ends, apply ticks only, until the piece locks.
-
-So the cadence from the moment a piece appears is:
+The caller replays your string for the current piece while a clock runs at the
+game's gravity interval. Every interval contains exactly one **tick** (gravity),
+and your next character is applied halfway between two ticks. The cadence from
+the moment a piece appears is:
 
 ```
-Action, Tick, Action, Tick, Action, Tick, ...
+half an interval, Action, the rest of the interval, Tick,
+half an interval, Action, the rest of the interval, Tick, ...
 ```
 
 A **tick** moves the piece down one row. If the piece cannot move down, the tick
-locks it, clears full lines, and spawns the next piece.
+locks it, clears full lines, and spawns the next piece. A piece that has just
+spawned is not moved in the instant it appears: its first action comes half an
+interval after the tick that spawned it.
+
+The rule for your string is:
+
+1. Apply the next character halfway through an interval.
+2. A hard drop restarts the rhythm. The clock's next step is an action again, so
+   the character after `H` — the piece's **last-tick move** (see below) — lands
+   half an interval after the drop, and the tick that locks the dropped piece and
+   spawns the next one comes a full interval after the drop.
+3. Any other character is followed by the interval's tick half an interval later,
+   and then by the next character halfway through the following interval.
+4. Continue until your string ends.
+5. After the string ends, one tick still arrives every interval until the piece
+   locks.
 
 Consequences you must respect:
 
-- Each action costs one tick. A plan with many actions gives the piece more time
-  to fall while it is being steered.
-- An impossible action (for example, moving into a wall) is ignored, but its
-  tick still happens.
-- `H` moves the piece to its lowest possible position; the tick after `H` locks
-  it there, unless the last-tick move has just shifted it over a drop.
-- A character after `H` is applied in the same interval as the drop: the drop,
-  then the side-step, then the tick. Nothing else can follow it in that plan.
+- Each action costs one interval. A plan with many actions gives the piece more
+  time to fall while it is being steered.
+- An impossible action (for example, moving into a wall) is ignored, but that
+  interval's tick still happens.
+- `H` moves the piece to its lowest possible position; the tick a full interval
+  after the drop locks it there, unless the last-tick move has just shifted it
+  over a drop.
+- A character after `H` is an action of its own, half an interval after the drop:
+  the drop, then a pause, then the side-step, then the tick that locks the piece.
+  Nothing else can follow it in that plan.
 - If the piece locks before your string ends, the remaining characters are
   discarded. Put the important actions first.
 - A rotation that would overlap a wall or settled cells may be shifted sideways
@@ -281,9 +290,9 @@ the lateral moves. For example, with the two-orientation bar above:
 - `"CLRH"` and `"ALRH"` select the same orientation when there are two
   orientations, because `A` steps backwards by one.
 
-Rotations cost ticks: every `C` or `A` is one action, followed by one tick, so
-the piece also falls while it turns. Prefer the fewest rotations that reach the
-orientation you want.
+Rotations cost time: every `C` or `A` is one action, and the next tick follows
+half an interval later, so the piece also falls while it turns. Prefer the
+fewest rotations that reach the orientation you want.
 
 ## The last-tick move after the hard drop
 
@@ -296,9 +305,10 @@ Add **one** `L` or `R` after the `H`:
 - The drop happens first, so the piece comes to rest as low as it can in the
   column you steered to.
 - The side-step then moves it one column at that same row — into the pocket, if
-  the pocket is beside it.
-- The tick that ends the interval then locks the piece in its new column, or
-  lets it fall one more row when the side-step uncovered a drop.
+  the pocket is beside it. It is a step of its own, half an interval after the
+  drop, so the piece is seen resting before it shifts.
+- The tick a full interval after the drop then locks the piece in its new column,
+  or lets it fall one more row when the side-step uncovered a drop.
 - Nothing else may follow: no rotation, no second drop, and never more than one
   side-step. A log with no side-step simply ends at `H`.
 
@@ -319,11 +329,12 @@ under the settled mino.
 A straight drop in column `7` would stop on top of the mino at row `19`, so the
 piece has to drop in column `8` and step left on the last tick:
 
-1. `R` — move from column `6` to `7`, then a tick.
-2. `R` — move from column `7` to `8`, then a tick.
-3. `H` — hard drop to row `21`, column `8`.
-4. `L` — the last-tick move, one column left, into row `21`, column `7`.
-5. The tick that ends this interval locks the piece there, under the mino.
+1. `R` — move from column `6` to `7`, then the interval's tick.
+2. `R` — move from column `7` to `8`, then the interval's tick.
+3. `H` — hard drop to row `21`, column `8`. This restarts the rhythm.
+4. `L` — the last-tick move, one column left, into row `21`, column `7`, half an
+   interval after the drop.
+5. The tick a full interval after the drop locks the piece there, under the mino.
 
 So the log is `"RRHL"`. Without the trailing `L` the piece would lock at row
 `21`, column `8` and the pocket would stay empty.
@@ -351,8 +362,8 @@ Every term except the `1000` bonus is multiplied by the level.
 
 - **Drop the piece as early as you can.** The drop score counts the rows between
   the piece and the bottom, so a piece dropped near the top is worth far more
-  than one that has already fallen. Every action costs one tick and therefore one
-  row — even an action the board blocks — so keep the plan short: reach the
+  than one that has already fallen. Every action costs one interval and therefore
+  one row — even an action the board blocks — so keep the plan short: reach the
   placement with as few rotations and moves as it takes, then `H`.
 - A drop with no free row below scores nothing for the fall; the piece just
   locks. The lock score still applies.
