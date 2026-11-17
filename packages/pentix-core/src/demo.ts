@@ -1,7 +1,8 @@
 import type { BoardSnapshot } from './board.js'
 import {
+  getOccupiedOffsets,
   normalizeAngle,
-  type Piece,
+  type Offset,
   type RotationAngle,
   type RotationMode,
 } from './piece.js'
@@ -35,7 +36,8 @@ interface PieceExtents {
 }
 
 interface DemoChoice extends PlacementScore {
-  readonly angle: RotationAngle
+  /** Index of the reachable orientation this choice scores. */
+  readonly orientation: number
   /** Column of the settled placement this choice scores. */
   readonly column: number
   /** Settled row of the placement this choice scores. */
@@ -55,13 +57,13 @@ interface PlacementScore {
   readonly contacts: number
 }
 
-function pieceExtents(piece: Piece): PieceExtents {
+function pieceExtents(offsets: readonly Offset[]): PieceExtents {
   let minX = 0
   let maxX = 0
   let minY = 0
   let maxY = 0
 
-  for (const offset of piece.occupiedOffsets) {
+  for (const offset of offsets) {
     if (offset.x < minX) {
       minX = offset.x
     }
@@ -79,6 +81,17 @@ function pieceExtents(piece: Piece): PieceExtents {
   return { minX, maxX, minY, maxY }
 }
 
+/** The board cells occupied by `offsets` anchored at `origin`. */
+function cellsAt(
+  offsets: readonly Offset[],
+  origin: BoardPosition,
+): BoardPosition[] {
+  return offsets.map((offset) => ({
+    row: origin.row + offset.y,
+    column: origin.column + offset.x,
+  }))
+}
+
 /** The rotation angles to try, normalized for the piece's rotation mode. */
 export function candidateAngles(rotationMode: RotationMode): RotationAngle[] {
   const angles = new Set<RotationAngle>()
@@ -94,19 +107,16 @@ export function candidateAngles(rotationMode: RotationMode): RotationAngle[] {
  */
 function descend(
   board: BoardSnapshot,
-  piece: Piece,
+  offsets: readonly Offset[],
   origin: BoardPosition,
 ): BoardPosition | null {
-  if (!canPlace(board, getOccupiedCells(piece, origin))) {
+  if (!canPlace(board, cellsAt(offsets, origin))) {
     return null
   }
 
   let row = origin.row
   while (
-    canPlace(
-      board,
-      getOccupiedCells(piece, { row: row + 1, column: origin.column }),
-    )
+    canPlace(board, cellsAt(offsets, { row: row + 1, column: origin.column }))
   ) {
     row += 1
   }
@@ -121,11 +131,11 @@ function descend(
  */
 export function findLandingRow(
   board: BoardSnapshot,
-  piece: Piece,
+  offsets: readonly Offset[],
   column: number,
 ): number | null {
-  const { minY } = pieceExtents(piece)
-  const landing = descend(board, piece, { row: -minY, column })
+  const { minY } = pieceExtents(offsets)
+  const landing = descend(board, offsets, { row: -minY, column })
   return landing === null ? null : landing.row
 }
 
@@ -278,11 +288,11 @@ function scorePlacement(
   width: number,
   height: number,
   holesBefore: number,
-  piece: Piece,
+  offsets: readonly Offset[],
   origin: BoardPosition,
 ): PlacementScore {
-  const { minX, maxX, minY, maxY } = pieceExtents(piece)
-  const cells = getOccupiedCells(piece, origin)
+  const { minX, maxX, minY, maxY } = pieceExtents(offsets)
+  const cells = cellsAt(offsets, origin)
   const grid = baseGrid.map((gridRow) => gridRow.slice())
   for (const cell of cells) {
     grid[cell.row][cell.column] = true
@@ -322,10 +332,10 @@ function scoreSettledPlacement(
   width: number,
   height: number,
   holesBefore: number,
-  piece: Piece,
+  offsets: readonly Offset[],
   origin: BoardPosition,
 ): SettledPlacement | null {
-  const landing = descend(board, piece, origin)
+  const landing = descend(board, offsets, origin)
   if (landing === null) {
     return null
   }
@@ -333,7 +343,7 @@ function scoreSettledPlacement(
   return {
     row: landing.row,
     column: landing.column,
-    ...scorePlacement(baseGrid, width, height, holesBefore, piece, landing),
+    ...scorePlacement(baseGrid, width, height, holesBefore, offsets, landing),
   }
 }
 
@@ -358,16 +368,48 @@ function scoreSettledPlacement(
 export function planDemoDestination(
   session: PentixGameSession,
 ): DemoDestination | null {
-  const { board } = session
+  const piece = getActivePiece(session)
+  const angles = candidateAngles(piece.rotationMode)
+  const orientations = angles.map((angle) =>
+    getOccupiedOffsets(piece.definition.offsets, angle, piece.rotationMode),
+  )
+  const destination = planDemoDestinationForOrientations(
+    session.board,
+    orientations,
+  )
+
+  return destination === null
+    ? null
+    : { angle: angles[destination.orientation], column: destination.column }
+}
+
+/** The chosen reachable orientation index and origin column. */
+export interface DemoOrientationDestination {
+  readonly orientation: number
+  readonly column: number
+}
+
+/**
+ * The classic heuristic planned from a list of reachable orientations (current
+ * first) instead of a session. Demo engines receive exactly that list, so the
+ * `delphi5` engine plans through this entry point.
+ */
+export function planDemoDestinationForOrientations(
+  board: BoardSnapshot,
+  orientations: readonly (readonly Offset[])[],
+): DemoOrientationDestination | null {
   const { width, height } = board
   const baseGrid = board.rows.map((row) => row.map((cell) => cell.isOccupied))
   const holesBefore = countHoles(baseGrid, width, height)
 
-  const piece = getActivePiece(session)
   const candidates: DemoChoice[] = []
 
-  for (const angle of candidateAngles(piece.rotationMode)) {
-    const rotated = piece.withAngle(angle)
+  for (
+    let orientation = 0;
+    orientation < orientations.length;
+    orientation += 1
+  ) {
+    const rotated = orientations[orientation]
     const topExtent = -pieceExtents(rotated).minY
 
     for (let column = 0; column < width; column += 1) {
@@ -394,7 +436,7 @@ export function planDemoDestination(
         }
 
         candidates.push({
-          angle,
+          orientation,
           landingColumn: column,
           shifted: false,
           ...settled,
@@ -420,7 +462,7 @@ export function planDemoDestination(
           }
 
           candidates.push({
-            angle,
+            orientation,
             landingColumn: column,
             shifted: true,
             ...sideStep,
@@ -431,9 +473,9 @@ export function planDemoDestination(
   }
 
   // Iterate in a stable order (bottom-up by row, then left-to-right by column,
-  // then by angle); indistinguishable tied candidates are picked at random.
+  // then by orientation); indistinguishable tied candidates are picked at random.
   candidates.sort(
-    (a, b) => b.row - a.row || a.column - b.column || a.angle - b.angle,
+    (a, b) => b.row - a.row || a.column - b.column || a.orientation - b.orientation,
   )
 
   let best: DemoChoice | null = null
@@ -443,7 +485,9 @@ export function planDemoDestination(
     }
   }
 
-  return best === null ? null : { angle: best.angle, column: best.landingColumn }
+  return best === null
+    ? null
+    : { orientation: best.orientation, column: best.landingColumn }
 }
 
 /**
@@ -483,6 +527,7 @@ export function planDemoLastTickMove(
   const holesBefore = countHoles(baseGrid, width, height)
 
   const piece = getActivePiece(session)
+  const offsets = piece.occupiedOffsets
   const origin = session.activePiece.origin
   const current = scoreSettledPlacement(
     board,
@@ -490,7 +535,7 @@ export function planDemoLastTickMove(
     width,
     height,
     holesBefore,
-    piece,
+    offsets,
     origin,
   )
   if (current === null) {
@@ -505,7 +550,7 @@ export function planDemoLastTickMove(
       width,
       height,
       holesBefore,
-      piece,
+      offsets,
       { row: origin.row, column: origin.column + shift },
     )
     if (sideStep === null) {
@@ -513,7 +558,9 @@ export function planDemoLastTickMove(
     }
 
     const candidate: DemoChoice = {
-      angle: piece.angle,
+      // The last-tick move keeps the current orientation; the index only
+      // orders candidates inside the destination planner.
+      orientation: 0,
       landingColumn: origin.column + shift,
       shifted: true,
       ...sideStep,

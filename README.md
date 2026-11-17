@@ -1,4 +1,4 @@
-# Pentix
+﻿# Pentix
 
 Pentix is a modern TypeScript reboot of a legacy Delphi Pentix/Tetris project. Two applications share the same game-domain code:
 
@@ -33,6 +33,7 @@ delphi/
   Tetris.pas       Legacy Delphi source used as the migration reference
 docs/
   foundation.md    Notes about the current architecture
+  demo-engine-task.md  The shared brief for AI-authored demo engines
 ```
 
 ## Current Scope
@@ -48,9 +49,9 @@ The codebase currently includes:
   - `Board` and `BoardCell`
   - serializable `User`, `PentixGame`, and `PentixGameSession` snapshots
   - a shared gameplay engine for movement, rotation, gravity ticks, hard drop, line clearing, scoring, and leveling
-  - the demo-engine contract, the engine registry, and the built-in `delphi5` and `random` planners
+  - the demo-engine contract (one `<engine-id>-demo-engine.ts` module per engine, planning from the visible board, the active piece's reachable orientations, and its rotation point, and returning a replayable `L`/`R`/`C`/`A`/`H` action log), the validating registry, and the built-in `delphi5` and `random` engines
   - the compact session action log and its deterministic replay
-- a browser gameplay client that plays a local session against the shared engine: the board with its next-piece preview, the title-less statistics line with a name line above it (the placeholder `Player01` while a player game runs, otherwise the name of the demo engine that owns the board), the pieces statistics popup, the ten-button level selector, the rotation and next-piece settings, the pause/restart controls, the attract demo that runs whenever no player game is active on the `random` engine and restarts itself after the game-over delay, and two small demo boards beside the board — the rail slots `demo-slot-1` and `demo-slot-2`, initially driven by the `delphi5` and `random` engines, started in parallel with a new main session, sharing the player's piece sequence while keeping their own session, statistics, and piece index, and following the level chosen while the attract demo runs; double-clicking a demo board during the attract demo exchanges it with the main board, so the clicked session and its engine take the main board and the previous main session takes that rail slot
+- a browser gameplay client that plays a local session against the shared engine: the board with its next-piece preview, the title-less statistics line with a name line above it (the placeholder `Player01` while a player game runs, otherwise the name of the demo engine that owns the board), the pieces statistics popup, the ten-button level selector, the rotation and next-piece settings, the pause/restart controls, the attract demo that runs whenever no player game is active on the `random` engine and restarts itself after the game-over delay, and a demo-board rail beside the board — one board per registered demo engine (capped at the rail's `12` slots; the built-in `delphi5` and `random` engines fill `demo-slot-1` and `demo-slot-2`), each board labelled with its engine's name and description and replaying that engine's action log as Action then Tick, started in parallel with a new main session, sharing the player's piece sequence while keeping their own session, statistics, and piece index, and following the level chosen while the attract demo runs; double-clicking a demo board during the attract demo exchanges it with the main board, so the clicked session and its engine take the main board and the previous main session takes that rail slot
 
 The following are intentionally not implemented yet:
 

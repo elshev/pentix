@@ -1,4 +1,4 @@
-/** Public API barrel for pentix-core, consumed by the server and the web client. */
+﻿/** Public API barrel for pentix-core, consumed by the server and the web client. */
 export {
   Board,
   createBoard,
@@ -63,18 +63,45 @@ export type {
 export {
   canDemoPieceMoveDown,
   planDemoDestination,
+  planDemoDestinationForOrientations,
   planDemoLastTickMove,
 } from './demo.js'
-export type { DemoDestination } from './demo.js'
+export type {
+  DemoDestination,
+  DemoOrientationDestination,
+} from './demo.js'
 export {
-  DEFAULT_DEMO_ENGINE_ID,
-  DemoEngineRegistry,
+  DEMO_ACTION_CODES,
+  actionsToward,
+  createDemoEngineInput,
+  demoCanPlace,
+  demoLandingRow,
+  demoPieceCells,
+  isDemoAction,
+} from './demo-actions.js'
+export type {
+  DemoAction,
+  DemoActionLog,
+  DemoBoard,
+  DemoEngineInput,
+  DemoPiece,
+  DemoPieceCell,
+  DemoPieceOrientation,
+  DemoPosition,
+} from './demo-actions.js'
+export { DEFAULT_DEMO_ENGINE_ID, DemoEngineRegistry } from './demo-engine.js'
+export type {
+  DemoEngine,
+  DemoEngineId,
+  DemoEngineSummary,
+} from './demo-engine.js'
+export {
+  builtInDemoEngines,
+  delphi5DemoEngine,
   demoEngineRegistry,
   getDemoEngine,
-} from './demo-engine.js'
-export type { DemoEngine, DemoEngineId } from './demo-engine.js'
-export { delphi5DemoEngine } from './demo-delphi5.js'
-export { randomDemoEngine } from './demo-random.js'
+  randomDemoEngine,
+} from './demo-engines/index.js'
 export {
   GameSessionEngine,
   gameSessionEngine,

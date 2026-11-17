@@ -1,16 +1,17 @@
-import assert from 'node:assert/strict'
+﻿import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { PIECE_CATALOG, delphi5DemoEngine, getPieceDefinitionById } from '#pentix/core'
+import { PIECE_CATALOG, demoEngineRegistry, delphi5DemoEngine, getPieceDefinitionById } from '#pentix/core'
 
 import { buildRenderGrid, getActiveCells } from '../apps/pentix-web/src/engine/projection.ts'
 import {
   DEFAULT_SETTINGS,
+  MAX_DEMO_BOARDS,
   createGameReducer,
   createInitialState,
   mainBoardName,
 } from '../apps/pentix-web/src/engine/gameReducer.ts'
-import { actionTowardDestination, nextDemoAction, resolveDemoPlan } from '../apps/pentix-web/src/engine/demo.ts'
+import { advanceDemoPlan, nextDemoAction, resolveDemoPlan } from '../apps/pentix-web/src/engine/demo.ts'
 import { getTickInterval } from '../apps/pentix-web/src/engine/gameLoop.ts'
 import { mapKeyToAction } from '../apps/pentix-web/src/engine/keyMap.ts'
 
@@ -354,15 +355,13 @@ function demoStateWith(deps, overrides) {
   return { ...state, session: { ...state.session, ...overrides } }
 }
 
-/** A `demoStep` action planned for the state's current piece and placement. */
+/** A `demoStep` action carrying one code from the engine's log. */
 function demoStepAction(state, action, overrides = {}) {
   return {
     type: 'demoStep',
     action,
     sessionId: state.session.id,
     pieceIndex: state.session.nextPieceIndex,
-    angle: state.session.activePiece.angle,
-    column: state.session.activePiece.origin.column,
     ...overrides,
   }
 }
@@ -392,7 +391,7 @@ test('a stale demo step does not steer a different piece', () => {
   // applied the demo has already spawned the next piece.
   const stale = reducer(
     demo,
-    demoStepAction(demo, { type: 'drop' }, {
+    demoStepAction(demo, 'H', {
       pieceIndex: demo.session.nextPieceIndex - 1,
     }),
   )
@@ -400,99 +399,59 @@ test('a stale demo step does not steer a different piece', () => {
   assert.equal(stale, demo)
 })
 
-test('a stale demo step does not steer a placement that already changed', () => {
+test('a demo step for another session is ignored', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
-  const action = demoStepAction(demo, { type: 'move', direction: 'left' })
 
-  // The piece already shifted one column after the step was planned, so the
-  // placement in the step no longer matches and the step is dropped.
-  const shifted = {
-    ...demo,
-    session: {
-      ...demo.session,
-      activePiece: {
-        ...demo.session.activePiece,
-        origin: {
-          row: demo.session.activePiece.origin.row,
-          column: demo.session.activePiece.origin.column + 1,
-        },
-      },
-    },
-  }
+  const stale = reducer(
+    demo,
+    demoStepAction(demo, 'L', { sessionId: 'session-missing' }),
+  )
 
-  assert.equal(reducer(shifted, action), shifted)
+  assert.equal(stale, demo)
 })
 
-test('a demo step descends the piece and applies the steering action', () => {
+test('a demo step applies the action and then one gravity tick', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
   const { row, column } = demo.session.activePiece.origin
 
-  const stepped = reducer(
-    demo,
-    demoStepAction(demo, { type: 'move', direction: 'left' }),
-  )
+  const stepped = reducer(demo, demoStepAction(demo, 'L'))
 
-  // Delphi's `TimerExpired`: the gravity step runs before the steering step.
+  // Action then Tick: the move lands first, then gravity descends the piece.
   assert.equal(stepped.session.activePiece.origin.row, row + 1)
   assert.equal(stepped.session.activePiece.origin.column, column - 1)
+  assert.equal(stepped.session.statistics.actions.moves, 1)
 })
 
-test('a demo step on a resting piece takes the last-tick move instead of locking', () => {
+test('a resting piece takes one legal action and then locks', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
+  // A nearly full floor keeps the piece resting after it steps sideways, and
+  // the empty column keeps the lock from clearing the row.
   const demo = demoStateWith(deps, {
-    board: boardWith(3, 4, [
-      [2, 0],
-      [3, 0],
-    ]),
-    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
+    board: boardWith(12, 22, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(
+      (column) => [21, column],
+    )),
+    activePiece: { key: '1Line', angle: 0, origin: { row: 20, column: 5 } },
   })
 
-  // Column 0 is stacked two rows high, so the piece rests at row 1 and stepping
-  // right lets it fall to the floor: the step replaces locking and no gravity is
-  // applied on this tick.
-  const stepped = reducer(
-    demo,
-    demoStepAction(demo, { type: 'move', direction: 'right' }),
-  )
+  const stepped = reducer(demo, demoStepAction(demo, 'R'))
 
-  assert.equal(stepped.session.activePiece.origin.row, 1)
-  assert.equal(stepped.session.activePiece.origin.column, 1)
-  assert.equal(stepped.session.statistics.blocks, 0)
-  assert.equal(stepped.session.id, demo.session.id)
+  // The move applies at the resting placement, and the paired tick locks it.
+  assert.equal(stepped.session.statistics.blocks, 1)
+  assert.equal(stepped.session.activePiece.key, demo.session.nextPieceKey)
+  assert.equal(stepped.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
+  assert.equal(stepped.session.board.rows[20][6].isOccupied, true)
 })
 
-test('a demo step parks the piece under a settled mino on the last tick', () => {
-  const deps = createDeps([0])
-  const reducer = createGameReducer(deps)
-  const demo = demoStateWith(deps, {
-    board: boardWith(12, 22, [[20, 11]]),
-    activePiece: { key: '1Line', angle: 0, origin: { row: 21, column: 10 } },
-  })
-
-  // Stepping right cannot fall any further — the piece is already on the floor —
-  // but the corner under the settled mino is the better placement, so the demo
-  // takes it instead of locking.
-  const stepped = reducer(
-    demo,
-    demoStepAction(demo, { type: 'move', direction: 'right' }),
-  )
-
-  assert.equal(stepped.session.activePiece.origin.row, 21)
-  assert.equal(stepped.session.activePiece.origin.column, 11)
-  assert.equal(stepped.session.statistics.blocks, 0)
-  assert.equal(stepped.session.id, demo.session.id)
-})
-
-test('a blocked last-tick move locks the resting piece instead of freezing the demo', () => {
+test('a blocked action still ticks and locks the resting piece', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   // The piece rests on the floor (row 21 occupied below) and the cell to its
-  // left is settled too, so the planned left step can never happen.
+  // left is settled too, so the left move can never happen.
   const demo = demoStateWith(deps, {
     board: boardWith(12, 22, [
       [21, 5],
@@ -501,20 +460,17 @@ test('a blocked last-tick move locks the resting piece instead of freezing the d
     activePiece: { key: '1Line', angle: 0, origin: { row: 20, column: 5 } },
   })
 
-  const stepped = reducer(
-    demo,
-    demoStepAction(demo, { type: 'move', direction: 'left' }),
-  )
+  const stepped = reducer(demo, demoStepAction(demo, 'L'))
 
-  // The steering step is impossible, so the demo locks the piece and spawns the
-  // next one rather than waiting on a placement it can never reach.
+  // The action is a no-op, but its paired tick still settles the piece.
   assert.equal(stepped.session.statistics.blocks, 1)
   assert.equal(stepped.session.activePiece.key, demo.session.nextPieceKey)
   assert.equal(stepped.session.nextPieceIndex, demo.session.nextPieceIndex + 1)
   assert.equal(stepped.session.id, demo.session.id)
+  assert.equal(stepped.session.board.rows[20][5].isOccupied, true)
 })
 
-test('a demo step with no last-tick move settles the resting piece', () => {
+test('a null action applies ticks only and settles the resting piece', () => {
   const deps = createDeps([0])
   const reducer = createGameReducer(deps)
   const demo = demoStateWith(deps, {
@@ -522,10 +478,7 @@ test('a demo step with no last-tick move settles the resting piece', () => {
     activePiece: { key: '1Line', angle: 0, origin: { row: 2, column: 1 } },
   })
 
-  const settled = reducer(
-    demo,
-    demoStepAction(demo, { type: 'drop' }),
-  )
+  const settled = reducer(demo, demoStepAction(demo, null))
 
   assert.equal(settled.session.statistics.blocks, 1)
   assert.equal(settled.session.activePiece.key, demo.session.nextPieceKey)
@@ -547,7 +500,7 @@ test('a demo step that ends the demo game keeps the final board until the delay 
 
   const over = reducer(
     blocked,
-    demoStepAction(blocked, { type: 'drop' }),
+    demoStepAction(blocked, 'H'),
   )
 
   assert.equal(over.phase, 'demo-over')
@@ -754,128 +707,105 @@ test('start and demo hotkeys are ignored until the game-over cooldown elapses', 
   }
 })
 
-test('nextDemoAction moves toward the demo destination', () => {
-  const session = {
-    board: emptyBoard(12, 22),
-    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
+test('nextDemoAction replays the plan one code at a time', () => {
+  const plan = {
+    sessionId: 'session-1',
+    pieceIndex: 1,
+    actions: 'LRH',
+    index: 0,
   }
 
-  // Pin the classic planner's random tie-break so the destination is the wall.
-  const destination = withFixedRandom(0, () =>
-    delphi5DemoEngine.planDestination(session),
-  )
-  assert.deepEqual(nextDemoAction(session, destination), {
-    type: 'move',
-    direction: 'right',
-  })
+  assert.equal(nextDemoAction(plan), 'L')
+
+  const second = advanceDemoPlan(plan)
+  assert.equal(nextDemoAction(second), 'R')
+
+  const third = advanceDemoPlan(second)
+  assert.equal(nextDemoAction(third), 'H')
+
+  const exhausted = advanceDemoPlan(third)
+  assert.equal(nextDemoAction(exhausted), null)
+  // An exhausted plan stays exhausted and keeps ticking.
+  assert.equal(advanceDemoPlan(exhausted), exhausted)
 })
 
-test('nextDemoAction hard-drops once the piece reaches its destination', () => {
-  const session = {
-    board: emptyBoard(12, 22),
-    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 11 } },
+test('nextDemoAction ignores characters outside the demo alphabet', () => {
+  const plan = {
+    sessionId: 'session-1',
+    pieceIndex: 1,
+    actions: 'TX',
+    index: 0,
   }
 
-  // Pin the classic planner's random tie-break so the destination is the wall.
-  const destination = withFixedRandom(0, () =>
-    delphi5DemoEngine.planDestination(session),
-  )
-  assert.deepEqual(nextDemoAction(session, destination), {
-    type: 'drop',
-  })
+  assert.equal(nextDemoAction(plan), null)
+  assert.equal(nextDemoAction(advanceDemoPlan(plan)), null)
 })
 
-test('actionTowardDestination rotates before aligning the column', () => {
-  const session = {
-    board: emptyBoard(12, 22),
-    activePiece: { key: '4T', angle: 0, origin: { row: 1, column: 5 } },
-  }
-
-  assert.deepEqual(actionTowardDestination(session, { angle: 90, column: 3 }), {
-    type: 'rotate',
-  })
-  assert.deepEqual(actionTowardDestination(session, { angle: 0, column: 3 }), {
-    type: 'move',
-    direction: 'left',
-  })
-})
-
-test('nextDemoAction returns undefined when the planner finds no placement', () => {
-  const session = {
-    board: filledBoard(3, 3),
-    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 1 } },
-  }
-
-  const destination = delphi5DemoEngine.planDestination(session)
-  assert.equal(nextDemoAction(session, destination), undefined)
-})
-
-test('nextDemoAction uses a precomputed destination', () => {
-  const session = {
-    board: emptyBoard(12, 22),
-    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 2 } },
-  }
-
-  // The destination is supplied, so the random planner is never consulted.
-  assert.deepEqual(nextDemoAction(session, { angle: 0, column: 0 }), {
-    type: 'move',
-    direction: 'left',
-  })
-  assert.deepEqual(nextDemoAction(session, { angle: 0, column: 2 }), {
-    type: 'drop',
-  })
-  assert.equal(nextDemoAction(session, null), undefined)
-})
-
-test('resolveDemoPlan keeps the destination stable for the same piece', () => {
+test('resolveDemoPlan asks the engine once per piece and keeps the log', () => {
   const session = {
     id: 'session-1',
     nextPieceIndex: 1,
     board: emptyBoard(12, 22),
     activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
   }
+  let planned = 0
+  const engine = {
+    id: 'test',
+    name: 'Test',
+    description: 'Plans a fixed log.',
+    plan() {
+      planned += 1
+      return 'LLH'
+    },
+  }
 
-  const first = resolveDemoPlan(null, session, delphi5DemoEngine)
-  const second = resolveDemoPlan(first, session, delphi5DemoEngine)
-  const third = resolveDemoPlan(second, session, delphi5DemoEngine)
+  const first = resolveDemoPlan(null, session, engine)
+  const second = resolveDemoPlan(first, session, engine)
 
-  // The destination must not be re-planned (or re-randomized) while the same
-  // piece is active, otherwise the demo would jitter left/right every tick.
+  assert.equal(planned, 1)
+  assert.equal(first.actions, 'LLH')
+  assert.equal(first.index, 0)
   assert.equal(second, first)
-  assert.equal(third.destination, first.destination)
 })
 
-test('resolveDemoPlan re-targets the destination for a last-tick side-step', () => {
+test('resolveDemoPlan re-plans when a new piece spawns or the session changes', () => {
   const session = {
     id: 'session-1',
     nextPieceIndex: 1,
-    // Column 0 is stacked two rows high, so the piece rests at row 1 and a step
-    // right lets it fall to the floor.
-    board: boardWith(3, 4, [
-      [2, 0],
-      [3, 0],
-    ]),
+    board: emptyBoard(12, 22),
     activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
   }
-
-  const first = resolveDemoPlan(null, session, delphi5DemoEngine)
-  const reTargeted = resolveDemoPlan(first, session, delphi5DemoEngine)
-
-  assert.deepEqual(reTargeted.destination, { angle: 0, column: 1 })
-
-  // Once the piece has stepped and can fall again, the new destination is kept
-  // as-is so the demo does not steer back.
-  const stepped = {
-    ...session,
-    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 1 } },
+  let planned = 0
+  const engine = {
+    id: 'test',
+    name: 'Test',
+    description: 'Counts plans.',
+    plan() {
+      planned += 1
+      return 'H'
+    },
   }
-  assert.equal(
-    resolveDemoPlan(reTargeted, stepped, delphi5DemoEngine),
-    reTargeted,
+
+  const first = resolveDemoPlan(null, session, engine)
+  const nextPiece = resolveDemoPlan(
+    first,
+    { ...session, nextPieceIndex: 2 },
+    engine,
   )
+  assert.equal(planned, 2)
+  assert.equal(nextPiece.pieceIndex, 2)
+  assert.equal(nextPiece.index, 0)
+
+  const nextSession = resolveDemoPlan(
+    first,
+    { ...session, id: 'session-2' },
+    engine,
+  )
+  assert.equal(nextSession.sessionId, 'session-2')
+  assert.equal(planned, 3)
 })
 
-/** A `demoBoardStep` action planned for a demo board's current piece. */
+/** A `demoBoardStep` action carrying one code from the board's engine log. */
 function demoBoardStepAction(board, action, overrides = {}) {
   return {
     type: 'demoBoardStep',
@@ -883,8 +813,6 @@ function demoBoardStepAction(board, action, overrides = {}) {
     action,
     sessionId: board.session.id,
     pieceIndex: board.session.nextPieceIndex,
-    angle: board.session.activePiece.angle,
-    column: board.session.activePiece.origin.column,
     ...overrides,
   }
 }
@@ -898,16 +826,21 @@ function filledCellCount(board) {
   return board.rows.flat().filter((cell) => cell.isOccupied).length
 }
 
-test('a fresh state starts two demo boards from the main game', () => {
+test('a fresh state starts one demo board per registered engine', () => {
   const state = createInitialState(createDeps([0, 1]))
+  const expectedEngines = demoEngineRegistry
+    .list()
+    .slice(0, MAX_DEMO_BOARDS)
+    .map((engine) => engine.id)
 
-  assert.deepEqual(
-    state.demoBoards.map((board) => board.id),
-    ['demo-slot-1', 'demo-slot-2'],
-  )
+  assert.deepEqual(expectedEngines, ['delphi5', 'random'])
   assert.deepEqual(
     state.demoBoards.map((board) => board.engineId),
-    ['delphi5', 'random'],
+    expectedEngines,
+  )
+  assert.deepEqual(
+    state.demoBoards.map((board) => board.id),
+    expectedEngines.map((_, index) => `demo-slot-${index + 1}`),
   )
   assert.equal(state.mainEngineId, 'random')
 
@@ -934,24 +867,20 @@ test('every board draws from the one shared piece list', () => {
   assert.equal(delphi.session.activePiece.key, random.session.activePiece.key)
 
   // A demo-board lock extends the one list; the main session keeps matching it.
-  // The first drop reaches the floor, the second settles the resting piece.
-  const dropped = reducer(playing, demoBoardStepAction(delphi, { type: 'drop' }))
-  const settled = reducer(
-    dropped,
-    demoBoardStepAction(dropped.demoBoards[0], { type: 'drop' }),
-  )
-  const advanced = settled.demoBoards[0]
+  // One Action-Tick step hard-drops and settles the piece.
+  const stepped = reducer(playing, demoBoardStepAction(delphi, 'H'))
+  const advanced = stepped.demoBoards[0]
 
-  assert.equal(settled.game.id, playing.game.id)
-  assert.ok(settled.game.pieceIds.length > playing.game.pieceIds.length)
+  assert.equal(stepped.game.id, playing.game.id)
+  assert.ok(stepped.game.pieceIds.length > playing.game.pieceIds.length)
   assert.equal(advanced.session.statistics.blocks, 1)
   assert.equal(
-    settled.session.activePiece.key,
-    pieceKeyAt(settled.game, settled.session.nextPieceIndex - 1),
+    stepped.session.activePiece.key,
+    pieceKeyAt(stepped.game, stepped.session.nextPieceIndex - 1),
   )
   assert.equal(
     advanced.session.activePiece.key,
-    pieceKeyAt(settled.game, advanced.session.nextPieceIndex - 1),
+    pieceKeyAt(stepped.game, advanced.session.nextPieceIndex - 1),
   )
 })
 
@@ -995,14 +924,9 @@ test('restarting replaces the demo-board sessions', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const playing = createInitialState(deps, 'playing')
-  const dropped = reducer(
-    playing,
-    demoBoardStepAction(playing.demoBoards[0], { type: 'drop' }),
-  )
-  // The second drop settles the piece that is already resting on the floor.
   const advanced = reducer(
-    dropped,
-    demoBoardStepAction(dropped.demoBoards[0], { type: 'drop' }),
+    playing,
+    demoBoardStepAction(playing.demoBoards[0], 'H'),
   )
 
   assert.equal(advanced.demoBoards[0].session.statistics.blocks, 1)
@@ -1045,7 +969,7 @@ test('the attract demo restart leaves the demo boards untouched', () => {
   const demo = createInitialState(deps, 'demo')
   const advanced = reducer(
     demo,
-    demoBoardStepAction(demo.demoBoards[1], { type: 'drop' }),
+    demoBoardStepAction(demo.demoBoards[1], 'H'),
   )
   const over = {
     ...advanced,
@@ -1072,7 +996,7 @@ test('a demo-board step advances only the addressed board', () => {
 
   const stepped = reducer(
     demo,
-    demoBoardStepAction(demo.demoBoards[1], { type: 'drop' }),
+    demoBoardStepAction(demo.demoBoards[1], 'H'),
   )
 
   assert.notEqual(stepped.demoBoards[1].session, demo.demoBoards[1].session)
@@ -1091,12 +1015,10 @@ test('a stale demo-board step is ignored', () => {
   for (const overrides of [
     { sessionId: 'session-missing' },
     { pieceIndex: delphi.session.nextPieceIndex - 1 },
-    { angle: 90 },
-    { column: delphi.session.activePiece.origin.column + 1 },
     { boardId: 'demo-missing' },
   ]) {
     assert.equal(
-      reducer(demo, demoBoardStepAction(delphi, { type: 'drop' }, overrides)),
+      reducer(demo, demoBoardStepAction(delphi, 'H', overrides)),
       demo,
     )
   }
@@ -1117,7 +1039,7 @@ test('a finished demo board keeps its final board and ignores steps', () => {
 
   const stepped = reducer(
     finished,
-    demoBoardStepAction(finished.demoBoards[0], { type: 'drop' }),
+    demoBoardStepAction(finished.demoBoards[0], 'H'),
   )
 
   assert.equal(stepped, finished)
@@ -1133,10 +1055,10 @@ test('demo-board steps run through the engine at the board’s own level', () =>
 
   const stepped = reducer(
     playing,
-    demoBoardStepAction(board, { type: 'move', direction: 'left' }),
+    demoBoardStepAction(board, 'L'),
   )
 
-  // One gravity descent plus one steering step, on that board's own session.
+  // One action plus one gravity tick, on that board's own session.
   assert.equal(stepped.demoBoards[1].session.activePiece.origin.row, row + 1)
   assert.equal(stepped.demoBoards[1].session.activePiece.origin.column, column - 1)
   assert.equal(stepped.demoBoards[1].session.statistics.actions.moves, 1)
@@ -1157,58 +1079,6 @@ test('player actions leave the demo boards unchanged', () => {
   ]) {
     assert.equal(reducer(playing, action).demoBoards, playing.demoBoards)
   }
-})
-
-test('resolveDemoPlan re-plans when a new piece spawns or the session changes', () => {
-  const session = {
-    id: 'session-1',
-    nextPieceIndex: 1,
-    board: emptyBoard(12, 22),
-    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
-  }
-  const first = resolveDemoPlan(null, session, delphi5DemoEngine)
-
-  const nextPiece = resolveDemoPlan(
-    first,
-    { ...session, nextPieceIndex: 2 },
-    delphi5DemoEngine,
-  )
-  assert.notEqual(nextPiece, first)
-  assert.equal(nextPiece.pieceIndex, 2)
-
-  const nextSession = resolveDemoPlan(
-    first,
-    { ...session, id: 'session-2' },
-    delphi5DemoEngine,
-  )
-  assert.notEqual(nextSession, first)
-  assert.equal(nextSession.sessionId, 'session-2')
-})
-
-test('resolveDemoPlan plans with the supplied engine', () => {
-  const session = {
-    id: 'session-1',
-    nextPieceIndex: 1,
-    board: emptyBoard(12, 22),
-    activePiece: { key: '1Line', angle: 0, origin: { row: 1, column: 0 } },
-  }
-  let planned = 0
-  const engine = {
-    id: 'test',
-    name: 'Test',
-    planDestination() {
-      planned += 1
-      return { angle: 0, column: 1 }
-    },
-    planLastTickMove() {
-      return null
-    },
-  }
-
-  const plan = resolveDemoPlan(null, session, engine)
-
-  assert.equal(planned, 1)
-  assert.deepEqual(plan.destination, { angle: 0, column: 1 })
 })
 
 test('a fresh session starts with zeroed action and per-piece statistics', () => {
@@ -1506,8 +1376,8 @@ test('steps planned before a swap are ignored after it', () => {
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
   const [delphi] = demo.demoBoards
-  const mainStep = demoStepAction(demo, { type: 'drop' })
-  const slotStep = demoBoardStepAction(delphi, { type: 'drop' })
+  const mainStep = demoStepAction(demo, 'H')
+  const slotStep = demoBoardStepAction(delphi, 'H')
 
   const swapped = reducer(demo, { type: 'swapBoard', boardId: delphi.id })
 
@@ -1516,7 +1386,7 @@ test('steps planned before a swap are ignored after it', () => {
   assert.equal(reducer(swapped, slotStep), swapped)
 
   // A step planned for the swapped-in session advances only its slot.
-  const forSlot = demoBoardStepAction(swapped.demoBoards[0], { type: 'drop' })
+  const forSlot = demoBoardStepAction(swapped.demoBoards[0], 'H')
   const stepped = reducer(swapped, forSlot)
 
   assert.notEqual(stepped.demoBoards[0].session, swapped.demoBoards[0].session)

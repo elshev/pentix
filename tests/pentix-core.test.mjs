@@ -1,4 +1,5 @@
-import assert from 'node:assert/strict'
+﻿import assert from 'node:assert/strict'
+import { readdirSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -21,10 +22,18 @@ import {
   planDemoDestination,
   planDemoLastTickMove,
   DEFAULT_DEMO_ENGINE_ID,
+  DEMO_ACTION_CODES,
+  SESSION_ACTIONS,
   DemoEngineRegistry,
+  actionsToward,
+  builtInDemoEngines,
+  createDemoEngineInput,
   demoEngineRegistry,
+  demoLandingRow,
+  demoPieceCells,
   delphi5DemoEngine,
   getDemoEngine,
+  isDemoAction,
   randomDemoEngine,
   replayPentixGameSession,
 } from '../packages/pentix-core/dist/index.js'
@@ -1044,7 +1053,7 @@ test('demo planner completes a line when one placement would clear it', () => {
 
   const destination = planDemoDestination(session)
 
-  // Dropping into column 2 fills the bottom row; the `fullLines²` term makes
+  // Dropping into column 2 fills the bottom row; the `fullLinesВІ` term makes
   // that placement beat the shallower columns 0 and 1.
   assert.deepEqual(destination, { angle: 0, column: 2 })
 })
@@ -1367,6 +1376,151 @@ function withFixedRandom(value, fn) {
   }
 }
 
+/** A minimal demo-engine input built from a demo fixture. */
+function demoInput({
+  width,
+  height,
+  filled = [],
+  key,
+  angle = 0,
+  row = 1,
+  column = 0,
+}) {
+  const board = Array.from({ length: height }, () => Array(width).fill(0))
+  for (const [filledRow, filledColumn] of filled) {
+    board[filledRow][filledColumn] = 1
+  }
+
+  const definition = PIECES_BY_KEY[key]
+  const turns =
+    definition.rotationMode === 'none'
+      ? 0
+      : definition.rotationMode === 'half'
+        ? 1
+        : 3
+
+  const orientations = []
+  const seen = new Set()
+  let currentAngle = angle
+
+  for (let turn = 0; turn <= turns; turn += 1) {
+    const cells = getOccupiedOffsets(
+      definition.offsets,
+      currentAngle,
+      definition.rotationMode,
+    ).map((offset) => ({ row: offset.y, column: offset.x }))
+    const signature = cells
+      .map((cell) => `${cell.row},${cell.column}`)
+      .sort()
+      .join(';')
+    if (!seen.has(signature)) {
+      seen.add(signature)
+      orientations.push(cells)
+    }
+    // The game rotates clockwise by -90 and normalizes for the piece mode.
+    currentAngle = normalizeAngle(currentAngle - 90, definition.rotationMode)
+  }
+
+  return { board, piece: orientations, position: { row, column } }
+}
+
+/** Calls an engine with the three minimal inputs. */
+function planWith(engine, input) {
+  return engine.plan(input.board, input.piece, input.position)
+}
+
+/** True when every character of `log` is a demo action code. */
+function actionAlphabetOnly(log) {
+  return [...log].every((code) => isDemoAction(code))
+}
+
+test('the demo action alphabet excludes ticks', () => {
+  assert.deepEqual(Object.values(DEMO_ACTION_CODES).sort(), [
+    'A',
+    'C',
+    'H',
+    'L',
+    'R',
+  ])
+  for (const code of ['L', 'R', 'C', 'A', 'H']) {
+    assert.equal(isDemoAction(code), true)
+  }
+  for (const code of ['T', 'X', '', 'l']) {
+    assert.equal(isDemoAction(code), false)
+  }
+})
+
+test('the demo alphabet is the session alphabet minus ticks', () => {
+  const sessionCodes = new Set(Object.values(SESSION_ACTIONS))
+  const demoCodes = Object.values(DEMO_ACTION_CODES)
+
+  assert.equal(demoCodes.length, sessionCodes.size - 1)
+  for (const code of demoCodes) {
+    assert.equal(sessionCodes.has(code), true)
+  }
+  assert.equal(demoCodes.includes(SESSION_ACTIONS.tick), false)
+  assert.equal(isDemoAction(SESSION_ACTIONS.tick), false)
+})
+
+test('the engine input orientation order matches repeated clockwise rotations', () => {
+  const sortCells = (list) =>
+    [...list]
+      .map((cell) => `${cell.row},${cell.column}`)
+      .sort()
+      .join(';')
+
+  for (const piece of PIECE_CATALOG) {
+    const game = createPentixGame({
+      id: `game-orient-${piece.id}`,
+      selectPieceId: () => piece.id,
+    })
+    let session = createPentixGameSession({
+      id: `session-orient-${piece.id}`,
+      userId: 'user-orient',
+      game,
+    })
+    const input = createDemoEngineInput(session)
+
+    for (let index = 0; index < input.piece.length; index += 1) {
+      const current = getOccupiedOffsets(
+        piece.offsets,
+        session.activePiece.angle,
+        piece.rotationMode,
+      ).map((offset) => ({ row: offset.y, column: offset.x }))
+
+      assert.equal(
+        sortCells(input.piece[index]),
+        sortCells(current),
+        `${piece.key} orientation ${index}`,
+      )
+
+      session = gameSessionEngine.rotate(session, 'clockwise')
+    }
+  }
+})
+
+test('demoLandingRow finds the resting row of a dropped piece', () => {
+  const input = demoInput({ width: 3, height: 3, key: '1Line', column: 1 })
+  assert.equal(demoLandingRow(input.board, input.piece[0], 1), 2)
+
+  const sealed = demoInput({
+    width: 3,
+    height: 3,
+    filled: [[0, 1]],
+    key: '1Line',
+    column: 1,
+  })
+  assert.equal(demoLandingRow(sealed.board, sealed.piece[0], 1), null)
+})
+
+test('actionsToward turns, moves, and hard-drops', () => {
+  const position = { row: 1, column: 5 }
+
+  assert.equal(actionsToward(2, position, 2), 'CCLLLH')
+  assert.equal(actionsToward(0, position, 7), 'RRH')
+  assert.equal(actionsToward(1, position, 5), 'CH')
+})
+
 test('the demo engine registry resolves the built-in engines', () => {
   assert.equal(DEFAULT_DEMO_ENGINE_ID, 'delphi5')
   assert.equal(getDemoEngine(), delphi5DemoEngine)
@@ -1376,6 +1530,20 @@ test('the demo engine registry resolves the built-in engines', () => {
     demoEngineRegistry.list().map((engine) => engine.id),
     ['delphi5', 'random'],
   )
+})
+
+test('the demo engine registry summarizes engines for the UI', () => {
+  const summaries = demoEngineRegistry.summaries()
+
+  assert.deepEqual(
+    summaries.map((summary) => summary.id),
+    ['delphi5', 'random'],
+  )
+  for (const summary of summaries) {
+    assert.ok(summary.name.length > 0)
+    assert.ok(summary.description.trim().length > 0)
+    assert.equal('plan' in summary, false)
+  }
 })
 
 test('the demo engine registry rejects an unknown engine id', () => {
@@ -1396,32 +1564,163 @@ test('the demo engine registry rejects a duplicate id', () => {
   assert.equal(registry.get('delphi5'), delphi5DemoEngine)
 })
 
-test('the delphi5 engine delegates to the classic planners', () => {
-  const session = demoSession({ width: 12, height: 22, key: '1Line' })
-  withFixedRandom(0, () => {
-    assert.deepEqual(
-      delphi5DemoEngine.planDestination(session),
-      planDemoDestination(session),
-    )
-  })
+test('the demo engine registry rejects an engine without the required shape', () => {
+  const registry = new DemoEngineRegistry()
+  const validEngine = {
+    id: 'valid-engine',
+    name: 'Valid engine',
+    description: 'A valid engine.',
+    plan: () => '',
+  }
+  registry.register(validEngine)
 
-  const resting = demoSession({
+  const candidates = [
+    { engine: { ...validEngine, id: 'Not-Kebab' }, error: /lowercase kebab-case/ },
+    { engine: { ...validEngine, name: '   ' }, error: /non-empty name/ },
+    { engine: { ...validEngine, description: '' }, error: /non-empty description/ },
+    { engine: { ...validEngine, plan: undefined }, error: /plan function/ },
+  ]
+
+  for (const { engine, error } of candidates) {
+    assert.throws(() => registry.register(engine), error)
+  }
+  assert.equal(registry.get('valid-engine'), validEngine)
+})
+
+test('every built-in engine module follows the four-export convention', () => {
+  assert.deepEqual(
+    builtInDemoEngines.map((engine) => engine.id),
+    ['delphi5', 'random'],
+  )
+
+  for (const engine of builtInDemoEngines) {
+    assert.equal(typeof engine.id, 'string')
+    assert.ok(engine.id.length > 0)
+    assert.ok(engine.name.length > 0)
+    assert.ok(engine.description.trim().length > 0)
+    assert.equal(typeof engine.plan, 'function')
+  }
+})
+
+test('demo engine modules follow the <engine-id>-demo-engine.ts name', () => {
+  const engineDirectory = new URL(
+    '../packages/pentix-core/src/demo-engines/',
+    import.meta.url,
+  )
+  const engineModules = readdirSync(engineDirectory)
+    .filter((name) => name.endsWith('.ts') && name !== 'index.ts')
+    .sort()
+
+  assert.deepEqual(engineModules, [
+    'delphi5-demo-engine.ts',
+    'random-demo-engine.ts',
+  ])
+  for (const name of engineModules) {
+    assert.match(name, /^[a-z0-9]+(?:-[a-z0-9]+)*-demo-engine\.ts$/)
+  }
+})
+
+test('a newly registered engine plans from the minimal input', () => {
+  const registry = new DemoEngineRegistry()
+  const engine = {
+    id: 'left-wall',
+    name: 'Left wall',
+    description: 'Drops every piece in the leftmost column.',
+    plan: (board, piece, position) => actionsToward(0, position, 0),
+  }
+  registry.register(engine)
+
+  const input = demoInput({
     width: 12,
     height: 22,
-    filled: [[20, 11]],
     key: '1Line',
-    row: 21,
-    column: 10,
+    row: 1,
+    column: 5,
   })
+
   assert.deepEqual(
-    delphi5DemoEngine.planLastTickMove(resting),
-    planDemoLastTickMove(resting),
+    registry.summaries().map((summary) => summary.id),
+    ['left-wall'],
   )
+  assert.equal(registry.get('left-wall').plan(input.board, input.piece, input.position), 'LLLLLH')
+})
+
+test('the engine input is the visible board, the piece cells, and the rotation point', () => {
+  const game = createPentixGame({
+    id: 'game-input',
+    selectPieceId: createSelector([0, 1]),
+  })
+  const session = createPentixGameSession({
+    id: 'session-input',
+    userId: 'user-input',
+    game,
+  })
+
+  const input = createDemoEngineInput(session)
+
+  assert.equal(input.board.length, session.board.height)
+  assert.equal(input.board[0].length, session.board.width)
+  assert.equal(input.board.flat().every((value) => value === 0), true)
+  // The first catalog piece is the single-cell 1Line.
+  assert.deepEqual(input.piece, [[{ row: 0, column: 0 }]])
+  assert.deepEqual(input.position, session.activePiece.origin)
+})
+
+test('the engine input lists exactly the reachable orientations', () => {
+  const inputFor = (pieceId) => {
+    const game = createPentixGame({
+      id: `game-${pieceId}`,
+      selectPieceId: createSelector([pieceId, pieceId]),
+    })
+    return createDemoEngineInput(
+      createPentixGameSession({
+        id: `session-${pieceId}`,
+        userId: 'user-input',
+        game,
+      }),
+    )
+  }
+
+  assert.equal(inputFor(0).piece.length, 1) // 1Line does not rotate
+  assert.equal(inputFor(1).piece.length, 2) // 2Line turns in half turns
+  assert.equal(inputFor(6).piece.length, 4) // 4T rotates fully
+})
+
+test('the delphi5 engine plans an action log from the minimal input', () => {
+  const input = demoInput({
+    width: 12,
+    height: 22,
+    key: '1Line',
+    row: 1,
+    column: 5,
+  })
+
+  const log = withFixedRandom(0, () => planWith(delphi5DemoEngine, input))
+
+  assert.equal(actionAlphabetOnly(log), true)
+  assert.equal(log.includes('T'), false)
+  assert.ok(log.endsWith('H'))
+})
+
+test('the delphi5 engine plans nothing when no placement exists', () => {
+  const filled = [0, 1, 2].flatMap((row) =>
+    [0, 1, 2].map((column) => [row, column]),
+  )
+  const input = demoInput({
+    width: 3,
+    height: 3,
+    filled,
+    key: '1Line',
+    row: 0,
+    column: 1,
+  })
+
+  assert.equal(planWith(delphi5DemoEngine, input), '')
 })
 
 test('the random engine picks among reachable destinations', () => {
   // Column 1 is sealed from the top, so only columns 0 and 2 are reachable.
-  const session = demoSession({
+  const input = demoInput({
     width: 3,
     height: 4,
     filled: [
@@ -1431,50 +1730,260 @@ test('the random engine picks among reachable destinations', () => {
       [3, 1],
     ],
     key: '1Line',
+    row: 0,
+    column: 1,
   })
 
-  const first = withFixedRandom(0, () =>
-    randomDemoEngine.planDestination(session),
-  )
-  const last = withFixedRandom(0.999, () =>
-    randomDemoEngine.planDestination(session),
-  )
+  const first = withFixedRandom(0, () => planWith(randomDemoEngine, input))
+  const last = withFixedRandom(0.999, () => planWith(randomDemoEngine, input))
 
-  assert.deepEqual(first, { angle: 0, column: 0 })
-  assert.deepEqual(last, { angle: 0, column: 2 })
+  assert.equal(first, 'LH')
+  assert.equal(last, 'RH')
+  assert.equal(actionAlphabetOnly(first), true)
+  assert.equal(actionAlphabetOnly(last), true)
 })
 
-test('the random engine reports no destination when every column is sealed', () => {
-  const session = demoSession({
+test('the random engine plans nothing when every column is sealed', () => {
+  const filled = [0, 1, 2].flatMap((row) =>
+    [0, 1, 2].map((column) => [row, column]),
+  )
+  const input = demoInput({
     width: 3,
     height: 3,
-    filled: [
-      [0, 0],
-      [0, 1],
-      [0, 2],
-      [1, 0],
-      [1, 1],
-      [1, 2],
-      [2, 0],
-      [2, 1],
-      [2, 2],
-    ],
+    filled,
     key: '1Line',
+    row: 0,
+    column: 1,
   })
 
-  assert.equal(randomDemoEngine.planDestination(session), null)
+  assert.equal(planWith(randomDemoEngine, input), '')
 })
 
-test('the random engine never side-steps on the last tick', () => {
-  const session = demoSession({
-    width: 12,
-    height: 22,
-    filled: [[20, 11]],
-    key: '1Line',
-    row: 21,
-    column: 10,
+/** A board with a single settled cell in the bottom-right corner. */
+function boardWithBottomRightMono(width = 12, height = 22) {
+  const board = Array.from({ length: height }, () => Array(width).fill(0))
+  board[height - 1][width - 1] = 1
+  return board
+}
+
+/** A real session for `pieceId` whose board is `boardRows`, plus its game. */
+function sessionWithBoard(pieceId, boardRows) {
+  const game = createPentixGame({
+    id: `game-board-${pieceId}`,
+    selectPieceId: () => pieceId,
+  })
+  const session = createPentixGameSession({
+    id: `session-board-${pieceId}`,
+    userId: 'user-board',
+    game,
   })
 
-  assert.equal(randomDemoEngine.planLastTickMove(session), null)
+  return {
+    game,
+    session: {
+      ...session,
+      board: {
+        width: boardRows[0].length,
+        height: boardRows.length,
+        rows: boardRows.map((row, rowIndex) =>
+          row.map((value, column) => ({
+            row: rowIndex,
+            column,
+            isOccupied: value === 1,
+          })),
+        ),
+      },
+    },
+  }
+}
+
+test('the delphi5 engine rotates 4T and 4S as planned next to a corner mono', () => {
+  const sortCells = (cells) =>
+    [...cells]
+      .map((cell) => `${cell.row},${cell.column}`)
+      .sort()
+      .join(';')
+
+  const cornerMono = boardWithBottomRightMono()
+  const cornerWall = boardWithBottomRightMono()
+  cornerWall[19][11] = 1
+
+  const boards = [
+    { name: 'corner mono', rows: cornerMono },
+    { name: 'corner mono with a wall cell above', rows: cornerWall },
+  ]
+
+  for (const [pieceId, key] of [
+    [6, '4T'],
+    [9, '4S'],
+  ]) {
+    const piece = PIECES_BY_KEY[key]
+
+    for (const boardCase of boards) {
+      const boardRows = boardCase.rows
+      const label = `${key} next to a ${boardCase.name}`
+      const { game, session } = sessionWithBoard(pieceId, boardRows)
+      const input = createDemoEngineInput(session)
+
+      const classic = withFixedRandom(0.5, () => planDemoDestination(session))
+      const log = withFixedRandom(0.5, () =>
+        delphi5DemoEngine.plan(input.board, input.piece, input.position),
+      )
+
+      const rotations = [...log].filter((code) => code === 'C').length
+      const lateral = [...log].filter((code) => code === 'L' || code === 'R')
+      const targetColumn =
+        input.position.column +
+        lateral.reduce((sum, code) => sum + (code === 'L' ? -1 : 1), 0)
+
+      // The engine must choose the classic planner's orientation and column.
+      const classicShape = getOccupiedOffsets(
+        piece.offsets,
+        classic.angle,
+        piece.rotationMode,
+      ).map((offset) => ({ row: offset.y, column: offset.x }))
+      assert.equal(
+        sortCells(input.piece[rotations]),
+        sortCells(classicShape),
+        `wrong orientation for ${label}`,
+      )
+      assert.equal(targetColumn, classic.column, `wrong column for ${label}`)
+
+      // ...and replaying the log must settle the same cells the plan describes.
+      let current = { game, session }
+
+      for (const code of log) {
+        if (code === 'L') {
+          current.session = gameSessionEngine.move(current.session, 'left')
+        } else if (code === 'R') {
+          current.session = gameSessionEngine.move(current.session, 'right')
+        } else if (code === 'C') {
+          current.session = gameSessionEngine.rotate(
+            current.session,
+            'clockwise',
+          )
+        } else if (code === 'A') {
+          current.session = gameSessionEngine.rotate(
+            current.session,
+            'counterclockwise',
+          )
+        } else if (code === 'H') {
+          current = gameSessionEngine.drop(current.session, current.game)
+        }
+        current = gameSessionEngine.tick(current.session, current.game)
+      }
+
+      let ticks = 0
+      while (
+        current.session.status === 'active' &&
+        current.session.statistics.blocks === 0 &&
+        ticks < 40
+      ) {
+        ticks += 1
+        current = gameSessionEngine.tick(current.session, current.game)
+      }
+
+      const landing = demoLandingRow(
+        input.board,
+        input.piece[rotations],
+        targetColumn,
+      )
+      assert.notEqual(
+        landing,
+        null,
+        `planned placement is unreachable for ${label}`,
+      )
+      const plannedCells = demoPieceCells(input.piece[rotations], {
+        row: landing,
+        column: targetColumn,
+      })
+        .map((cell) => `${cell.row},${cell.column}`)
+        .sort()
+
+      const isFixture = (cell) => boardRows[cell.row][cell.column] === 1
+      const actualCells = current.session.board.rows
+        .flat()
+        .filter((cell) => cell.isOccupied && !isFixture(cell))
+        .map((cell) => `${cell.row},${cell.column}`)
+        .sort()
+
+      assert.deepEqual(
+        actualCells,
+        plannedCells,
+        `wrong placement for ${label}`,
+      )
+    }
+  }
+})
+
+test('replaying a delphi5 log as Action then Tick lands at the planned column', () => {
+  const game = createPentixGame({
+    id: 'game-demo',
+    selectPieceId: createSelector([0, 1]),
+  })
+  const session = createPentixGameSession({
+    id: 'session-demo',
+    userId: 'user-demo',
+    game,
+  })
+  const input = createDemoEngineInput(session)
+  const log = withFixedRandom(0, () =>
+    delphi5DemoEngine.plan(input.board, input.piece, input.position),
+  )
+
+  let current = { game, session }
+  for (const code of log) {
+    switch (code) {
+      case 'L':
+        current = {
+          ...current,
+          session: gameSessionEngine.move(current.session, 'left'),
+        }
+        break
+      case 'R':
+        current = {
+          ...current,
+          session: gameSessionEngine.move(current.session, 'right'),
+        }
+        break
+      case 'C':
+        current = {
+          ...current,
+          session: gameSessionEngine.rotate(current.session, 'clockwise'),
+        }
+        break
+      case 'A':
+        current = {
+          ...current,
+          session: gameSessionEngine.rotate(
+            current.session,
+            'counterclockwise',
+          ),
+        }
+        break
+      case 'H':
+        current = gameSessionEngine.drop(current.session, current.game)
+        break
+      default:
+        assert.fail(`unexpected demo action: ${code}`)
+    }
+    // The driver's rule: every action is followed by exactly one tick.
+    current = gameSessionEngine.tick(current.session, current.game)
+  }
+
+  assert.equal(log.includes('T'), false)
+  assert.equal(current.session.statistics.blocks, 1)
+  assert.equal(current.session.activePiece.key, session.nextPieceKey)
+
+  // 1Line is one cell, so the settled cell's column is the rotation point's
+  // column after the lateral moves the log planned.
+  const lateral = [...log].filter((code) => code === 'L' || code === 'R')
+  const delta = lateral.reduce((sum, code) => sum + (code === 'L' ? -1 : 1), 0)
+  const expectedColumn = session.activePiece.origin.column + delta
+
+  const bottom = current.session.board.rows[current.session.board.height - 1]
+  const occupied = bottom.filter((cell) => cell.isOccupied)
+  assert.equal(occupied.length, 1)
+  assert.equal(occupied[0].column, expectedColumn)
 })
 
