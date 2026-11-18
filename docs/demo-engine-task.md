@@ -20,45 +20,44 @@ file name, or a module.
 
 ## The blocks
 
-The piece set is fixed. There are 29 blocks: `1` to `4` minos in the small ones
-and `5` minos in the rest. Every block's cells are given as `(column, row)`
-offsets from its rotation point, and the drawing below shows the orientation the
-piece has when it appears.
+The piece set is fixed: 29 blocks. Every block's cells are given as
+`(column, row)` offsets from its rotation point, and the drawing below shows the
+orientation the piece has when it appears.
 
 - `X` is a mino, `@` is the mino that is the rotation point, `o` is a rotation
   point on an empty cell, `.` is an empty cell.
 
-| Key | ID | Minos | Rotation | Colour | Offsets `(column, row)` |
-| --- | --- | --- | --- | --- | --- |
-| `1Line` | 0 | 1 | none | blue | `(0,0)` |
-| `2Line` | 1 | 2 | half | red | `(0,0) (0,1)` |
-| `3Line` | 2 | 3 | half | red | `(0,0) (-1,0) (1,0)` |
-| `3Corner` | 3 | 3 | full | silver | `(0,0) (0,-1) (1,0)` |
-| `4Line` | 4 | 4 | half | red | `(0,0) (-2,0) (-1,0) (1,0)` |
-| `4Square` | 5 | 4 | none | blue | `(0,0) (0,1) (1,1) (1,0)` |
-| `4T` | 6 | 4 | full | yellow | `(0,0) (-1,0) (1,0) (0,-1)` |
-| `4L` | 7 | 4 | full | fuchsia | `(0,0) (-1,0) (1,0) (1,-1)` |
-| `4LMir` | 8 | 4 | full | silver | `(0,0) (-1,-1) (-1,0) (1,0)` |
-| `4S` | 9 | 4 | half | lime | `(0,0) (-1,0) (0,-1) (1,-1)` |
-| `4SMir` | 10 | 4 | half | aqua | `(0,0) (-1,-1) (0,-1) (1,0)` |
-| `5Line` | 11 | 5 | half | red | `(0,0) (-2,0) (-1,0) (1,0) (2,0)` |
-| `5Corner` | 12 | 5 | full | silver | `(-1,-1) (-1,0) (-1,1) (0,1) (1,1)` |
-| `5Cross` | 13 | 5 | none | silver | `(0,0) (0,-1) (-1,0) (0,1) (1,0)` |
-| `5T` | 14 | 5 | full | yellow | `(0,0) (1,-1) (0,-1) (-1,-1) (0,1)` |
-| `5W` | 15 | 5 | full | yellow | `(0,0) (-1,1) (0,1) (1,0) (1,-1)` |
-| `5U` | 16 | 5 | full | fuchsia | `(0,0) (-1,-1) (-1,0) (1,0) (1,-1)` |
-| `5L` | 17 | 5 | full | fuchsia | `(0,0) (-2,0) (-1,0) (1,0) (1,-1)` |
-| `5LMir` | 18 | 5 | full | yellow | `(0,0) (-1,-1) (-1,0) (1,0) (2,0)` |
-| `5S` | 19 | 5 | full | aqua | `(0,0) (0,-1) (-2,0) (-1,0) (1,-1)` |
-| `5SMir` | 20 | 5 | full | lime | `(0,0) (0,-1) (-1,-1) (1,0) (2,0)` |
-| `5F` | 21 | 5 | full | lime | `(0,0) (0,-1) (-1,1) (0,1) (1,0)` |
-| `5FMir` | 22 | 5 | full | aqua | `(0,0) (0,-1) (-1,0) (0,1) (1,1)` |
-| `5P` | 23 | 5 | full | blue | `(0,0) (1,0) (1,-1) (0,-1) (0,1)` |
-| `5PMir` | 24 | 5 | full | blue | `(0,0) (0,-1) (-1,-1) (-1,0) (0,1)` |
-| `5Z` | 25 | 5 | half | lime | `(0,0) (0,-1) (-1,-1) (0,1) (1,1)` |
-| `5ZMir` | 26 | 5 | half | fuchsia | `(0,0) (1,-1) (0,-1) (-1,1) (0,1)` |
-| `5R` | 27 | 5 | full | silver | `(0,0) (2,0) (1,0) (0,-1) (-1,0)` |
-| `5RMir` | 28 | 5 | full | yellow | `(0,0) (1,0) (0,-1) (-2,0) (-1,0)` |
+| Key | Rotation | Offsets `(column, row)` |
+| --- | --- | --- |
+| `1Line` | none | `(0,0)` |
+| `2Line` | half | `(0,0) (0,1)` |
+| `3Line` | half | `(0,0) (-1,0) (1,0)` |
+| `3Corner` | full | `(0,0) (0,-1) (1,0)` |
+| `4Line` | half | `(0,0) (-2,0) (-1,0) (1,0)` |
+| `4Square` | none | `(0,0) (0,1) (1,1) (1,0)` |
+| `4T` | full | `(0,0) (-1,0) (1,0) (0,-1)` |
+| `4L` | full | `(0,0) (-1,0) (1,0) (1,-1)` |
+| `4LMir` | full | `(0,0) (-1,-1) (-1,0) (1,0)` |
+| `4S` | half | `(0,0) (-1,0) (0,-1) (1,-1)` |
+| `4SMir` | half | `(0,0) (-1,-1) (0,-1) (1,0)` |
+| `5Line` | half | `(0,0) (-2,0) (-1,0) (1,0) (2,0)` |
+| `5Corner` | full | `(-1,-1) (-1,0) (-1,1) (0,1) (1,1)` |
+| `5Cross` | none | `(0,0) (0,-1) (-1,0) (0,1) (1,0)` |
+| `5T` | full | `(0,0) (1,-1) (0,-1) (-1,-1) (0,1)` |
+| `5W` | full | `(0,0) (-1,1) (0,1) (1,0) (1,-1)` |
+| `5U` | full | `(0,0) (-1,-1) (-1,0) (1,0) (1,-1)` |
+| `5L` | full | `(0,0) (-2,0) (-1,0) (1,0) (1,-1)` |
+| `5LMir` | full | `(0,0) (-1,-1) (-1,0) (1,0) (2,0)` |
+| `5S` | full | `(0,0) (0,-1) (-2,0) (-1,0) (1,-1)` |
+| `5SMir` | full | `(0,0) (0,-1) (-1,-1) (1,0) (2,0)` |
+| `5F` | full | `(0,0) (0,-1) (-1,1) (0,1) (1,0)` |
+| `5FMir` | full | `(0,0) (0,-1) (-1,0) (0,1) (1,1)` |
+| `5P` | full | `(0,0) (1,0) (1,-1) (0,-1) (0,1)` |
+| `5PMir` | full | `(0,0) (0,-1) (-1,-1) (-1,0) (0,1)` |
+| `5Z` | half | `(0,0) (0,-1) (-1,-1) (0,1) (1,1)` |
+| `5ZMir` | half | `(0,0) (1,-1) (0,-1) (-1,1) (0,1)` |
+| `5R` | full | `(0,0) (2,0) (1,0) (0,-1) (-1,0)` |
+| `5RMir` | full | `(0,0) (1,0) (0,-1) (-2,0) (-1,0)` |
 
 The shapes, in the orientation the piece appears in (rows top to bottom):
 
@@ -135,9 +134,9 @@ A **rotation** turns the piece a quarter turn clockwise (`C`) or anticlockwise
 (`A`) around its rotation point. A block's rotation mode limits what you can
 reach:
 
-- `none` вЂ” the piece cannot rotate: `piece.length` is `1`.
-- `half` вЂ” half turns only: `piece.length` is `2`.
-- `full` вЂ” quarter turns: `piece.length` is `4` for most blocks, but shapes that
+- `none` — the piece cannot rotate: `piece.length` is `1`.
+- `half` — half turns only: `piece.length` is `2`.
+- `full` — quarter turns: `piece.length` is `4` for most blocks, but shapes that
   look the same after a half turn repeat, so read `piece.length` instead of
   assuming four.
 
@@ -230,55 +229,44 @@ Every character is one action:
 
 Return the empty string `""` when you have no actions for this piece.
 
-**Never return `T`.** `T` means "tick" and ticks are not actions; the caller
-applies them itself (see below). Never return any other character either.
+Only these five characters are accepted; any other character in the string is
+ignored.
 
 ## How the caller executes your string
 
-The caller replays your string for the current piece while a clock runs at the
-game's gravity interval. Every interval contains exactly one **tick** (gravity),
-and your next character is applied halfway between two ticks. The cadence from
-the moment a piece appears is:
+A piece appears, then your actions are replayed one per turn, with one **tick**
+after each:
 
 ```
-half an interval, Action, the rest of the interval, Tick,
-half an interval, Action, the rest of the interval, Tick, ...
+piece appears
+Action
+Tick (move down one row)
+Action
+Tick
+...
 ```
 
-A **tick** moves the piece down one row. If the piece cannot move down, the tick
-locks it, clears full lines, and spawns the next piece. A piece that has just
-spawned is not moved in the instant it appears: its first action comes half an
-interval after the tick that spawned it.
+Your string is read in order:
 
-The rule for your string is:
+1. Apply the next character.
+2. Apply one tick: the piece moves down one row, or locks when it cannot.
+3. Repeat until the string ends. Then ticks continue alone until the piece locks.
 
-1. Apply the next character halfway through an interval.
-2. A hard drop restarts the rhythm. The clock's next step is an action again, so
-   the character after `H` — the piece's **last-tick move** (see below) — lands
-   half an interval after the drop, and the tick that locks the dropped piece and
-   spawns the next one comes a full interval after the drop.
-3. Any other character is followed by the interval's tick half an interval later,
-   and then by the next character halfway through the following interval.
-4. Continue until your string ends.
-5. After the string ends, one tick still arrives every interval until the piece
-   locks.
+At the last position, where the piece can no longer move down, one more action is
+still applied: it happens before the tick that locks the piece. That action is
+your last chance to shift or rotate the piece.
 
 Consequences you must respect:
 
-- Each action costs one interval. A plan with many actions gives the piece more
-  time to fall while it is being steered.
-- An impossible action (for example, moving into a wall) is ignored, but that
-  interval's tick still happens.
-- `H` moves the piece to its lowest possible position; the tick a full interval
-  after the drop locks it there, unless the last-tick move has just shifted it
-  over a drop.
-- A character after `H` is an action of its own, half an interval after the drop:
-  the drop, then a pause, then the side-step, then the tick that locks the piece.
-  Nothing else can follow it in that plan.
+- Each action costs one tick, so the piece also falls while you steer it.
+- An impossible action (for example, moving into a wall) is ignored, but its tick
+  still happens.
+- `H` moves the piece to its lowest possible position; the next tick locks it
+  there, unless the action after `H` moved it sideways.
 - If the piece locks before your string ends, the remaining characters are
   discarded. Put the important actions first.
-- A rotation that would overlap a wall or settled cells may be shifted sideways
-  by the game (a "wall kick"). Plan the simple case; small shifts are possible.
+- Rotate first, then move: the rotation is the action that gets kicked against a
+  wall or stack (see "Rotate before you move" above).
 
 ## Choosing an orientation
 
@@ -290,9 +278,23 @@ the lateral moves. For example, with the two-orientation bar above:
 - `"CLRH"` and `"ALRH"` select the same orientation when there are two
   orientations, because `A` steps backwards by one.
 
-Rotations cost time: every `C` or `A` is one action, and the next tick follows
-half an interval later, so the piece also falls while it turns. Prefer the
-fewest rotations that reach the orientation you want.
+Rotations cost time: every `C` or `A` is one action, and the piece falls one row
+while it turns. Prefer the fewest rotations that reach the orientation you want.
+
+### Rotate before you move
+
+A rotation turns the piece around its rotation point. When the turned shape would
+overlap a wall or a settled cell, the game shifts the piece sideways, or up when
+it is against the top, until it fits. This is a "wall kick". The plan still runs,
+but the piece can end up a column away from where you aimed.
+
+So rotate first, then move:
+
+- Rotate while the piece is still high, where there is free space around it.
+- Steer it into the target column afterwards.
+- A rotation done last, next to a wall or a tall stack, is the one that gets
+  kicked. If you must rotate late, keep one free column between the piece and the
+  wall.
 
 ## The last-tick move after the hard drop
 
@@ -304,13 +306,13 @@ Add **one** `L` or `R` after the `H`:
 
 - The drop happens first, so the piece comes to rest as low as it can in the
   column you steered to.
-- The side-step then moves it one column at that same row — into the pocket, if
-  the pocket is beside it. It is a step of its own, half an interval after the
-  drop, so the piece is seen resting before it shifts.
-- The tick a full interval after the drop then locks the piece in its new column,
-  or lets it fall one more row when the side-step uncovered a drop.
+- The `L` or `R` is the action after the drop, and the piece has not locked yet:
+  it moves one column at that same row, into the pocket if the pocket is beside
+  it.
+- The next tick then locks the piece in its new column, or lets it fall one more
+  row when the side-step uncovered a drop.
 - Nothing else may follow: no rotation, no second drop, and never more than one
-  side-step. A log with no side-step simply ends at `H`.
+  side-step. A string with no side-step simply ends at `H`.
 
 ### Worked example
 
@@ -329,14 +331,13 @@ under the settled mino.
 A straight drop in column `7` would stop on top of the mino at row `19`, so the
 piece has to drop in column `8` and step left on the last tick:
 
-1. `R` — move from column `6` to `7`, then the interval's tick.
-2. `R` — move from column `7` to `8`, then the interval's tick.
-3. `H` — hard drop to row `21`, column `8`. This restarts the rhythm.
-4. `L` — the last-tick move, one column left, into row `21`, column `7`, half an
-   interval after the drop.
-5. The tick a full interval after the drop locks the piece there, under the mino.
+1. `R` — move from column `6` to `7`, then a tick.
+2. `R` — move from column `7` to `8`, then a tick.
+3. `H` — hard drop to row `21`, column `8`.
+4. `L` — the action after the drop, one column left, into row `21`, column `7`.
+5. The next tick locks the piece there, under the mino.
 
-So the log is `"RRHL"`. Without the trailing `L` the piece would lock at row
+So the string is `"RRHL"`. Without the trailing `L` the piece would lock at row
 `21`, column `8` and the pocket would stay empty.
 
 If the side-step is blocked, the caller ignores it but still applies the tick, so
@@ -362,7 +363,7 @@ Every term except the `1000` bonus is multiplied by the level.
 
 - **Drop the piece as early as you can.** The drop score counts the rows between
   the piece and the bottom, so a piece dropped near the top is worth far more
-  than one that has already fallen. Every action costs one interval and therefore
+  than one that has already fallen. Every action costs one tick and therefore
   one row — even an action the board blocks — so keep the plan short: reach the
   placement with as few rotations and moves as it takes, then `H`.
 - A drop with no free row below scores nothing for the fall; the piece just
@@ -411,7 +412,7 @@ You **cannot**:
 - use files, network, timers, the DOM, Node.js APIs, `import`, or `require`;
 - depend on data from previous pieces or on anything outside the arguments;
 - return a character other than `L`, `R`, `C`, `A`, or `H`;
-- return `T` (ticks) or an array/object instead of a string;
+- return an array or an object instead of a string;
 - return more than one action after `H`, or anything other than `L`/`R` there;
 - write JavaScript instead of TypeScript, or leave a parameter unannotated;
 - throw for a valid board, piece, and position.
@@ -505,7 +506,7 @@ function plan(
 - There is exactly one function named `plan`, taking `board`, `piece`, and
   `position`, all annotated, returning `string`.
 - It returns a **string** such as `"LLCH"`.
-- The string contains only `L`, `R`, `C`, `A`, and `H` — never `T`.
+- The string contains only `L`, `R`, `C`, `A`, and `H`.
 - It returns `""` when it has no actions.
 - Any action after `H` is a single `L` or `R`, placed last.
 - It plans for points: it drops the piece early and prefers placements that clear
