@@ -4,8 +4,10 @@ You are writing **one TypeScript function** that plans the moves of one falling
 piece in Pentix, a Tetris-like game. The goal is the highest score: the caller
 scores every action and lock, and your plan decides where each piece goes.
 Everything you need is in this document: no other file, repository, package, or
-documentation is required. Return only the function; do not return metadata, a
-file name, or a module.
+documentation is required. Answer from this document alone — do not reuse code,
+notes, or context from another chat or a previous answer. Return the function
+with one short comment above it that describes your algorithm; do not return
+metadata, a file name, or a module.
 
 ## The game
 
@@ -296,13 +298,20 @@ So rotate first, then move:
   kicked. If you must rotate late, keep one free column between the piece and the
   wall.
 
-## The last-tick move after the hard drop
+## The last-tick move after the hard drop (pockets only)
 
-Some useful placements cannot be reached by a straight drop at all: they sit
-under an overhang, with a settled cell above them. The demo engine is allowed one
-**side-step after the hard drop**, which is exactly what these placements need.
+**End the log at `H` whenever your chosen placement is reachable by a straight
+drop in the target column.** Do not append a lateral move in that case: the demo
+replays one action per tick, so `H` followed by `L` or `R` makes the piece land
+and then walk sideways — it costs a row of fall, it looks wrong, and the same
+placement was already reachable before the drop.
 
-Add **one** `L` or `R` after the `H`:
+Some placements genuinely cannot be reached by a straight drop at all: they sit
+under an overhang, with a settled cell above them. For exactly those placements —
+and only those — the demo engine allows one **side-step after the hard drop**.
+
+Add **one** `L` or `R` after the `H`, and only when the target cell is inside
+such a pocket:
 
 - The drop happens first, so the piece comes to rest as low as it can in the
   column you steered to.
@@ -343,6 +352,9 @@ So the string is `"RRHL"`. Without the trailing `L` the piece would lock at row
 If the side-step is blocked, the caller ignores it but still applies the tick, so
 the piece locks where it was dropped. Plan the side-step only when the target
 cell is free.
+
+This pocket is the **exception**. If a straight drop in the target column reaches
+the placement, the plan ends at `H` and carries no side-step at all.
 
 ## Scoring
 
@@ -411,6 +423,7 @@ You **cannot**:
 - keep state between calls — each call plans a new piece from scratch;
 - use files, network, timers, the DOM, Node.js APIs, `import`, or `require`;
 - depend on data from previous pieces or on anything outside the arguments;
+- reuse code, notes, or context from another chat or from a previous answer — the function must be produced from this document alone;
 - return a character other than `L`, `R`, `C`, `A`, or `H`;
 - return an array or an object instead of a string;
 - return more than one action after `H`, or anything other than `L`/`R` there;
@@ -422,10 +435,13 @@ sequence must produce the same string.
 
 ## Answer format
 
-Return exactly one **TypeScript** function, named `plan`, with the three
-parameters described above, each annotated, and a `string` return type:
+Return exactly one **TypeScript** function, named `plan`, preceded by a short
+**comment block** that describes your algorithm — a few lines saying what the
+plan enumerates, how it scores a placement, and why it ends where it does — with
+the three parameters described above, each annotated, and a `string` return type:
 
 ```ts
+// Describe your algorithm here in a few lines.
 function plan(
   board: number[][],
   piece: { row: number; column: number }[][],
@@ -434,9 +450,10 @@ function plan(
 ```
 
 No imports, no exports, no metadata (the caller supplies the engine name and
-description itself), no explanation outside the code. JavaScript answers are not
-accepted: the function is compiled by a strict TypeScript build, so annotate the
-parameters and the return type. Put the whole answer in a single code block.
+description itself), and no explanation after the function — the algorithm
+comment above it is the only prose the answer may carry. JavaScript answers are
+not accepted: the function is compiled by a strict TypeScript build, so annotate
+the parameters and the return type. Put the whole answer in a single code block.
 
 ## Example answer
 
@@ -445,6 +462,8 @@ reachable column whose landing row is lowest, without rotating, and adds no
 last-tick move. It is valid, not optimal. Write your own strategy.
 
 ```ts
+// Drops the piece straight down in the reachable column whose landing row is
+// lowest, without rotating, and ends at the hard drop.
 function plan(
   board: number[][],
   piece: { row: number; column: number }[][],
@@ -505,10 +524,15 @@ function plan(
 
 - There is exactly one function named `plan`, taking `board`, `piece`, and
   `position`, all annotated, returning `string`.
+- A short comment above `function plan` describes the algorithm.
+- The answer is produced from this document alone: no code or notes reused from
+  another chat or a previous answer.
 - It returns a **string** such as `"LLCH"`.
 - The string contains only `L`, `R`, `C`, `A`, and `H`.
 - It returns `""` when it has no actions.
-- Any action after `H` is a single `L` or `R`, placed last.
+- Its log ends at `H` whenever a straight drop reaches the chosen placement.
+- Any action after `H` is a single `L` or `R`, placed last, and it appears only
+  when a straight drop cannot reach the placement (a pocket under an overhang).
 - It plans for points: it drops the piece early and prefers placements that clear
   rows.
 - It does not mutate the arguments, keep state, or use imports, I/O, or timers.

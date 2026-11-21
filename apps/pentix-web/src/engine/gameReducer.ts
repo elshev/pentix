@@ -22,11 +22,12 @@ export type GamePhase = 'demo' | 'demo-over' | 'playing' | 'paused' | 'game-over
 export const MAIN_BOARD_ID = 'main'
 
 /**
- * The engine the main board's attract demo starts with. A swap replaces it, and
- * the state then keeps the arriving engine across player sessions and demo
- * restarts, so the player's choice survives.
+ * The engine the main board's attract demo starts with: the classic Delphi 5
+ * heuristic, so a fresh page opens on it. A swap replaces it, and the state then
+ * keeps the arriving engine across player sessions and demo restarts, so the
+ * player's choice survives.
  */
-export const MAIN_DEMO_ENGINE_ID: DemoEngineId = 'random'
+export const MAIN_DEMO_ENGINE_ID: DemoEngineId = 'delphi5'
 
 /**
  * The name shown on the main board while a player game runs. Temporary

@@ -16,7 +16,7 @@ The browser gameplay client SHALL start demo mode when the page first loads with
 
 ### Requirement: The demo imitates player actions within the shared engine
 
-The demo SHALL plan the active piece's actions with the demo engine selected from the shared demo engine registry. That engine SHALL return one `DemoActionLog` per spawned piece, and the browser client SHALL replay the log one action per gravity interval: it SHALL apply exactly one gravity tick every interval and SHALL apply the next action code through the shared `GameSessionEngine` halfway between two consecutive ticks, so from the piece's spawn the cadence is half an interval, Action, the rest of the interval, Tick. A piece that spawns when a tick locks the previous piece SHALL NOT be steered in the instant it spawns; its first action SHALL land half an interval after that locking tick. When the applied code is `H`, the client SHALL treat the code after it — the piece's last-tick move (`L` or `R`) — as the next action step, applied half an interval after the drop, and SHALL restart the interval rhythm so the tick that locks the dropped piece and spawns the next one comes a full interval after the drop; the side-step SHALL therefore never share the drop's instant, and the dropped piece SHALL stay resting for a full interval before the next piece appears. When the drop settles the piece instead, the following code SHALL be dropped with the old piece's log and SHALL NOT steer the new piece. Once the log is exhausted the client SHALL apply ticks only until the piece locks. An action the board blocks SHALL leave the placement unchanged, and the interval's tick SHALL still apply. The browser client SHALL keep the main board's selected engine in its game state as a demo engine id, SHALL resolve that engine from the registry by id, SHALL initialize it to `random` on the initial page load, SHALL keep that engine when a player session starts and when a demo session restarts, and SHALL NOT keep a separate temporary or hard-coded engine override constant outside that state. The selected engine SHALL travel with the session it planned, so after the main board and a demo board exchange sessions each board plans with the engine that arrived with its session. The log SHALL be planned once per spawned piece and replayed across intervals; the demo SHALL NOT re-plan mid-piece, SHALL NOT ask the engine on the last tick, and SHALL drop any unplayed actions when the piece locks. All demo movement, rotation, hard drop, side-step, locking, and game-over detection SHALL go through the shared `GameSessionEngine`; the demo SHALL NOT re-implement those operations, SHALL NOT apply an action and a gravity tick in the same instant, and SHALL NOT let a second timer advance its gravity.
+The demo SHALL plan the active piece's actions with the demo engine selected from the shared demo engine registry. That engine SHALL return one `DemoActionLog` per spawned piece, and the browser client SHALL replay the log one action per gravity interval: it SHALL apply exactly one gravity tick every interval and SHALL apply the next action code through the shared `GameSessionEngine` halfway between two consecutive ticks, so from the piece's spawn the cadence is half an interval, Action, the rest of the interval, Tick. A piece that spawns when a tick locks the previous piece SHALL NOT be steered in the instant it spawns; its first action SHALL land half an interval after that locking tick. When the applied code is `H`, the client SHALL treat the code after it — the piece's last-tick move (`L` or `R`) — as the next action step, applied half an interval after the drop, and SHALL restart the interval rhythm so the tick that locks the dropped piece and spawns the next one comes a full interval after the drop; the side-step SHALL therefore never share the drop's instant, and the dropped piece SHALL stay resting for a full interval before the next piece appears. When the drop settles the piece instead, the following code SHALL be dropped with the old piece's log and SHALL NOT steer the new piece. Once the log is exhausted the client SHALL apply ticks only until the piece locks. An action the board blocks SHALL leave the placement unchanged, and the interval's tick SHALL still apply. The browser client SHALL keep the main board's selected engine in its game state as a demo engine id, SHALL resolve that engine from the registry by id, SHALL initialize it to `delphi5` on the initial page load, SHALL keep that engine when a player session starts and when a demo session restarts, and SHALL NOT keep a separate temporary or hard-coded engine override constant outside that state. The selected engine SHALL travel with the session it planned, so after the main board and a demo board exchange sessions each board plans with the engine that arrived with its session. The log SHALL be planned once per spawned piece and replayed across intervals; the demo SHALL NOT re-plan mid-piece, SHALL NOT ask the engine on the last tick, and SHALL drop any unplayed actions when the piece locks. All demo movement, rotation, hard drop, side-step, locking, and game-over detection SHALL go through the shared `GameSessionEngine`; the demo SHALL NOT re-implement those operations, SHALL NOT apply an action and a gravity tick in the same instant, and SHALL NOT let a second timer advance its gravity.
 
 #### Scenario: The demo plans with the selected engine
 
@@ -82,11 +82,11 @@ The demo SHALL plan the active piece's actions with the demo engine selected fro
 - **AND** the interval's tick locks the piece and the next piece spawns
 - **AND** the unplayed actions of the old piece are dropped
 
-#### Scenario: The main board starts on the Random engine
+#### Scenario: The main board starts on the Delphi 5 engine
 
 - **GIVEN** a freshly loaded page whose attract demo still runs the engine it started with
 - **WHEN** the client selects the engine that plans the main board's actions
-- **THEN** it resolves the registry engine whose id is `random` and whose display name is `Random`
+- **THEN** it resolves the registry engine whose id is `delphi5` and whose display name is `Delphi 5`
 - **AND** it reads that id from the game state instead of a hard-coded selection outside it
 
 #### Scenario: The log follows the classic placement preference
@@ -95,7 +95,7 @@ The demo SHALL plan the active piece's actions with the demo engine selected fro
 - **WHEN** the engine returns the piece's log
 - **THEN** the log steers toward a placement that is lower, reduces the number of column holes, and completes more full rows
 - **AND** among placements with equal score it steers toward the one the classic tie-breaks prefer
-- **AND** when the preferred placement needs a last-tick side-step, the log carries that move after its `H`
+- **AND** when, and only when, the preferred placement cannot be reached by a straight drop, the log carries that one side-step after its `H`
 
 #### Scenario: The log is held for the whole piece
 
@@ -112,10 +112,10 @@ The demo SHALL plan the active piece's actions with the demo engine selected fro
 
 #### Scenario: The selected engine follows a swapped session
 
-- **GIVEN** a main board running its attract demo with the `random` engine and a demo board running the `delphi5` engine
+- **GIVEN** a main board running its attract demo with the `delphi5` engine and a demo board running the `random` engine
 - **WHEN** the player double-clicks that demo board and its session moves to the main board
-- **THEN** the main board plans its pieces with the `delphi5` engine
-- **AND** the demo board that received the previous main session plans with the `random` engine
+- **THEN** the main board plans its pieces with the `random` engine
+- **AND** the demo board that received the previous main session plans with the `delphi5` engine
 
 #### Scenario: A player game keeps the swapped engine
 

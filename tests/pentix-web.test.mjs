@@ -36,6 +36,16 @@ function settings(overrides = {}) {
   return { ...DEFAULT_SETTINGS, ...overrides }
 }
 
+const registeredEngineIds = demoEngineRegistry.list().map((engine) => engine.id)
+const railEngineIds = registeredEngineIds.slice(0, MAX_DEMO_BOARDS)
+
+/** The rail board that currently plays `engineId`. */
+function demoBoardByEngine(state, engineId) {
+  const board = state.demoBoards.find((entry) => entry.engineId === engineId)
+  assert.ok(board, `demo board for ${engineId}`)
+  return board
+}
+
 /** A player game that just ended, still inside its post-game-over cooldown. */
 function coolingGameOverState(deps) {
   const base = createInitialState(deps, 'game-over')
@@ -787,11 +797,11 @@ test('the demo restart starts a fresh board set with the main engine kept', () =
   })
   assert.deepEqual(
     restarted.demoBoards.map((board) => board.id),
-    ['demo-slot-1', 'demo-slot-2'],
+    railEngineIds.map((_, index) => `demo-slot-${index + 1}`),
   )
   assert.deepEqual(
     restarted.demoBoards.map((board) => board.engineId),
-    ['delphi5', 'random'],
+    railEngineIds,
   )
   // Each new demo session starts with the seeded mino, not an empty board.
   restarted.demoBoards.forEach((board) => {
@@ -1115,12 +1125,16 @@ function filledCellCount(board) {
 
 test('a fresh state starts one demo board per registered engine', () => {
   const state = createInitialState(createDeps([0, 1]))
-  const expectedEngines = demoEngineRegistry
-    .list()
+  const registered = demoEngineRegistry.list()
+  const expectedEngines = registered
     .slice(0, MAX_DEMO_BOARDS)
     .map((engine) => engine.id)
 
-  assert.deepEqual(expectedEngines, ['delphi5', 'random'])
+  assert.equal(expectedEngines.length, 9)
+  assert.equal(
+    state.demoBoards.length,
+    Math.min(registered.length, MAX_DEMO_BOARDS),
+  )
   assert.deepEqual(
     state.demoBoards.map((board) => board.engineId),
     expectedEngines,
@@ -1129,7 +1143,7 @@ test('a fresh state starts one demo board per registered engine', () => {
     state.demoBoards.map((board) => board.id),
     expectedEngines.map((_, index) => `demo-slot-${index + 1}`),
   )
-  assert.equal(state.mainEngineId, 'random')
+  assert.equal(state.mainEngineId, 'delphi5')
 
   const sessionIds = new Set([state.session.id])
   for (const board of state.demoBoards) {
@@ -1138,14 +1152,15 @@ test('a fresh state starts one demo board per registered engine', () => {
     assert.equal(board.session.userId, state.session.userId)
     sessionIds.add(board.session.id)
   }
-  assert.equal(sessionIds.size, 3)
+  assert.equal(sessionIds.size, state.demoBoards.length + 1)
 })
 
 test('every board draws from the one shared piece list', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const playing = createInitialState(deps, 'playing')
-  const [delphi, random] = playing.demoBoards
+  const delphi = demoBoardByEngine(playing, 'delphi5')
+  const random = demoBoardByEngine(playing, 'random')
 
   // Boards on the same index hold the same active and next pieces.
   assert.equal(playing.session.nextPieceIndex, delphi.session.nextPieceIndex)
@@ -1156,7 +1171,7 @@ test('every board draws from the one shared piece list', () => {
   // A demo-board lock extends the one list; the main session keeps matching it.
   // A hard drop followed by its tick settles the piece.
   const stepped = replayDemoBoardStep(reducer, playing, delphi.id, 'H')
-  const advanced = stepped.demoBoards[0]
+  const advanced = stepped.demoBoards.find((board) => board.id === delphi.id)
 
   assert.equal(stepped.game.id, playing.game.id)
   assert.ok(stepped.game.pieceIds.length > playing.game.pieceIds.length)
@@ -1317,10 +1332,9 @@ test('a level pick on the game-over screen starts a fresh board set', () => {
 
   assert.equal(started.phase, 'playing')
   assert.equal(started.session.statistics.level, 6)
-  assert.deepEqual(
-    started.demoBoards.map((board) => board.session.statistics.level),
-    [6, 6],
-  )
+  for (const board of started.demoBoards) {
+    assert.equal(board.session.statistics.level, 6)
+  }
   started.demoBoards.forEach((board, index) => {
     assert.notEqual(board.session.id, over.demoBoards[index].session.id)
   })
@@ -1330,7 +1344,8 @@ test('a finished main demo keeps the rail playing and waits for it', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
-  const advanced = replayDemoBoardStep(reducer, demo, demo.demoBoards[1].id, 'H')
+  const random = demoBoardByEngine(demo, 'random')
+  const advanced = replayDemoBoardStep(reducer, demo, random.id, 'H')
   const over = {
     ...advanced,
     phase: 'demo-over',
@@ -1342,9 +1357,13 @@ test('a finished main demo keeps the rail playing and waits for it', () => {
   assert.equal(reducer(over, { type: 'demoRestart' }), over)
 
   // The rail keeps advancing while the main board holds its final board.
-  const stepped = reducer(over, demoBoardActionStep(over.demoBoards[1], 'L'))
+  const overRandom = over.demoBoards.find((board) => board.id === random.id)
+  const stepped = reducer(over, demoBoardActionStep(overRandom, 'L'))
 
-  assert.notEqual(stepped.demoBoards[1].session, over.demoBoards[1].session)
+  assert.notEqual(
+    stepped.demoBoards.find((board) => board.id === random.id).session,
+    overRandom.session,
+  )
   assert.equal(stepped.session, over.session)
   assert.equal(stepped.phase, 'demo-over')
 })
@@ -1353,18 +1372,20 @@ test('a demo-board step advances only the addressed board', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
-  const [delphi] = demo.demoBoards
+  const delphi = demoBoardByEngine(demo, 'delphi5')
+  const random = demoBoardByEngine(demo, 'random')
 
-  const stepped = replayDemoBoardStep(
-    reducer,
-    demo,
-    demo.demoBoards[1].id,
-    'H',
+  const stepped = replayDemoBoardStep(reducer, demo, random.id, 'H')
+  const steppedRandom = stepped.demoBoards.find(
+    (board) => board.id === random.id,
   )
 
-  assert.notEqual(stepped.demoBoards[1].session, demo.demoBoards[1].session)
-  assert.equal(stepped.demoBoards[1].session.statistics.actions.drops, 1)
-  assert.equal(stepped.demoBoards[0], delphi)
+  assert.notEqual(steppedRandom.session, random.session)
+  assert.equal(steppedRandom.session.statistics.actions.drops, 1)
+  assert.equal(
+    stepped.demoBoards.find((board) => board.id === delphi.id),
+    delphi,
+  )
   assert.equal(stepped.session, demo.session)
   assert.equal(stepped.phase, 'demo')
 })
@@ -1373,7 +1394,7 @@ test('a stale demo-board step is ignored', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
-  const [delphi] = demo.demoBoards
+  const delphi = demoBoardByEngine(demo, 'delphi5')
 
   for (const overrides of [
     { sessionId: 'session-missing' },
@@ -1421,16 +1442,17 @@ test('demo-board steps run through the engine at the board’s own level', () =>
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const playing = createInitialState(deps, 'playing', settings({ startingLevel: 4 }))
-  const board = playing.demoBoards[1]
+  const board = demoBoardByEngine(playing, 'random')
   const { row, column } = board.session.activePiece.origin
 
   const stepped = replayDemoBoardStep(reducer, playing, board.id, 'L')
+  const steppedBoard = stepped.demoBoards.find((entry) => entry.id === board.id)
 
   // One action plus one gravity tick, on that board's own session.
-  assert.equal(stepped.demoBoards[1].session.activePiece.origin.row, row + 1)
-  assert.equal(stepped.demoBoards[1].session.activePiece.origin.column, column - 1)
-  assert.equal(stepped.demoBoards[1].session.statistics.actions.moves, 1)
-  assert.equal(stepped.demoBoards[1].session.statistics.level, 4)
+  assert.equal(steppedBoard.session.activePiece.origin.row, row + 1)
+  assert.equal(steppedBoard.session.activePiece.origin.column, column - 1)
+  assert.equal(steppedBoard.session.statistics.actions.moves, 1)
+  assert.equal(steppedBoard.session.statistics.level, 4)
 })
 
 test('player actions leave the demo boards unchanged', () => {
@@ -1553,10 +1575,9 @@ test('changing the level during the attract demo retunes every demo board', () =
   assert.equal(retuned.phase, 'demo')
   assert.equal(retuned.settings.startingLevel, 5)
   assert.equal(retuned.session.statistics.level, 5)
-  assert.deepEqual(
-    retuned.demoBoards.map((board) => board.session.statistics.level),
-    [5, 5],
-  )
+  for (const board of retuned.demoBoards) {
+    assert.equal(board.session.statistics.level, 5)
+  }
   // The same sessions keep playing; only their level changes.
   retuned.demoBoards.forEach((board, index) => {
     assert.equal(board.session.id, demo.demoBoards[index].session.id)
@@ -1588,16 +1609,14 @@ test('the level step keys retune the demo boards while the demo runs', () => {
   const demo = createInitialState(deps, 'demo', settings({ startingLevel: 3 }))
 
   const raised = reducer(demo, { type: 'increaseLevel' })
-  assert.deepEqual(
-    raised.demoBoards.map((board) => board.session.statistics.level),
-    [4, 4],
-  )
+  for (const board of raised.demoBoards) {
+    assert.equal(board.session.statistics.level, 4)
+  }
 
   const lowered = reducer(raised, { type: 'decreaseLevel' })
-  assert.deepEqual(
-    lowered.demoBoards.map((board) => board.session.statistics.level),
-    [3, 3],
-  )
+  for (const board of lowered.demoBoards) {
+    assert.equal(board.session.statistics.level, 3)
+  }
 })
 
 test('a level chosen during the demo delay retunes the demo boards at once', () => {
@@ -1616,10 +1635,9 @@ test('a level chosen during the demo delay retunes the demo boards at once', () 
   // follows the chosen level immediately.
   assert.equal(chosen.phase, 'demo-over')
   assert.equal(chosen.session.statistics.level, 2)
-  assert.deepEqual(
-    chosen.demoBoards.map((board) => board.session.statistics.level),
-    [7, 7],
-  )
+  for (const board of chosen.demoBoards) {
+    assert.equal(board.session.statistics.level, 7)
+  }
 })
 
 
@@ -1627,36 +1645,42 @@ test('double-clicking a demo board exchanges it with the main board', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
-  const [delphi, random] = demo.demoBoards
+  const delphi = demoBoardByEngine(demo, 'delphi5')
+  const random = demoBoardByEngine(demo, 'random')
 
-  const swapped = reducer(demo, { type: 'swapBoard', boardId: delphi.id })
+  // The main board opens on delphi5, so the random slot is a real exchange.
+  const swapped = reducer(demo, { type: 'swapBoard', boardId: random.id })
 
   // The clicked board's session and engine take over the main board.
   assert.equal(swapped.phase, 'demo')
-  assert.equal(swapped.session, delphi.session)
-  assert.equal(swapped.mainEngineId, 'delphi5')
+  assert.equal(swapped.session, random.session)
+  assert.equal(swapped.mainEngineId, 'random')
 
   // The main board's session and engine land in that rail slot, under its id.
-  const received = swapped.demoBoards[0]
-  assert.equal(received.id, 'demo-slot-1')
+  const received = swapped.demoBoards.find((board) => board.id === random.id)
+  assert.equal(received.id, 'demo-slot-2')
   assert.equal(received.session, demo.session)
-  assert.equal(received.engineId, 'random')
+  assert.equal(received.engineId, 'delphi5')
 
   // The other slot, the shared game, and the board order are untouched.
-  assert.equal(swapped.demoBoards[1], random)
-  assert.equal(swapped.demoBoards[1].engineId, 'random')
+  const untouchedDelphi = swapped.demoBoards.find(
+    (board) => board.id === delphi.id,
+  )
+  assert.equal(untouchedDelphi, delphi)
+  assert.equal(untouchedDelphi.engineId, 'delphi5')
   assert.equal(swapped.game, demo.game)
   assert.deepEqual(
     swapped.demoBoards.map((board) => board.id),
-    ['demo-slot-1', 'demo-slot-2'],
+    railEngineIds.map((_, index) => `demo-slot-${index + 1}`),
   )
 
   // A second swap with the same slot restores the original assignment.
-  const back = reducer(swapped, { type: 'swapBoard', boardId: 'demo-slot-1' })
+  const back = reducer(swapped, { type: 'swapBoard', boardId: random.id })
+  const restored = back.demoBoards.find((board) => board.id === random.id)
   assert.equal(back.session, demo.session)
-  assert.equal(back.mainEngineId, 'random')
-  assert.equal(back.demoBoards[0].session, delphi.session)
-  assert.equal(back.demoBoards[0].engineId, 'delphi5')
+  assert.equal(back.mainEngineId, 'delphi5')
+  assert.equal(restored.session, random.session)
+  assert.equal(restored.engineId, 'random')
 })
 
 test('a swap is ignored while a player game owns the main board', () => {
@@ -1672,32 +1696,33 @@ test('a swap is ignored while a player game owns the main board', () => {
   }
 
   const demo = createInitialState(deps, 'demo')
-  assert.equal(reducer(demo, { type: 'swapBoard', boardId: 'demo-slot-9' }), demo)
+  assert.equal(reducer(demo, { type: 'swapBoard', boardId: 'demo-slot-11' }), demo)
 })
 
 test('a finished demo board can be swapped in and waits for the rail', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
-  const [delphi] = demo.demoBoards
+  const random = demoBoardByEngine(demo, 'random')
   const finished = {
     ...demo,
     demoBoards: demo.demoBoards.map((board) =>
-      board.id === delphi.id
+      board.id === random.id
         ? { ...board, session: { ...board.session, status: 'game-over' } }
         : board,
     ),
   }
 
-  const swapped = reducer(finished, { type: 'swapBoard', boardId: delphi.id })
+  const swapped = reducer(finished, { type: 'swapBoard', boardId: random.id })
+  const received = swapped.demoBoards.find((board) => board.id === random.id)
 
   assert.equal(swapped.phase, 'demo-over')
   assert.equal(swapped.session.status, 'game-over')
-  assert.equal(swapped.mainEngineId, 'delphi5')
+  assert.equal(swapped.mainEngineId, 'random')
   // The active main session keeps playing in the freed slot.
-  assert.equal(swapped.demoBoards[0].session, demo.session)
-  assert.equal(swapped.demoBoards[0].session.status, 'active')
-  assert.equal(swapped.demoBoards[0].engineId, 'random')
+  assert.equal(received.session, demo.session)
+  assert.equal(received.session.status, 'active')
+  assert.equal(received.engineId, 'delphi5')
 
   // That session now holds the gate: the finished demo cannot restart yet.
   assert.equal(reducer(swapped, { type: 'demoRestart' }), swapped)
@@ -1714,11 +1739,11 @@ test('a finished demo board can be swapped in and waits for the rail', () => {
   assert.equal(restarted.phase, 'demo')
   assert.equal(restarted.session.status, 'active')
   assert.notEqual(restarted.session.id, swapped.session.id)
-  assert.equal(restarted.mainEngineId, 'delphi5')
+  assert.equal(restarted.mainEngineId, 'random')
   // The new cycle reassigns the rail in registry order.
   assert.deepEqual(
     restarted.demoBoards.map((board) => board.engineId),
-    ['delphi5', 'random'],
+    railEngineIds,
   )
 })
 
@@ -1735,18 +1760,18 @@ test('a fresh board set keeps the swapped engine and re-applies the rail slots',
   assert.equal(started.mainEngineId, 'delphi5')
   assert.deepEqual(
     started.demoBoards.map((board) => board.engineId),
-    ['delphi5', 'random'],
+    railEngineIds,
   )
   assert.deepEqual(
     started.demoBoards.map((board) => board.id),
-    ['demo-slot-1', 'demo-slot-2'],
+    railEngineIds.map((_, index) => `demo-slot-${index + 1}`),
   )
 
   const restarted = reducer(swapped, { type: 'restart' })
   assert.equal(restarted.mainEngineId, 'delphi5')
   assert.deepEqual(
     restarted.demoBoards.map((board) => board.engineId),
-    ['delphi5', 'random'],
+    railEngineIds,
   )
 })
 
@@ -1754,7 +1779,8 @@ test('steps planned before a swap are ignored after it', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo')
-  const [delphi] = demo.demoBoards
+  const delphi = demoBoardByEngine(demo, 'delphi5')
+  const random = demoBoardByEngine(demo, 'random')
   const mainStep = demoActionStep(demo, 'H')
   const slotStep = demoBoardActionStep(delphi, 'H')
 
@@ -1765,32 +1791,41 @@ test('steps planned before a swap are ignored after it', () => {
   assert.equal(reducer(swapped, slotStep), swapped)
 
   // A step planned for the swapped-in session advances only its slot.
-  const forSlot = demoBoardActionStep(swapped.demoBoards[0], 'H')
+  const received = swapped.demoBoards.find((board) => board.id === delphi.id)
+  const forSlot = demoBoardActionStep(received, 'H')
   const stepped = reducer(swapped, forSlot)
 
-  assert.notEqual(stepped.demoBoards[0].session, swapped.demoBoards[0].session)
+  assert.notEqual(
+    stepped.demoBoards.find((board) => board.id === delphi.id).session,
+    received.session,
+  )
   assert.equal(stepped.session, swapped.session)
-  assert.equal(stepped.demoBoards[1], swapped.demoBoards[1])
+  assert.equal(
+    stepped.demoBoards.find((board) => board.id === random.id),
+    random,
+  )
 })
 
 test('a level change after a swap retunes the rail and keeps the engines', () => {
   const deps = createDeps([0, 1])
   const reducer = createGameReducer(deps)
   const demo = createInitialState(deps, 'demo', settings({ startingLevel: 2 }))
-  const swapped = reducer(demo, { type: 'swapBoard', boardId: 'demo-slot-1' })
+  const random = demoBoardByEngine(demo, 'random')
+  const swapped = reducer(demo, { type: 'swapBoard', boardId: random.id })
 
   const retuned = reducer(swapped, { type: 'setStartingLevel', level: 7 })
 
   assert.equal(retuned.phase, 'demo')
   assert.equal(retuned.session.statistics.level, 7)
-  assert.deepEqual(
-    retuned.demoBoards.map((board) => board.session.statistics.level),
-    [7, 7],
-  )
-  assert.equal(retuned.mainEngineId, 'delphi5')
+  for (const board of retuned.demoBoards) {
+    assert.equal(board.session.statistics.level, 7)
+  }
+  assert.equal(retuned.mainEngineId, 'random')
+  const swappedEngines = [...railEngineIds]
+  swappedEngines[1] = 'delphi5'
   assert.deepEqual(
     retuned.demoBoards.map((board) => board.engineId),
-    ['random', 'random'],
+    swappedEngines,
   )
 })
 
@@ -1839,10 +1874,11 @@ test('the main board names the player or the demo engine', () => {
   assert.equal(mainBoardName({ ...playing, phase: 'game-over' }), 'Player01')
 
   const demo = createInitialState(deps, 'demo')
-  assert.equal(mainBoardName(demo), 'Random')
-  assert.equal(mainBoardName({ ...demo, phase: 'demo-over' }), 'Random')
+  assert.equal(mainBoardName(demo), 'Delphi 5')
+  assert.equal(mainBoardName({ ...demo, phase: 'demo-over' }), 'Delphi 5')
 
-  const swapped = reducer(demo, { type: 'swapBoard', boardId: 'demo-slot-1' })
-  assert.equal(mainBoardName(swapped), 'Delphi 5')
+  const random = demoBoardByEngine(demo, 'random')
+  const swapped = reducer(demo, { type: 'swapBoard', boardId: random.id })
+  assert.equal(mainBoardName(swapped), 'Random')
 })
 
