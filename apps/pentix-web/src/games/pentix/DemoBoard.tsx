@@ -17,8 +17,9 @@ interface DemoBoardProps {
 /**
  * A parallel demo board in the rail. It shows only the primary statistics and
  * its engine's name: no next-piece preview, no pieces popup, no level buttons,
- * no controls, and no overlays. During the attract demo a double-click moves it
- * to the main board, sending the main board's session into this slot.
+ * no controls. A finished board shows the game-over state as a board overlay.
+ * During the attract demo a double-click moves it to the main board, sending
+ * the main board's session into this slot.
  */
 export function DemoBoard({ board, dispatch, canSwap }: DemoBoardProps) {
   useDemoBoard(board, dispatch)
@@ -34,27 +35,67 @@ export function DemoBoard({ board, dispatch, canSwap }: DemoBoardProps) {
       onDoubleClick={() => dispatch({ type: 'swapBoard', boardId: board.id })}
     >
       <header className="demo-board__head">
-        <p className="demo-board__engine" title={engine.description}>
-          {engine.name}
-        </p>
-        {status === 'game-over' && (
-          <p className="demo-board__status">Game over</p>
-        )}
+        <p className="demo-board__engine">{engine.name}</p>
+        <span
+          className="demo-board__info"
+          role="img"
+          tabIndex={0}
+          aria-label={`About ${engine.name}`}
+        >
+          i
+          <span className="demo-board__about">
+            <strong>{engine.name}</strong>
+            <span>{engine.description}</span>
+          </span>
+        </span>
       </header>
       <div className="demo-board__stats">
-        <DemoStat label="Score" value={statistics.score} />
-        <DemoStat label="Lines" value={statistics.clearedLines} />
-        <DemoStat label="Pieces" value={statistics.blocks} />
+        <DemoStat short="S" label="Score" value={statistics.score} />
+        <DemoStat short="L" label="Lines" value={statistics.clearedLines} />
+        <DemoStat short="P" label="Pieces" value={statistics.blocks} />
       </div>
-      <BoardView session={board.session} compact />
+      <div className="demo-board__stage">
+        <BoardView session={board.session} compact />
+        {status === 'game-over' && (
+          <div className="overlay overlay--mini">
+            <div className="overlay__card overlay__card--mini">
+              <p className="overlay__title">Game over</p>
+              <dl className="overlay__final">
+                <div>
+                  <dt>Score</dt>
+                  <dd>{statistics.score}</dd>
+                </div>
+                <div>
+                  <dt>Lines</dt>
+                  <dd>{statistics.clearedLines}</dd>
+                </div>
+                <div>
+                  <dt>Pieces</dt>
+                  <dd>{statistics.blocks}</dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+        )}
+      </div>
     </article>
   )
 }
 
-function DemoStat({ label, value }: { label: string; value: number }) {
+function DemoStat({
+  short,
+  label,
+  value,
+}: {
+  short: string
+  label: string
+  value: number
+}) {
   return (
     <span className="demo-board__stat">
-      <span className="demo-board__label">{label}</span>
+      <span className="demo-board__label" title={label} aria-label={label}>
+        {short}
+      </span>
       <strong className="demo-board__value">{value}</strong>
     </span>
   )

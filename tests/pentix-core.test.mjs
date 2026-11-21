@@ -27,6 +27,7 @@ import {
   SESSION_ACTIONS,
   DemoEngineRegistry,
   actionsToward,
+  adaptAuthoredPlan,
   builtInDemoEngines,
   createDemoEngineInput,
   demoCanPlaceAt,
@@ -70,6 +71,18 @@ const expectedCatalog = [
   [26, '5ZMir', 'half', [[0, 0], [1, -1], [0, -1], [-1, 1], [0, 1]]],
   [27, '5R', 'full', [[0, 0], [2, 0], [1, 0], [0, -1], [-1, 0]]],
   [28, '5RMir', 'full', [[0, 0], [1, 0], [0, -1], [-2, 0], [-1, 0]]],
+]
+
+const expectedDemoEngineIds = [
+  'delphi5',
+  'random',
+  'claude-opus-5-5-extra',
+  'claude-sonnet-5-5-extra',
+  'deepseek-v4-flash-1107-max',
+  'deepseek-v4-pro-max',
+  'glm-5-3-flash-extra',
+  'minimax-m3-1-flash-extra',
+  'qwen-4-max',
 ]
 
 function offsetsToPairs(offsets) {
@@ -1556,6 +1569,57 @@ test('actionsToward turns, moves, and hard-drops', () => {
   assert.equal(actionsToward(1, position, 5), 'CH')
 })
 
+test('the authored-plan adapter copies its inputs before planning', () => {
+  const board = [
+    [0, 0],
+    [0, 0],
+  ]
+  const piece = [
+    [{ row: 0, column: 0 }],
+  ]
+  const position = { row: 0, column: 0 }
+  const plan = adaptAuthoredPlan((mutableBoard, mutablePiece, mutablePosition) => {
+    mutableBoard[0][0] = 1
+    mutablePiece[0][0].row = 5
+    mutablePosition.row = 5
+    mutablePosition.column = 5
+    return 'H'
+  })
+
+  assert.equal(plan(board, piece, position), 'H')
+  assert.deepEqual(board, [
+    [0, 0],
+    [0, 0],
+  ])
+  assert.deepEqual(piece, [[{ row: 0, column: 0 }]])
+  assert.deepEqual(position, { row: 0, column: 0 })
+})
+
+test('the authored-plan adapter keeps only demo action codes', () => {
+  const board = [[0]]
+  const piece = [[{ row: 0, column: 0 }]]
+  const position = { row: 0, column: 0 }
+  const adapt = (result) => adaptAuthoredPlan(() => result)
+
+  assert.equal(adapt('LLXH!')(board, piece, position), 'LLH')
+  assert.equal(adapt('RHHLC')(board, piece, position), 'RHL')
+  assert.equal(adapt('CLRHR')(board, piece, position), 'CLRHR')
+})
+
+test('the authored-plan adapter returns the empty log for a non-string result', () => {
+  const plan = adaptAuthoredPlan(() => 42)
+
+  assert.equal(plan([[0]], [[{ row: 0, column: 0 }]], { row: 0, column: 0 }), '')
+})
+
+test('the authored-plan adapter returns the empty log when the plan throws', () => {
+  const plan = adaptAuthoredPlan(() => {
+    throw new Error('broken')
+  })
+
+  assert.equal(plan([[0]], [[{ row: 0, column: 0 }]], { row: 0, column: 0 }), '')
+})
+
 test('the demo engine registry resolves the built-in engines', () => {
   assert.equal(DEFAULT_DEMO_ENGINE_ID, 'delphi5')
   assert.equal(getDemoEngine(), delphi5DemoEngine)
@@ -1563,8 +1627,10 @@ test('the demo engine registry resolves the built-in engines', () => {
   assert.equal(getDemoEngine('random'), randomDemoEngine)
   assert.deepEqual(
     demoEngineRegistry.list().map((engine) => engine.id),
-    ['delphi5', 'random'],
+    expectedDemoEngineIds,
   )
+  assert.equal(delphi5DemoEngine.name, 'Delphi 5')
+  assert.equal(randomDemoEngine.name, 'Random')
 })
 
 test('the demo engine registry summarizes engines for the UI', () => {
@@ -1572,7 +1638,7 @@ test('the demo engine registry summarizes engines for the UI', () => {
 
   assert.deepEqual(
     summaries.map((summary) => summary.id),
-    ['delphi5', 'random'],
+    expectedDemoEngineIds,
   )
   for (const summary of summaries) {
     assert.ok(summary.name.length > 0)
@@ -1625,7 +1691,7 @@ test('the demo engine registry rejects an engine without the required shape', ()
 test('every built-in engine module follows the four-export convention', () => {
   assert.deepEqual(
     builtInDemoEngines.map((engine) => engine.id),
-    ['delphi5', 'random'],
+    expectedDemoEngineIds,
   )
 
   for (const engine of builtInDemoEngines) {
@@ -1646,12 +1712,58 @@ test('demo engine modules follow the <engine-id>-demo-engine.ts name', () => {
     .filter((name) => name.endsWith('.ts') && name !== 'index.ts')
     .sort()
 
-  assert.deepEqual(engineModules, [
-    'delphi5-demo-engine.ts',
-    'random-demo-engine.ts',
-  ])
+  assert.deepEqual(
+    engineModules,
+    expectedDemoEngineIds.map((id) => `${id}-demo-engine.ts`).sort(),
+  )
   for (const name of engineModules) {
     assert.match(name, /^[a-z0-9]+(?:-[a-z0-9]+)*-demo-engine\.ts$/)
+  }
+  for (const engine of builtInDemoEngines) {
+    assert.ok(engineModules.includes(`${engine.id}-demo-engine.ts`))
+  }
+})
+
+test('every registered engine plans a legal log without mutating its input', () => {
+  const input = demoInput({
+    width: 12,
+    height: 22,
+    filled: [
+      [21, 0],
+      [21, 1],
+      [20, 1],
+      [21, 4],
+      [20, 4],
+      [19, 4],
+      [21, 7],
+      [20, 7],
+      [21, 8],
+      [21, 9],
+    ],
+    key: '4T',
+    row: 1,
+    column: 5,
+  })
+  const boardBefore = JSON.stringify(input.board)
+  const pieceBefore = JSON.stringify(input.piece)
+  const positionBefore = JSON.stringify(input.position)
+
+  for (const engine of demoEngineRegistry.list()) {
+    const log = planWith(engine, input)
+
+    assert.equal(actionAlphabetOnly(log), true, engine.id)
+    assert.equal(log.includes('T'), false, engine.id)
+    const afterDrop = log.indexOf('H')
+    if (afterDrop >= 0) {
+      assert.ok(
+        log.slice(afterDrop + 1).length <= 1,
+        `${engine.id} emits more than one action after the drop`,
+      )
+      assert.equal(/^[LR]?$/.test(log.slice(afterDrop + 1)), true, engine.id)
+    }
+    assert.equal(JSON.stringify(input.board), boardBefore, engine.id)
+    assert.equal(JSON.stringify(input.piece), pieceBefore, engine.id)
+    assert.equal(JSON.stringify(input.position), positionBefore, engine.id)
   }
 })
 

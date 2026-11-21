@@ -94,6 +94,8 @@ export type {
   DemoPieceOrientation,
   DemoPosition,
 } from './demo-actions.js'
+export { adaptAuthoredPlan } from './demo-engine-toolkit.js'
+export type { AuthoredPlan } from './demo-engine-toolkit.js'
 export { DEFAULT_DEMO_ENGINE_ID, DemoEngineRegistry } from './demo-engine.js'
 export type {
   DemoEngine,
@@ -102,9 +104,16 @@ export type {
 } from './demo-engine.js'
 export {
   builtInDemoEngines,
+  claudeOpus55ExtraDemoEngine,
+  claudeSonnet55ExtraDemoEngine,
+  deepseekV4Flash1107MaxDemoEngine,
+  deepseekV4ProMaxDemoEngine,
   delphi5DemoEngine,
   demoEngineRegistry,
   getDemoEngine,
+  glm53FlashExtraDemoEngine,
+  minimaxM31FlashExtraDemoEngine,
+  qwen4MaxDemoEngine,
   randomDemoEngine,
 } from './demo-engines/index.js'
 export {

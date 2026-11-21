@@ -147,8 +147,10 @@
 }
 
 .demo-board {
+  position: relative;
   display: grid;
   gap: 0.25rem;
+  min-width: 0;
   width: var(--demo-slot-width);
   padding: var(--demo-card-pad);
   border-radius: 10px;
@@ -167,40 +169,109 @@
 
 .demo-board__head {
   display: flex;
+  min-width: 0;
   align-items: baseline;
   justify-content: space-between;
   gap: 0.25rem;
 }
 
 .demo-board__engine {
+  min-width: 0;
   margin: 0;
+  overflow: hidden;
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: #f7c75f;
 }
 
-.demo-board__status {
-  margin: 0;
-  font-size: 0.56rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: rgba(233, 239, 255, 0.72);
+/* The `i` icon owns the name-and-description panel revealed on hover or focus. */
+.demo-board__info {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  border: 1px solid rgba(233, 239, 255, 0.5);
+  font-size: 0.5rem;
+  font-weight: 700;
+  line-height: 1;
+  color: rgba(233, 239, 255, 0.82);
+  cursor: help;
+}
+
+.demo-board__info:focus-visible {
+  outline: 2px solid rgba(247, 199, 95, 0.85);
+  outline-offset: 1px;
+}
+
+.demo-board__about {
+  display: none;
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  z-index: 3;
+  width: calc(var(--demo-slot-width) - 2 * var(--demo-card-pad) - 2px);
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  background: rgba(6, 10, 20, 0.97);
+  border: 1px solid rgba(247, 199, 95, 0.35);
+  box-shadow: 0 10px 30px rgba(4, 10, 24, 0.45);
+  font-size: 0.55rem;
+  line-height: 1.35;
+  letter-spacing: normal;
+  text-transform: none;
+  color: rgba(233, 239, 255, 0.78);
+  pointer-events: none;
+}
+
+.demo-board__about strong {
+  display: block;
+  margin-bottom: 0.15rem;
+  color: #f7c75f;
+}
+
+.demo-board__about span {
+  display: block;
+}
+
+.demo-board__info:hover .demo-board__about,
+.demo-board__info:focus-visible .demo-board__about,
+.demo-board__info:focus-within .demo-board__about {
+  display: block;
+}
+
+/* The board keeps its own positioning context for the mini game-over overlay. */
+.demo-board__stage {
+  position: relative;
 }
 
 /* Only the primary statistics: score, lines, and locked pieces. */
 .demo-board__stats {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.1rem 0.45rem;
-  font-size: 0.56rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+  gap: 0 0.3rem;
+  overflow: hidden;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .demo-board__stat {
   display: flex;
   align-items: baseline;
-  gap: 0.2rem;
+  gap: 0.15rem;
+}
+
+.demo-board__stat:not(:last-child)::after {
+  content: ',';
+  color: rgba(233, 239, 255, 0.45);
 }
 
 .demo-board__label {
@@ -424,6 +495,51 @@
   opacity: 0.45;
   cursor: not-allowed;
   filter: none;
+}
+
+/* A mini rail board's game-over state: keep the final board visible underneath. */
+.overlay--mini {
+  inset: var(--demo-board-pad);
+  border-radius: 10px;
+}
+
+.overlay--mini .overlay__card {
+  gap: 0.35rem;
+  max-width: 100%;
+}
+
+.overlay--mini .overlay__title {
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The final statistics, a little larger than the card's S/L/P line. */
+.overlay__final {
+  display: grid;
+  gap: 0.1rem;
+  margin: 0;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.overlay__final div {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.3rem;
+}
+
+.overlay__final dt {
+  color: rgba(233, 239, 255, 0.72);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.overlay__final dd {
+  margin: 0;
+  color: #eef2ff;
+  font-weight: 700;
 }
 
 .status-line {

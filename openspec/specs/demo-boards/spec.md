@@ -6,7 +6,7 @@ Define the demo-board rail beside the main board: one slot-addressed board per r
 ## Requirements
 ### Requirement: A board set pairs the main session with one demo board per registered engine
 
-Alongside the main board's session, the browser gameplay client SHALL keep one demo board per engine registered in the shared demo engine registry, in registration order, addressed by the stable rail-slot ids `demo-slot-1`, `demo-slot-2`, and so on. The number of demo boards SHALL NOT exceed the rail's capacity of `12` boards; engines registered beyond that capacity SHALL NOT add boards. Every demo board's engine SHALL be resolved from the registry, so with the built-in engines slot 1 plays `delphi5` and slot 2 plays `random`. Every board SHALL own its own `PentixGameSession`, and all sessions created for one board set SHALL be created from one and the same `PentixGame`. The client SHALL identify a demo board by its slot id — never by its engine id — and SHALL address auto-play and engine operations to one board at a time, so a demo board keeps its slot id when the engine assigned to it changes. The main board's attract-demo engine SHALL be part of the board set: it SHALL start as `random` on the initial board set, and every later board set the client creates SHALL keep the engine the game state already holds, so the demo engine a double-click brought to the main board survives the player's next game, a restart, and the demo that follows. The rail SHALL always be reassigned in registration order and SHALL NOT be derived from the main board's engine, so the main board and a rail slot can end up playing the same engine.
+Alongside the main board's session, the browser gameplay client SHALL keep one demo board per engine registered in the shared demo engine registry, in registration order, addressed by the stable rail-slot ids `demo-slot-1`, `demo-slot-2`, and so on. The number of demo boards SHALL NOT exceed the rail's capacity of `12` boards; engines registered beyond that capacity SHALL NOT add boards. Every demo board's engine SHALL be resolved from the registry, so with the built-in engines slot 1 plays `delphi5`, slot 2 plays `random`, and slots 3 to 9 play the seven AI-authored engines in catalog order. Every board SHALL own its own `PentixGameSession`, and all sessions created for one board set SHALL be created from one and the same `PentixGame`. The client SHALL identify a demo board by its slot id — never by its engine id — and SHALL address auto-play and engine operations to one board at a time, so a demo board keeps its slot id when the engine assigned to it changes. The main board's attract-demo engine SHALL be part of the board set: it SHALL start as `delphi5` on the initial board set, and every later board set the client creates SHALL keep the engine the game state already holds, so the demo engine a double-click brought to the main board survives the player's next game, a restart, and the demo that follows. The rail SHALL always be reassigned in registration order and SHALL NOT be derived from the main board's engine, so the main board and a rail slot can end up playing the same engine.
 
 #### Scenario: The page load starts the main session and every demo board
 
@@ -22,7 +22,9 @@ Alongside the main board's session, the browser gameplay client SHALL keep one d
 - **WHEN** the client resolves the engine of each demo board
 - **THEN** `demo-slot-1` uses the registry engine with id `delphi5` and display name `Delphi 5`
 - **AND** `demo-slot-2` uses the registry engine with id `random` and display name `Random`
-- **AND** the main board uses the registry engine with id `random`
+- **AND** `demo-slot-3` uses the registry engine with id `claude-opus-5-5-extra` and display name `Claude Opus 5.5 Extra`
+- **AND** `demo-slot-9` uses the registry engine with id `qwen-4-max` and display name `Qwen 4 Max`
+- **AND** the main board uses the registry engine with id `delphi5`
 
 #### Scenario: A later board set keeps the main board's engine
 
@@ -60,8 +62,6 @@ Alongside the main board's session, the browser gameplay client SHALL keep one d
 - **WHEN** the client compares the main session with the demo-board sessions
 - **THEN** every session has a different session id
 - **AND** each demo board has its own board snapshot and its own statistics
-
-- **AND** no action from the old log is replayed
 
 ### Requirement: Every board draws from one shared piece sequence
 
@@ -274,27 +274,43 @@ Every auto-play step SHALL name its board by slot id, and a steering step SHALL 
 
 ### Requirement: A demo board shows only the primary statistics
 
-Each demo board SHALL render its own session's board at the session's stored `width`-by-`height` grid with its cells colored by `pieceKey` and its active piece overlaid. The demo-board minos SHALL be as large as the rail's four-column wall allows: four board slots plus the three horizontal gaps SHALL fit inside the rail column, with no cell smaller than `4` px and no cell larger than `11` px. Concretely, four boards of the stored `12` columns with `1` px cell gaps, `4` px board padding, `4` px card padding, and `2` px of borders per board occupy `12` times the mino size plus `31` px each, so the mino is `11` px at desktop widths, steps through `10`, `9`, `8`, and `7` px as the shell narrows, and is `6` px once four `7` px boards no longer fit side by side; the rail switches to two boards per row below `480` px. The horizontal gap between rail boards SHALL be the row gap plus `0.25rem` (`4` px at the default root). Above the board each demo board SHALL render the display name of the engine currently assigned to that board and SHALL expose that engine's `description` as the label's tooltip, both read from the registry; the name SHALL NOT be limited to a fixed list of engines. Next to the name it SHALL render exactly three values read from its own session statistics: `Score` (`statistics.score`), `Lines` (`statistics.clearedLines`), and `Pieces` (`statistics.blocks`). It SHALL NOT render a next-piece preview, a pieces statistics popup, action counters, a level selector, on-screen controls, a pause overlay, or a game-over overlay, and SHALL read every value from the session snapshot rather than keeping client-side copies.
+Each demo board SHALL render its own session's board at the session's stored `width`-by-`height` grid with its cells colored by `pieceKey` and its active piece overlaid. The demo-board minos SHALL be as large as the rail's four-column wall allows: four board slots plus the three horizontal gaps SHALL fit inside the rail column, with no cell smaller than `4` px and no cell larger than `11` px. Concretely, four boards of the stored `12` columns with `1` px cell gaps, `4` px board padding, `4` px card padding, and `2` px of borders per board occupy `12` times the mino size plus `31` px each, so the mino is `11` px at desktop widths, steps through `10`, `9`, `8`, and `7` px as the shell narrows, and is `6` px once four `7` px boards no longer fit side by side; the rail switches to two boards per row below `480` px. The horizontal gap between rail boards SHALL be the row gap plus `0.25rem` (`4` px at the default root). The card's header SHALL have two rows and no more. The first row SHALL show only the display name of the engine currently assigned to that board, read from the registry and not limited to a fixed list of engines, next to an `i` info icon. The info icon SHALL reveal that engine's display name and its `description` together — the name repeated above the description — while the pointer hovers over the icon or the icon has keyboard focus, and the panel SHALL close when the pointer and the focus leave it; the description SHALL NOT be printed anywhere else on the card. The second row SHALL show exactly three values read from the board's own session statistics on one line that never wraps: `S` for `statistics.score`, `L` for `statistics.clearedLines`, and `P` for `statistics.blocks`, separated by commas, with the full words `Score`, `Lines`, and `Pieces` exposed as the abbreviated labels' tooltips, and rendered at a slightly larger font than the previous `0.56rem` card line (`0.66rem`). When the session's status is `game-over`, the card SHALL keep the final locked board visible and SHALL draw a `Game over` overlay over the board area, following the main board's game-over overlay (a dimmed backdrop with a `Game over` title) without its buttons. The overlay SHALL repeat the board's final `Score`, `Lines`, and `Pieces` values read from that session and SHALL render its title and values at a slightly larger font than the card statistics (`0.9rem` title, `0.7rem` values), and the header SHALL NOT carry a separate game-over marker. The card SHALL NOT render a next-piece preview, a pieces statistics popup, action counters, a level selector, on-screen controls, or a pause overlay, and SHALL read every value from the session snapshot rather than keeping client-side copies.
 
 #### Scenario: The primary statistics match the board's session
 
 - **GIVEN** a demo board whose session has a known score, cleared line count, and locked-piece count
 - **WHEN** the board renders
-- **THEN** it shows the engine display name and those three values
+- **THEN** its first header row shows the engine display name
+- **AND** its second header row shows those three values as `S`, `L`, and `P`
 - **AND** it renders no other statistic
 
-#### Scenario: The engine description is exposed by the board
+#### Scenario: The engine name and description are revealed by the info icon
 
 - **GIVEN** a demo board whose engine has a non-empty description in the registry
-- **WHEN** the board renders
-- **THEN** the engine label carries that description as its tooltip
+- **WHEN** the pointer hovers over the card's `i` info icon
+- **THEN** a panel shows the engine's display name and that description together
+- **AND** the panel closes when the pointer leaves the icon
+
+#### Scenario: The info icon is keyboard reachable
+
+- **GIVEN** a demo board with its `i` info icon
+- **WHEN** the icon receives keyboard focus
+- **THEN** the same name-and-description panel appears
+- **AND** it disappears when focus leaves the icon
+
+#### Scenario: The statistics row never wraps
+
+- **GIVEN** a demo board whose session reports a five-digit score and three-digit line and piece counts
+- **WHEN** the board renders at the rail's narrowest card width
+- **THEN** `S`, `L`, and `P` appear on one line
+- **AND** the card's height matches the other cards of its rail row
 
 #### Scenario: A demo board renders no secondary statistics or controls
 
 - **GIVEN** any demo-board session, including one whose engine recorded moves and rotations
 - **WHEN** the board renders
 - **THEN** it renders no next-piece preview, no pieces statistics popup, no action counters, no level selector, and no on-screen controls
-- **AND** it renders no pause or game-over overlay
+- **AND** it renders no pause overlay
 
 #### Scenario: Four demo boards fill one rail row
 
@@ -324,18 +340,30 @@ Each demo board SHALL render its own session's board at the session's stored `wi
 - **WHEN** the board re-renders
 - **THEN** its shown score, lines, and pieces reflect the updated session statistics
 
-#### Scenario: A finished demo board shows a game-over marker
+#### Scenario: A finished demo board shows a game-over overlay
 
 - **GIVEN** a demo board whose session reached `status` `game-over`
 - **WHEN** the board renders
 - **THEN** it keeps the final locked board visible
-- **AND** it shows a game-over marker naming the board's status
+- **AND** a `Game over` overlay with a dimmed backdrop covers the board area
+- **AND** the overlay carries no buttons
+- **AND** the overlay lists the final score, lines, and pieces
+- **AND** the card's header carries no separate game-over marker
+
+#### Scenario: The overlay reports the final statistics
+
+- **GIVEN** a demo board whose session ended with a known score, line count, and locked-piece count
+- **WHEN** the board renders its game-over overlay
+- **THEN** the overlay shows those three values under the `Game over` title
+- **AND** its title and values are a little larger than the card's `S`/`L`/`P` line
+- **AND** the values come from the same session snapshot as the card line
 
 #### Scenario: The engine name follows the swapped engine
 
 - **GIVEN** a demo board that received the `random` engine and session from the main board
 - **WHEN** the board renders
 - **THEN** its engine label reads `Random`
+- **AND** its info panel reveals the `random` engine's description
 - **AND** its statistics come from the session it received
 
 ### Requirement: Changing the level during the attract demo retunes every demo board
