@@ -1,7 +1,9 @@
-export class HttpError extends Error {
-  readonly statusCode: number
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 
-  constructor(statusCode: number, message: string) {
+export class HttpError extends Error {
+  readonly statusCode: ContentfulStatusCode
+
+  constructor(statusCode: ContentfulStatusCode, message: string) {
     super(message)
     this.name = 'HttpError'
     this.statusCode = statusCode
@@ -15,12 +17,13 @@ export const HttpStatus = {
   badRequest400: 400,
   notFound404: 404,
   conflict409: 409,
+  unsupportedMediaType415: 415,
   internalServerError500: 500,
 } as const
 
 export function throwHttpErrorIf(
   condition: boolean,
-  statusCode: number,
+  statusCode: ContentfulStatusCode,
   message: string,
 ): void {
   if (condition) {

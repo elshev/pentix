@@ -62,6 +62,8 @@ The following are intentionally not implemented yet:
 
 ## Server API
 
+With the server running, the API reference is at `/docs` (Swagger UI with **Try it out**) and its OpenAPI 3.1 document at `/openapi.json`; the default origin is `http://127.0.0.1:3100`, and `PENTIX_SERVER_HOST`/`PENTIX_SERVER_PORT` change it. The console loads its stylesheet and bundle from this server under `/docs/swagger-ui-dist/*`, so it needs no CDN or internet access. A request that sends a body without a JSON content type is answered with `415 Unsupported Media Type` and a `{ message }` body.
+
 - `POST /users` creates a `User` with a UUIDv7 `id` and a required non-empty `name`; a duplicate name (compared case-insensitively after trimming) is rejected with `409 Conflict`.
 - `GET /users` lists retained users as `{ "users": [...] }`.
 - `GET /users/{id}` returns a single retained user.
@@ -82,7 +84,7 @@ Scoring follows [Demo/Pentix/Main.pas](./delphi/Demo/Pentix/Main.pas): a lock sc
 ## Commands
 
 - `npm run build`: build the shared core, server, and web app
-- `npm run start:server`: build and start PentixServer (persists to `PENTIX_DATA_FILE`, default `data/pentix.db`)
+- `npm run start:server`: build and start PentixServer (persists to `PENTIX_DATA_FILE`, default `data/pentix.db`); open `http://127.0.0.1:3100/docs` for the API reference
 - `npm run dev:web`: run the browser app with Vite
 - `npm run test`: verify shared primitives, game/session lifecycle behavior, server APIs, and the browser reducer, engine, and demo planner
 - `npm run lint`: run ESLint across the repository
