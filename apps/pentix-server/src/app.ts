@@ -10,19 +10,24 @@ import { HttpError, HttpStatus } from './http.js'
 import {
   checkUuid,
   readDirection,
+  readGameCount,
   readOptionalGameId,
   readOptionalName,
   readRequiredName,
   readRequiredUserId,
 } from './request.js'
+import type { DemoRunService } from './demo-runs.js'
 import type { PentixGameLifecycle } from './server.js'
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024
 
 const NOT_FOUND_MESSAGE =
-  'PentixServer is running. Supported endpoints are POST /games, POST /game-sessions, POST /game-sessions/{id}/next-piece, POST /game-sessions/{id}/move, POST /game-sessions/{id}/rotate, POST /game-sessions/{id}/tick, POST /game-sessions/{id}/drop, POST /users, GET /users, and GET /users/{id}.'
+  'PentixServer is running. Supported endpoints are POST /games, POST /game-sessions, POST /game-sessions/{id}/next-piece, POST /game-sessions/{id}/move, POST /game-sessions/{id}/rotate, POST /game-sessions/{id}/tick, POST /game-sessions/{id}/drop, POST /demo-runs, GET /demo-runs/{id}, POST /users, GET /users, and GET /users/{id}.'
 
-export function createPentixApp(lifecycle: PentixGameLifecycle): Hono {
+export function createPentixApp(
+  lifecycle: PentixGameLifecycle,
+  demoRuns: DemoRunService,
+): Hono {
   const app = new Hono()
 
   app.post('/games', async (c) => {
@@ -114,6 +119,26 @@ export function createPentixApp(lifecycle: PentixGameLifecycle): Hono {
     const sessionId = c.req.param('id')
     checkUuid(sessionId, 'Game session id')
     return writeJson(c, HttpStatus.ok200, await lifecycle.drop(sessionId))
+  })
+
+  app.post('/demo-runs', async (c) => {
+    const gameCount = readGameCount(await readJsonBody(c))
+    return writeJson(c, HttpStatus.accepted202, demoRuns.startRun(gameCount))
+  })
+
+  app.get('/demo-runs/:id', (c) => {
+    const demoRunId = c.req.param('id')
+    checkUuid(demoRunId, 'Demo run id')
+
+    const run = demoRuns.getRun(demoRunId)
+    if (run === undefined) {
+      throw new HttpError(
+        HttpStatus.notFound404,
+        `Demo run ${demoRunId} was not found.`,
+      )
+    }
+
+    return writeJson(c, HttpStatus.ok200, run)
   })
 
   app.notFound((c) => {

@@ -30,6 +30,13 @@ import {
   adaptAuthoredPlan,
   builtInDemoEngines,
   createDemoEngineInput,
+  createDemoPlayback,
+  createDemoSession,
+  advanceDemoPlayback,
+  playDemoSession,
+  withSeededDemoMino,
+  DEFAULT_DEMO_STARTING_LEVEL,
+  DEMO_SEED_PIECE_KEY,
   demoCanPlaceAt,
   demoEngineRegistry,
   demoLandingRow,
@@ -2274,5 +2281,221 @@ test('a straight-drop destination carries no last-tick move', () => {
 
   assert.notEqual(destination, null)
   assert.equal(destination.lastTickMove, null)
+})
+
+
+// --- Headless demo playback --------------------------------------------------
+
+/** A demo engine whose plan is the given log. */
+function demoPlaybackEngine(id, plan) {
+  return { id, name: `Engine ${id}`, description: 'stub', plan }
+}
+
+function demoPlaybackSession(seedColumn = 0) {
+  const game = createPentixGame({ id: 'demo-game', selectPieceId: () => 0 })
+  const session = createDemoSession({
+    id: 'demo-session',
+    userId: 'demo',
+    game,
+    level: DEFAULT_DEMO_STARTING_LEVEL,
+    seedColumn,
+  })
+  return { game, session }
+}
+
+/** A playback with a hand-written cached log, as a demo would hold one. */
+function playbackWithLog(game, session, engine, actions) {
+  return {
+    ...createDemoPlayback({ engine, game, session }),
+    actions,
+    actionIndex: 0,
+    plannedPieceIndex: session.nextPieceIndex,
+  }
+}
+
+test('a demo session opens seeded at the demo starting level', () => {
+  const { session } = demoPlaybackSession(7)
+  const occupied = session.board.rows.flat().filter((cell) => cell.isOccupied)
+
+  assert.equal(session.statistics.level, DEFAULT_DEMO_STARTING_LEVEL)
+  assert.equal(DEFAULT_DEMO_STARTING_LEVEL, 9)
+  assert.equal(occupied.length, 1)
+  assert.deepEqual([occupied[0].row, occupied[0].column], [20, 7])
+  assert.equal(occupied[0].pieceKey, DEMO_SEED_PIECE_KEY)
+  assert.equal(session.statistics.score, 0)
+  assert.equal(session.statistics.clearedLines, 0)
+  assert.equal(session.statistics.blocks, 0)
+})
+
+test('seeding changes only the board', () => {
+  const game = createPentixGame({ id: 'demo-game', selectPieceId: () => 0 })
+  const plain = createPentixGameSession({
+    id: 'plain',
+    userId: 'demo',
+    game,
+  })
+  const seeded = withSeededDemoMino(plain, 3)
+
+  assert.deepEqual(seeded.statistics, plain.statistics)
+  assert.equal(seeded.statistics.level, 1)
+  assert.equal(
+    seeded.board.rows.flat().filter((cell) => cell.isOccupied).length,
+    1,
+  )
+  assert.equal(
+    plain.board.rows.flat().some((cell) => cell.isOccupied),
+    false,
+  )
+})
+
+test('a seed column outside the board is rejected', () => {
+  const { session } = demoPlaybackSession(0)
+  assert.throws(() => withSeededDemoMino(session, 12), /seed column/i)
+  assert.throws(() => withSeededDemoMino(session, 1.5), /seed column/i)
+})
+
+test('the playback applies the action before the tick', () => {
+  const { game, session } = demoPlaybackSession()
+  const engine = demoPlaybackEngine('stub', () => 'L')
+  let playback = createDemoPlayback({ engine, game, session })
+
+  playback = advanceDemoPlayback(playback)
+  assert.equal(playback.plans, 1)
+  assert.deepEqual(playback.session.activePiece.origin, { row: 1, column: 5 })
+  assert.equal(playback.slot, 'tick')
+
+  playback = advanceDemoPlayback(playback)
+  assert.deepEqual(playback.session.activePiece.origin, { row: 2, column: 5 })
+  assert.equal(playback.slot, 'action')
+})
+
+
+test('a hard drop is followed by the side-step and then the locking tick', () => {
+  const { game, session } = demoPlaybackSession()
+  const engine = demoPlaybackEngine('stub', () => 'HL')
+  let playback = createDemoPlayback({ engine, game, session })
+
+  playback = advanceDemoPlayback(playback)
+  assert.deepEqual(playback.session.activePiece.origin, { row: 21, column: 6 })
+  assert.equal(playback.session.statistics.blocks, 0)
+  assert.equal(playback.slot, 'action')
+
+  playback = advanceDemoPlayback(playback)
+  assert.deepEqual(playback.session.activePiece.origin, { row: 21, column: 5 })
+  assert.equal(playback.slot, 'tick')
+
+  playback = advanceDemoPlayback(playback)
+  assert.equal(playback.session.statistics.blocks, 1)
+  assert.equal(playback.session.activePiece.origin.row, 1)
+})
+
+test('a settling drop leaves the spawned piece unsteered', () => {
+  const { game, session } = demoPlaybackSession()
+  const engine = demoPlaybackEngine('stub', () => 'HR')
+
+  let resting = { game, session }
+  for (let ticks = 0; ticks < 40; ticks += 1) {
+    if (!canDemoPieceMoveDown(resting.session)) {
+      break
+    }
+    resting = gameSessionEngine.tick(resting.session, resting.game)
+  }
+
+  const playback = playbackWithLog(resting.game, resting.session, engine, 'HR')
+  const dropped = advanceDemoPlayback(playback)
+  assert.equal(dropped.session.statistics.blocks, 1)
+
+  const next = advanceDemoPlayback(dropped)
+  assert.equal(next.session.activePiece.origin.column, 6)
+  assert.equal(next.session.statistics.blocks, 1)
+})
+
+test('an exhausted log keeps ticking until the piece locks', () => {
+  const { game, session } = demoPlaybackSession()
+  const engine = demoPlaybackEngine('stub', () => '')
+  let playback = createDemoPlayback({ engine, game, session })
+
+  let steps = 0
+  while (playback.session.statistics.blocks === 0 && steps < 200) {
+    playback = advanceDemoPlayback(playback)
+    steps += 1
+  }
+
+  assert.equal(playback.session.statistics.blocks, 1)
+  assert.equal(playback.plans, 1)
+  assert.equal(playback.actions, '')
+})
+
+test('a blocked action leaves the placement and the tick still applies', () => {
+  const { game, session } = demoPlaybackSession()
+  const engine = demoPlaybackEngine('stub', () => 'L')
+
+  let atWall = session
+  for (let moves = 0; moves < 6; moves += 1) {
+    atWall = gameSessionEngine.move(atWall, 'left')
+  }
+  assert.equal(atWall.activePiece.origin.column, 0)
+
+  const playback = playbackWithLog(game, atWall, engine, 'L')
+  const blocked = advanceDemoPlayback(playback)
+  assert.deepEqual(blocked.session.activePiece.origin, { row: 1, column: 0 })
+  assert.equal(blocked.actionIndex, 1)
+  assert.equal(blocked.slot, 'tick')
+
+  const ticked = advanceDemoPlayback(blocked)
+  assert.deepEqual(ticked.session.activePiece.origin, { row: 2, column: 0 })
+})
+
+test('only plan calls are timed', () => {
+  const { game, session } = demoPlaybackSession()
+  const engine = demoPlaybackEngine('stub', () => '')
+  const readings = [0, 0.5, 1, 1.5]
+  let read = 0
+  const clock = () => readings[read++]
+
+  let playback = createDemoPlayback({ engine, game, session, clock })
+  while (playback.plans < 2) {
+    playback = advanceDemoPlayback(playback)
+  }
+
+  assert.equal(playback.plans, 2)
+  assert.equal(playback.planTimeMs, 1)
+})
+
+test('an empty log is still a measured plan', () => {
+  const { game, session } = demoPlaybackSession()
+  const engine = demoPlaybackEngine('stub', () => '')
+  const readings = [0, 0.25]
+  let read = 0
+  const clock = () => readings[read++]
+
+  const playback = advanceDemoPlayback(
+    createDemoPlayback({ engine, game, session, clock }),
+  )
+
+  assert.equal(playback.plans, 1)
+  assert.equal(playback.planTimeMs, 0.25)
+  assert.equal(playback.slot, 'tick')
+})
+
+test('a full playback ends the session without touching its inputs', () => {
+  const { game, session } = demoPlaybackSession()
+  const engine = demoPlaybackEngine('stub', () => 'H')
+  const sessionBefore = JSON.stringify(session)
+  const gameBefore = JSON.stringify(game)
+  const pieceIdsBefore = game.pieceIds.length
+
+  const result = playDemoSession({ engine, game, session })
+
+  assert.equal(JSON.stringify(session), sessionBefore)
+  assert.equal(JSON.stringify(game), gameBefore)
+  assert.equal(result.session.status, 'game-over')
+  assert.equal(result.session.gameId, game.id)
+  assert.equal(result.plans > 0, true)
+  assert.equal(result.game.pieceIds.length > pieceIdsBefore, true)
+  assert.equal(
+    result.game.pieceIds.length >= result.session.nextPieceIndex,
+    true,
+  )
 })
 

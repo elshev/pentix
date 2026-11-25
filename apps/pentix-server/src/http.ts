@@ -11,6 +11,7 @@ export class HttpError extends Error {
 export const HttpStatus = {
   ok200: 200,
   created201: 201,
+  accepted202: 202,
   badRequest400: 400,
   notFound404: 404,
   conflict409: 409,

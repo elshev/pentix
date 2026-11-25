@@ -40,7 +40,7 @@ docs/
 
 The codebase currently includes:
 
-- a `PentixServer` implemented with Node.js and TypeScript, including user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints, persisting users, games, and sessions through engine-agnostic repositories
+- a `PentixServer` implemented with Node.js and TypeScript, including user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints, persisting users, games, and sessions through engine-agnostic repositories, plus on-demand demo batches (`POST /demo-runs`, `GET /demo-runs/{id}`) that play every registered demo engine in the background and rank them by points, lines, pieces, and planning time
 - a shared `pentix-core` package with:
   - `Piece`
   - `Offset`
@@ -72,6 +72,8 @@ The following are intentionally not implemented yet:
 - `POST /game-sessions/{id}/rotate` rotates the active piece with Delphi near-wall kicks (`{ "direction": "clockwise" | "counterclockwise" }`).
 - `POST /game-sessions/{id}/tick` steps gravity; when the piece cannot move down it locks, clears lines, scores, levels, and spawns the next piece.
 - `POST /game-sessions/{id}/drop` scores by fall distance and moves the piece to its lowest position without locking; the following tick locks it.
+- `POST /demo-runs` starts a demo batch in the background and answers `202 Accepted` with the run's snapshot. The optional body carries `{ "gameCount": <integer> }` — the number of games to play, `1` by default and `256` at most; any other value is rejected with `400 Bad Request`. Every engine registered in the shared demo-engine registry competes in every game, each on its own demo session created from one shared `PentixGame`, so all engines face the same piece sequence.
+- `GET /demo-runs/{id}` reports the run: `status` (`queued`, `running`, `completed`, `failed`), `gameCount`, `completedGameCount`, the competing `engines`, and — once completed — `standings` ordered winner to loser. Each standing line carries the engine's `name`, its `points`, `lines`, `pieces`, and `playingTimeMs` (the summed time spent inside that engine's `plan` calls). Ties break on lines, then pieces, then the shorter playing time, then engine id. There is no UI for runs: they live in server memory only, the `32` most recent completions stay readable, and a restart forgets them.
 
 Scoring follows [Demo/Pentix/Main.pas](./delphi/Demo/Pentix/Main.pas): a lock scores `points × level`, a drop scores `points × (height − row) × level ÷ 10`, a cleared line scores `lineIndex × (10 + (height − row)) × level`, and emptying the field awards a `1000`-point bonus. Level increases every 30 locked pieces up to level 9.
 

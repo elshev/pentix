@@ -1,5 +1,9 @@
 import { validate, version } from 'uuid'
 
+import {
+  DEFAULT_DEMO_RUN_GAME_COUNT,
+  MAX_DEMO_RUN_GAME_COUNT,
+} from './demo-runs.js'
 import { HttpError, HttpStatus, throwHttpErrorIf } from './http.js'
 
 export function isUuidV7(value: string): boolean {
@@ -12,6 +16,42 @@ export function checkUuid(value: string, label: string): void {
     HttpStatus.badRequest400,
     `${label} must be a UUIDv7 value.`,
   )
+}
+
+/**
+ * Reads the optional `gameCount` of a demo run. An absent body or field means
+ * the default; anything outside the integer range is rejected.
+ */
+export function readGameCount(body: unknown): number {
+  if (body === undefined) {
+    return DEFAULT_DEMO_RUN_GAME_COUNT
+  }
+
+  if (!isJsonRecord(body)) {
+    throw new HttpError(
+      HttpStatus.badRequest400,
+      'Demo run request body must be a JSON object.',
+    )
+  }
+
+  const { gameCount } = body
+  if (gameCount === undefined) {
+    return DEFAULT_DEMO_RUN_GAME_COUNT
+  }
+
+  if (
+    typeof gameCount !== 'number' ||
+    !Number.isInteger(gameCount) ||
+    gameCount < 1 ||
+    gameCount > MAX_DEMO_RUN_GAME_COUNT
+  ) {
+    throw new HttpError(
+      HttpStatus.badRequest400,
+      `Demo run gameCount must be an integer from 1 to ${MAX_DEMO_RUN_GAME_COUNT}.`,
+    )
+  }
+
+  return gameCount
 }
 
 export function isJsonRecord(

@@ -5,6 +5,7 @@ import {
   demoEngineRegistry,
   gameSessionEngine,
   getDemoEngine,
+  withSeededDemoMino,
   type AdvancePentixGameSessionResult,
   type DemoAction,
   type DemoEngineId,
@@ -12,7 +13,6 @@ import {
   type PentixGame,
   type PentixGameSession,
   type PieceIdSelector,
-  type PieceKey,
   type RotateDirection,
 } from '#pentix/core'
 
@@ -258,54 +258,10 @@ function createSessionForGame(
 }
 
 /**
- * The single cell a demo board starts with. It is a settled mino, not a locked
- * piece, so it never counts towards the score, the piece statistics, or the
- * level.
+ * The single cell a demo board starts with comes from the shared demo playback:
+ * one settled mino on the row before last, seeded when the session starts.
  */
-const DEMO_SEED_PIECE_KEY: PieceKey = '1Line'
-
-/**
- * Adds the demo's starting mino: one settled cell in a random column of the row
- * before last. Every demo therefore begins with an overhang to plan around, and
- * the cell stays on the board — it only disappears when its row is completed —
- * for as long as that demo runs.
- */
-export function withSeededDemoMino(
-  session: PentixGameSession,
-): PentixGameSession {
-  const { width, height } = session.board
-  const seedRow = height - 2
-  if (seedRow < 0 || width === 0) {
-    return session
-  }
-
-  const seedColumn = Math.floor(Math.random() * width)
-  return Object.freeze({
-    ...session,
-    board: Object.freeze({
-      width,
-      height,
-      rows: Object.freeze(
-        session.board.rows.map((cells, row) =>
-          Object.freeze(
-            row === seedRow
-              ? cells.map((cell, column) =>
-                  column === seedColumn
-                    ? Object.freeze({
-                        row: cell.row,
-                        column: cell.column,
-                        isOccupied: true,
-                        pieceKey: DEMO_SEED_PIECE_KEY,
-                      })
-                    : cell,
-                )
-              : cells.slice(),
-          ),
-        ),
-      ),
-    }),
-  })
-}
+export { withSeededDemoMino } from '#pentix/core'
 
 /** True when the phase runs a demo (not a player) session on the main board. */
 function isDemoPhase(phase: GamePhase): boolean {

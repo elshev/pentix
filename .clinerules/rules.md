@@ -1,5 +1,16 @@
 # Project Rules
 
+## Code style
+
+### Count-valued names end with `Count`
+
+A parameter, request/response field, or option that carries a count SHALL be
+named `<thing>Count`, never a bare plural or a bare noun: `gameCount`, not
+`games`; `completedGameCount`, not `gamesCompleted`; `MAX_DEMO_RUN_GAME_COUNT`,
+not `MAX_DEMO_RUN_GAMES`. The suffix states the unit and keeps a count from
+reading like a collection. A field that actually holds a collection keeps its
+plural name.
+
 ## Keep the working branch in sync with `main`
 
 Before making any code changes, confirm that the current branch contains the
