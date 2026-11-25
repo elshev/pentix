@@ -1,145 +1,83 @@
-import { Hono } from 'hono'
-import type { Context } from 'hono'
-import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import type { Context, Env } from 'hono'
+import { HTTPException } from 'hono/http-exception'
+import { OpenAPIHono, type OpenAPIHonoOptions } from '@hono/zod-openapi'
+import type { ZodError } from 'zod'
 
-import type {
-  MoveDirection,
-  RotateDirection,
-} from '../../../packages/pentix-core/dist/index.js'
+import { buildPentixRoutes } from './api/routes.js'
+import { registerApiReference } from './api/docs.js'
+import { writeJson } from './api/responses.js'
 import { HttpError, HttpStatus } from './http.js'
-import {
-  checkUuid,
-  readDirection,
-  readGameCount,
-  readOptionalGameId,
-  readOptionalName,
-  readRequiredName,
-  readRequiredUserId,
-} from './request.js'
 import type { DemoRunService } from './demo-runs.js'
 import type { PentixGameLifecycle } from './server.js'
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024
 
 const NOT_FOUND_MESSAGE =
-  'PentixServer is running. Supported endpoints are POST /games, POST /game-sessions, POST /game-sessions/{id}/next-piece, POST /game-sessions/{id}/move, POST /game-sessions/{id}/rotate, POST /game-sessions/{id}/tick, POST /game-sessions/{id}/drop, POST /demo-runs, GET /demo-runs/{id}, POST /users, GET /users, and GET /users/{id}.'
+  'PentixServer is running. Supported endpoints are POST /games, POST /game-sessions, POST /game-sessions/{id}/next-piece, POST /game-sessions/{id}/move, POST /game-sessions/{id}/rotate, POST /game-sessions/{id}/tick, POST /game-sessions/{id}/drop, POST /demo-runs, GET /demo-runs/{id}, POST /users, GET /users, and GET /users/{id}. The API reference is at GET /docs and its OpenAPI document at GET /openapi.json.'
+
+type ValidationHook = NonNullable<OpenAPIHonoOptions<Env>['defaultHook']>
+
+/** Turns a failed route validation into the server's `{ message }` envelope. */
+const defaultHook: ValidationHook = (result, c) => {
+  if (result.success) {
+    return undefined
+  }
+
+  return writeJson(c, HttpStatus.badRequest400, {
+    message: firstIssueMessage(result.error),
+  })
+}
+
+function firstIssueMessage(error: ZodError): string {
+  const [issue] = error.issues
+  return issue?.message ?? 'Request validation failed.'
+}
+
+/**
+ * Rejects request bodies over the 1 MiB cap before any validator runs. The
+ * body is read through Hono's cache, so the route validator re-parses the same
+ * bytes instead of a consumed stream.
+ */
+async function capJsonBody(
+  c: Context,
+  next: () => Promise<void>,
+): Promise<void> {
+  const declaredLength = c.req.header('content-length')
+  if (declaredLength !== undefined) {
+    const declaredBytes = Number(declaredLength)
+    if (
+      Number.isFinite(declaredBytes) &&
+      declaredBytes > MAX_JSON_BODY_BYTES
+    ) {
+      throw new HttpError(
+        HttpStatus.badRequest400,
+        'Request JSON body is too large.',
+      )
+    }
+  }
+
+  if (c.req.raw.body !== null) {
+    const rawBody = await c.req.text()
+    if (Buffer.byteLength(rawBody, 'utf8') > MAX_JSON_BODY_BYTES) {
+      throw new HttpError(
+        HttpStatus.badRequest400,
+        'Request JSON body is too large.',
+      )
+    }
+  }
+
+  await next()
+}
 
 export function createPentixApp(
   lifecycle: PentixGameLifecycle,
   demoRuns: DemoRunService,
-): Hono {
-  const app = new Hono()
+): OpenAPIHono {
+  const app = new OpenAPIHono({ defaultHook })
 
-  app.post('/games', async (c) => {
-    const name = readOptionalName(await readJsonBody(c))
-    return writeJson(c, HttpStatus.created201, await lifecycle.createGame(name))
-  })
-
-  app.post('/game-sessions', async (c) => {
-    const body = await readJsonBody(c)
-    const gameId = readOptionalGameId(body)
-    const userId = readRequiredUserId(body)
-    return writeJson(
-      c,
-      HttpStatus.created201,
-      await lifecycle.createSession(userId, gameId),
-    )
-  })
-
-  app.post('/users', async (c) => {
-    const name = readRequiredName(await readJsonBody(c))
-    return writeJson(c, HttpStatus.created201, await lifecycle.createUser(name))
-  })
-
-  app.get('/users', (c) => {
-    return writeJson(c, HttpStatus.ok200, { users: lifecycle.listUsers() })
-  })
-
-  app.get('/users/:id', (c) => {
-    const userId = c.req.param('id')
-    checkUuid(userId, 'User id')
-
-    const user = lifecycle.getUser(userId)
-    if (user === undefined) {
-      throw new HttpError(HttpStatus.notFound404, `User ${userId} was not found.`)
-    }
-
-    return writeJson(c, HttpStatus.ok200, user)
-  })
-
-  app.post('/game-sessions/:id/next-piece', async (c) => {
-    const sessionId = c.req.param('id')
-    checkUuid(sessionId, 'Game session id')
-    return writeJson(
-      c,
-      HttpStatus.ok200,
-      await lifecycle.advanceSession(sessionId),
-    )
-  })
-
-  app.post('/game-sessions/:id/move', async (c) => {
-    const sessionId = c.req.param('id')
-    checkUuid(sessionId, 'Game session id')
-
-    const direction = readDirection<MoveDirection>(
-      await readJsonBody(c),
-      ['left', 'right'],
-      'Move',
-    )
-    return writeJson(
-      c,
-      HttpStatus.ok200,
-      await lifecycle.move(sessionId, direction),
-    )
-  })
-
-  app.post('/game-sessions/:id/rotate', async (c) => {
-    const sessionId = c.req.param('id')
-    checkUuid(sessionId, 'Game session id')
-
-    const direction = readDirection<RotateDirection>(
-      await readJsonBody(c),
-      ['clockwise', 'counterclockwise'],
-      'Rotate',
-    )
-    return writeJson(
-      c,
-      HttpStatus.ok200,
-      await lifecycle.rotate(sessionId, direction),
-    )
-  })
-
-  app.post('/game-sessions/:id/tick', async (c) => {
-    const sessionId = c.req.param('id')
-    checkUuid(sessionId, 'Game session id')
-    return writeJson(c, HttpStatus.ok200, await lifecycle.tick(sessionId))
-  })
-
-  app.post('/game-sessions/:id/drop', async (c) => {
-    const sessionId = c.req.param('id')
-    checkUuid(sessionId, 'Game session id')
-    return writeJson(c, HttpStatus.ok200, await lifecycle.drop(sessionId))
-  })
-
-  app.post('/demo-runs', async (c) => {
-    const gameCount = readGameCount(await readJsonBody(c))
-    return writeJson(c, HttpStatus.accepted202, demoRuns.startRun(gameCount))
-  })
-
-  app.get('/demo-runs/:id', (c) => {
-    const demoRunId = c.req.param('id')
-    checkUuid(demoRunId, 'Demo run id')
-
-    const run = demoRuns.getRun(demoRunId)
-    if (run === undefined) {
-      throw new HttpError(
-        HttpStatus.notFound404,
-        `Demo run ${demoRunId} was not found.`,
-      )
-    }
-
-    return writeJson(c, HttpStatus.ok200, run)
-  })
+  app.use('*', capJsonBody)
+  app.openapiRoutes(buildPentixRoutes(lifecycle, demoRuns))
+  registerApiReference(app)
 
   app.notFound((c) => {
     return writeJson(c, HttpStatus.notFound404, {
@@ -155,42 +93,15 @@ export function createPentixApp(
       return writeJson(c, error.statusCode, { message: error.message })
     }
 
+    if (error instanceof HTTPException) {
+      return writeJson(c, error.status, { message: error.message })
+    }
+
     console.error(error)
     return writeJson(c, HttpStatus.internalServerError500, {
       message: 'Internal server error.',
     })
   })
 
-  return app
-}
-
-async function readJsonBody(c: Context): Promise<unknown> {
-  const declaredLength = c.req.header('content-length')
-  if (declaredLength !== undefined) {
-    const declaredBytes = Number(declaredLength)
-    if (Number.isFinite(declaredBytes) && declaredBytes > MAX_JSON_BODY_BYTES) {
-      throw new HttpError(HttpStatus.badRequest400, 'Request JSON body is too large.')
-    }
-  }
-
-  const rawBody = await c.req.text()
-  if (Buffer.byteLength(rawBody, 'utf8') > MAX_JSON_BODY_BYTES) {
-    throw new HttpError(HttpStatus.badRequest400, 'Request JSON body is too large.')
-  }
-
-  if (rawBody.trim().length === 0) {
-    return undefined
-  }
-
-  try {
-    return JSON.parse(rawBody) as unknown
-  } catch {
-    throw new HttpError(HttpStatus.badRequest400, 'Request body must be valid JSON.')
-  }
-}
-
-function writeJson(c: Context, statusCode: number, payload: unknown): Response {
-  return c.body(JSON.stringify(payload), statusCode as ContentfulStatusCode, {
-    'content-type': 'application/json; charset=utf-8',
-  })
+  return app as OpenAPIHono
 }

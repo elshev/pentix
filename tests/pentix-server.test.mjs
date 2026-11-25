@@ -6,8 +6,20 @@ import path from 'node:path'
 import test from 'node:test'
 import { v7 as uuidv7 } from 'uuid'
 
-import { startPentixServer } from '../apps/pentix-server/dist/server.js'
+import { PentixGameLifecycle, startPentixServer } from '../apps/pentix-server/dist/server.js'
 import { DemoRunService } from '../apps/pentix-server/dist/demo-runs.js'
+import {
+  DemoRunSnapshotSchema,
+  ErrorResponseSchema,
+  PentixGameSchema,
+  PentixGameSessionSchema,
+  UserListSchema,
+  UserSchema,
+} from '../apps/pentix-server/dist/api/schemas.js'
+import {
+  buildPentixRoutes,
+  listPentixRouteKeys,
+} from '../apps/pentix-server/dist/api/routes.js'
 import { createInMemoryStorage } from '../apps/pentix-server/dist/storage/memory.js'
 import { createSqliteStorage } from '../apps/pentix-server/dist/storage/sqlite.js'
 import {
@@ -1307,6 +1319,248 @@ test('a demo run is forgotten after a restart', async () => {
     assert.equal(status, 404)
   } finally {
     await second.close()
+  }
+})
+
+
+const NON_OPERATION_KEYS = new Set([
+  'summary',
+  'description',
+  'servers',
+  'parameters',
+  '$ref',
+])
+
+async function fetchApiDocument(url) {
+  const response = await fetch(`${url}/openapi.json`)
+  assert.equal(response.status, 200)
+  assert.equal(
+    response.headers.get('content-type'),
+    'application/json',
+  )
+  return response.json()
+}
+
+function operationEntries(apiDocument) {
+  const entries = []
+  for (const [path, pathItem] of Object.entries(apiDocument.paths)) {
+    for (const [method, operation] of Object.entries(pathItem)) {
+      if (NON_OPERATION_KEYS.has(method)) {
+        continue
+      }
+      entries.push({ method: method.toUpperCase(), path, operation })
+    }
+  }
+  return entries
+}
+
+function resolveSchema(apiDocument, schema) {
+  const reference = schema?.$ref
+  if (reference === undefined) {
+    return schema
+  }
+
+  return apiDocument.components.schemas[
+    reference.replace('#/components/schemas/', '')
+  ]
+}
+
+test('GET /openapi.json serves the documented API', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const apiDocument = await fetchApiDocument(handle.url)
+
+    assert.equal(apiDocument.openapi, '3.1.0')
+    assert.equal(apiDocument.info.title, 'PentixServer API')
+    assert.deepEqual(apiDocument.servers, [
+      { url: handle.url, description: 'This server' },
+    ])
+    assert.equal(Object.keys(apiDocument.paths).length, 11)
+  } finally {
+    await handle.close()
+  }
+})
+
+test('the document matches the registered routes', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const apiDocument = await fetchApiDocument(handle.url)
+    const documented = operationEntries(apiDocument).map(
+      ({ method, path }) => `${method} ${path}`,
+    )
+
+    assert.deepEqual(documented.sort(), [...listPentixRouteKeys()].sort())
+    assert.equal(apiDocument.paths['/docs'], undefined)
+    assert.equal(apiDocument.paths['/openapi.json'], undefined)
+
+    for (const { operation } of operationEntries(apiDocument)) {
+      assert.equal(typeof operation.summary, 'string')
+      assert.ok(Array.isArray(operation.tags))
+      assert.ok(operation.tags.length > 0)
+    }
+  } finally {
+    await handle.close()
+  }
+})
+
+test('every route config has exactly one handler', () => {
+  const lifecycle = new PentixGameLifecycle(() => UNKNOWN_UUID_V7)
+  const demoRuns = new DemoRunService(() => UNKNOWN_UUID_V7, { engines: [] })
+
+  const tableKeys = buildPentixRoutes(lifecycle, demoRuns).map(
+    ({ route }) => `${route.method.toUpperCase()} ${route.path}`,
+  )
+
+  assert.deepEqual(tableKeys, listPentixRouteKeys())
+})
+
+test('the document derives its constraints from the route schemas', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const apiDocument = await fetchApiDocument(handle.url)
+
+    const demoRunBody = resolveSchema(
+      apiDocument,
+      apiDocument.paths['/demo-runs'].post.requestBody.content[
+        'application/json'
+      ].schema,
+    )
+    assert.equal(demoRunBody.properties.gameCount.type, 'integer')
+    assert.equal(demoRunBody.properties.gameCount.minimum, 1)
+    assert.equal(demoRunBody.properties.gameCount.maximum, 256)
+
+    const userIdParameter = apiDocument.paths['/users/{id}'].get.parameters.find(
+      (parameter) => parameter.name === 'id',
+    )
+    assert.equal(userIdParameter.in, 'path')
+    assert.ok(userIdParameter.schema.pattern.startsWith('^'))
+    assert.ok(userIdParameter.schema.pattern.includes('-7[0-9a-f]{3}-'))
+  } finally {
+    await handle.close()
+  }
+})
+
+test('GET /docs serves a self-contained Swagger UI', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const response = await fetch(`${handle.url}/docs`)
+    const html = await response.text()
+
+    assert.equal(response.status, 200)
+    assert.match(response.headers.get('content-type'), /^text\/html/)
+    assert.match(html, /<title>PentixServer API<\/title>/)
+    assert.ok(html.includes('/openapi.json'))
+    assert.ok(html.includes('/docs/swagger-ui-dist/swagger-ui.css'))
+    assert.deepEqual(html.match(/https?:\/\/[^"'\s]+/g), null)
+  } finally {
+    await handle.close()
+  }
+})
+
+test('the Swagger UI assets are served locally', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const stylesheet = await fetch(
+      `${handle.url}/docs/swagger-ui-dist/swagger-ui.css`,
+    )
+    const bundle = await fetch(
+      `${handle.url}/docs/swagger-ui-dist/swagger-ui-bundle.js`,
+    )
+
+    assert.equal(stylesheet.status, 200)
+    assert.match(stylesheet.headers.get('content-type'), /^text\/css/)
+    assert.equal(bundle.status, 200)
+    assert.match(
+      bundle.headers.get('content-type'),
+      /^text\/javascript|^application\/javascript/,
+    )
+    assert.ok((await stylesheet.text()).length > 1000)
+    assert.ok((await bundle.text()).length > 1000)
+  } finally {
+    await handle.close()
+  }
+})
+
+
+test('live responses satisfy the documented schemas', async () => {
+  const handle = await startDemoServer()
+
+  try {
+    const userResponse = await post(handle.url, '/users', { name: 'Ada' })
+    assert.equal(userResponse.status, 201)
+    const user = UserSchema.parse(await userResponse.json())
+
+    const usersResponse = await fetch(`${handle.url}/users`)
+    const users = UserListSchema.parse(await usersResponse.json())
+    assert.deepEqual(users.users, [user])
+
+    const gameResponse = await post(handle.url, '/games', { name: 'Ranked' })
+    assert.equal(gameResponse.status, 201)
+    const game = PentixGameSchema.parse(await gameResponse.json())
+
+    const sessionResponse = await post(handle.url, '/game-sessions', {
+      userId: user.id,
+      gameId: game.id,
+    })
+    assert.equal(sessionResponse.status, 201)
+    PentixGameSessionSchema.parse(await sessionResponse.json())
+
+    const runResponse = await post(handle.url, '/demo-runs', { gameCount: 1 })
+    assert.equal(runResponse.status, 202)
+    const queuedRun = DemoRunSnapshotSchema.parse(await runResponse.json())
+    assert.equal(queuedRun.status, 'queued')
+
+    const finishedRun = DemoRunSnapshotSchema.parse(
+      await waitForDemoRun(handle.url, queuedRun.id),
+    )
+    assert.equal(finishedRun.standings.length, 2)
+
+    const missing = await getJson(handle.url, `/users/${UNKNOWN_UUID_V7}`)
+    assert.equal(missing.status, 404)
+    ErrorResponseSchema.parse(missing.body)
+  } finally {
+    await handle.close()
+  }
+})
+
+test('a body without a JSON content type is refused', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const response = await fetch(`${handle.url}/games`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: JSON.stringify({ name: 'Plain' }),
+    })
+    const body = await response.json()
+
+    assert.equal(response.status, 415)
+    ErrorResponseSchema.parse(body)
+
+    const afterResponse = await post(handle.url, '/games')
+    assert.equal(afterResponse.status, 201)
+    assert.equal((await afterResponse.json()).name, '')
+  } finally {
+    await handle.close()
+  }
+})
+
+test('malformed JSON keeps its 400 answer', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const response = await post(handle.url, '/games', '{invalid-json')
+    const body = await response.json()
+
+    assert.equal(response.status, 400)
+    ErrorResponseSchema.parse(body)
+  } finally {
+    await handle.close()
   }
 })
 
