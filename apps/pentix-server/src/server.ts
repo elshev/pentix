@@ -10,6 +10,7 @@ import {
   getPieceDefinition,
   replayPentixGameSession,
   type MoveDirection,
+  type DemoEngine,
   type PentixGame,
   type PentixGameSession,
   type PieceIdSelector,
@@ -21,6 +22,7 @@ import {
 import { v7 as uuidv7 } from 'uuid'
 
 import { createPentixApp } from './app.js'
+import { DemoRunService } from './demo-runs.js'
 import { HttpError, HttpStatus } from './http.js'
 import { createInMemoryStorage } from './storage/memory.js'
 import type { PentixStorage } from './storage/repositories.js'
@@ -33,6 +35,12 @@ export interface PentixServerContext {
    * and non-durable runs stay deterministic.
    */
   readonly storage?: PentixStorage
+  /** The engines a demo run competes; defaults to every registered engine. */
+  readonly demoEngines?: readonly DemoEngine[]
+  /** The level demo sessions open at; defaults to the demo's starting level. */
+  readonly demoStartingLevel?: number
+  /** Millisecond clock used to time demo `plan` calls; defaults to `performance.now()`. */
+  readonly demoPlanClock?: () => number
 }
 
 export interface PentixServerStartOptions {
@@ -321,7 +329,13 @@ export async function createPentixServer(
     context.storage ?? createInMemoryStorage(),
   )
   await lifecycle.load()
-  const app = createPentixApp(lifecycle)
+  const demoRuns = new DemoRunService(context.createId ?? uuidv7, {
+    selectPieceId: context.selectPieceId,
+    engines: context.demoEngines,
+    startingLevel: context.demoStartingLevel,
+    clock: context.demoPlanClock,
+  })
+  const app = createPentixApp(lifecycle, demoRuns)
 
   return createAdaptorServer({ fetch: app.fetch }) as Server
 }
@@ -379,3 +393,11 @@ export async function startPentixServer(
       }),
   }
 }
+
+export { DemoRunService }
+export type {
+  DemoRunServiceOptions,
+  DemoRunSnapshot,
+  DemoRunStanding,
+  DemoRunStatus,
+} from './demo-runs.js'

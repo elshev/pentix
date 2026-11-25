@@ -71,6 +71,22 @@ export type {
   DemoOrientationDestination,
 } from './demo.js'
 export {
+  DEFAULT_DEMO_STARTING_LEVEL,
+  DEMO_SEED_PIECE_KEY,
+  advanceDemoPlayback,
+  createDemoPlayback,
+  createDemoSession,
+  playDemoSession,
+  withSeededDemoMino,
+} from './demo-play.js'
+export type {
+  DemoPlayback,
+  DemoPlaybackOptions,
+  DemoPlaybackSlot,
+  DemoPlayResult,
+  DemoSessionOptions,
+} from './demo-play.js'
+export {
   DEMO_ACTION_CODES,
   actionsToward,
   createDemoEngineInput,

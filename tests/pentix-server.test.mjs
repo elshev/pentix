@@ -7,13 +7,17 @@ import test from 'node:test'
 import { v7 as uuidv7 } from 'uuid'
 
 import { startPentixServer } from '../apps/pentix-server/dist/server.js'
+import { DemoRunService } from '../apps/pentix-server/dist/demo-runs.js'
 import { createInMemoryStorage } from '../apps/pentix-server/dist/storage/memory.js'
 import { createSqliteStorage } from '../apps/pentix-server/dist/storage/sqlite.js'
 import {
+  createDemoSession,
   createPentixGame,
   createPentixGameSession,
   createUser,
+  DEFAULT_DEMO_STARTING_LEVEL,
   PIECE_CATALOG,
+  playDemoSession,
 } from '../packages/pentix-core/dist/index.js'
 
 const UNKNOWN_UUID_V7 = '018cc251-f400-7000-8000-000000000000'
@@ -995,3 +999,314 @@ test('SQLite session storage rejects actions outside the alphabet', async () => 
     await temp.cleanup()
   }
 })
+
+// --- Demo runs ---------------------------------------------------------------
+
+/** A stub demo engine that always plans the same log. */
+function stubDemoEngine(id, plan) {
+  return { id, name: `Engine ${id}`, description: 'stub engine', plan }
+}
+
+/** The statistics one demo game with the same seeds produces. */
+function expectedDemoGameStats(plan, selectPieceId = () => 0) {
+  const game = createPentixGame({ id: 'expected-game', selectPieceId })
+  const session = createDemoSession({
+    id: 'expected-session',
+    userId: 'demo',
+    game,
+    level: DEFAULT_DEMO_STARTING_LEVEL,
+    seedColumn: 0,
+  })
+
+  return playDemoSession({
+    engine: stubDemoEngine('expected', plan),
+    game,
+    session,
+    selectPieceId,
+  }).session.statistics
+}
+
+async function getJson(url, path) {
+  const response = await fetch(`${url}${path}`)
+  return { status: response.status, body: await response.json() }
+}
+
+async function waitForDemoRun(url, runId, status = 'completed') {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const { status: code, body } = await getJson(url, `/demo-runs/${runId}`)
+    assert.equal(code, 200)
+    if (body.status === status) {
+      return body
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+
+  assert.fail(`demo run ${runId} did not reach ${status}`)
+}
+
+async function startDemoServer(context = {}) {
+  return startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: {
+      demoEngines: [
+        stubDemoEngine('alpha', () => 'H'),
+        stubDemoEngine('beta', () => 'H'),
+      ],
+      selectPieceId: () => 0,
+      demoStartingLevel: DEFAULT_DEMO_STARTING_LEVEL,
+      ...context,
+    },
+  })
+}
+
+test('a demo run plays every engine and completes', async () => {
+  let ids = 0
+  const service = new DemoRunService(() => `demo-${ids++}`, {
+    engines: [
+      stubDemoEngine('alpha', () => 'H'),
+      stubDemoEngine('beta', () => 'H'),
+    ],
+    selectPieceId: () => 0,
+    seedColumn: 0,
+    clock: () => 0,
+  })
+
+  const run = service.startRun(2)
+  assert.equal(run.status, 'queued')
+  assert.deepEqual(run.engines, ['alpha', 'beta'])
+  assert.equal(run.gameCount, 2)
+  assert.equal(run.completedGameCount, 0)
+  assert.deepEqual(run.standings, [])
+
+  await service.whenIdle()
+
+  const done = service.getRun(run.id)
+  assert.equal(done.status, 'completed')
+  assert.equal(done.completedGameCount, 2)
+  assert.deepEqual(
+    done.standings.map((line) => line.engineId),
+    ['alpha', 'beta'],
+  )
+  assert.equal(service.getRun('missing-run'), undefined)
+})
+
+test('demo standings sum the games and rank equal engines by id', async () => {
+  const expected = expectedDemoGameStats(() => 'H')
+  let ids = 0
+  let read = 0
+  const service = new DemoRunService(() => `demo-${ids++}`, {
+    engines: [
+      stubDemoEngine('beta', () => 'H'),
+      stubDemoEngine('alpha', () => 'H'),
+    ],
+    selectPieceId: () => 0,
+    seedColumn: 0,
+    clock: () => read++,
+  })
+
+  const run = service.startRun(2)
+  await service.whenIdle()
+
+  const done = service.getRun(run.id)
+  assert.deepEqual(
+    done.standings.map((line) => line.engineId),
+    ['alpha', 'beta'],
+  )
+
+  for (const line of done.standings) {
+    assert.equal(line.name, `Engine ${line.engineId}`)
+    assert.equal(line.points, expected.score * 2)
+    assert.equal(line.lines, expected.clearedLines * 2)
+    assert.equal(line.pieces, expected.blocks * 2)
+    assert.equal(line.playingTimeMs, line.pieces)
+  }
+})
+
+test('a throwing planner fails the run without standings', async () => {
+  const service = new DemoRunService(() => 'demo-1', {
+    engines: [
+      stubDemoEngine('broken', () => {
+        throw new Error('planner exploded')
+      }),
+    ],
+    selectPieceId: () => 0,
+    seedColumn: 0,
+  })
+
+  const run = service.startRun(1)
+  await service.whenIdle()
+
+  const done = service.getRun(run.id)
+  assert.equal(done.status, 'failed')
+  assert.match(done.error, /planner exploded/)
+  assert.deepEqual(done.standings, [])
+})
+
+test('a demo run rejects a game count outside its bounds', async () => {
+  const service = new DemoRunService(() => 'demo-1', { engines: [] })
+
+  for (const gameCount of [0, -1, 1.5, 257, Number.NaN]) {
+    assert.throws(() => service.startRun(gameCount), /1 to 256/)
+  }
+
+  const maximum = service.startRun(256)
+  assert.equal(maximum.gameCount, 256)
+  await service.whenIdle()
+  assert.equal(service.getRun(maximum.id).completedGameCount, 256)
+})
+
+test('finished runs are retained up to the boundary', async () => {
+  let ids = 0
+  const service = new DemoRunService(() => `demo-${ids++}`, { engines: [] })
+
+  const runs = []
+  for (let index = 0; index < 33; index += 1) {
+    runs.push(service.startRun(1))
+  }
+
+  await service.whenIdle()
+
+  assert.equal(service.getRun(runs[0].id), undefined)
+  assert.notEqual(service.getRun(runs[32].id), undefined)
+})
+
+
+test('POST /demo-runs starts a background run and reports its standings', async () => {
+  const handle = await startDemoServer()
+
+  try {
+    const response = await post(handle.url, '/demo-runs')
+    assert.equal(response.status, 202)
+
+    const run = await response.json()
+    assertUuidV7(run.id)
+    assert.equal(run.gameCount, 1)
+    assert.deepEqual(run.engines, ['alpha', 'beta'])
+    assert.deepEqual(run.standings, [])
+    assert.ok(run.status === 'queued' || run.status === 'running')
+
+    const done = await waitForDemoRun(handle.url, run.id)
+    assert.equal(done.status, 'completed')
+    assert.equal(done.completedGameCount, 1)
+    assert.equal(done.standings.length, 2)
+
+    for (const line of done.standings) {
+      assert.equal(typeof line.engineId, 'string')
+      assert.equal(typeof line.name, 'string')
+      assert.ok(Number.isInteger(line.points) && line.points >= 0)
+      assert.ok(Number.isInteger(line.lines) && line.lines >= 0)
+      assert.ok(Number.isInteger(line.pieces) && line.pieces >= 0)
+      assert.ok(typeof line.playingTimeMs === 'number')
+      assert.ok(line.playingTimeMs >= 0)
+    }
+  } finally {
+    await handle.close()
+  }
+})
+
+test('POST /demo-runs accepts the maximum batch', async () => {
+  const handle = await startDemoServer({ demoEngines: [] })
+
+  try {
+    const response = await post(handle.url, '/demo-runs', { gameCount: 256 })
+    assert.equal(response.status, 202)
+
+    const run = await response.json()
+    assert.equal(run.gameCount, 256)
+    assert.deepEqual(run.engines, [])
+
+    const done = await waitForDemoRun(handle.url, run.id)
+    assert.equal(done.completedGameCount, 256)
+    assert.deepEqual(done.standings, [])
+  } finally {
+    await handle.close()
+  }
+})
+
+test('POST /demo-runs rejects game counts outside its bounds', async () => {
+  const handle = await startDemoServer()
+
+  try {
+    for (const gameCount of [0, 257, 1.5, '3', null]) {
+      const response = await post(handle.url, '/demo-runs', { gameCount })
+      assert.equal(response.status, 400)
+      const body = await response.json()
+      assert.match(body.message, /1 to 256/)
+    }
+  } finally {
+    await handle.close()
+  }
+})
+
+test('GET /demo-runs/{id} rejects unknown and malformed ids', async () => {
+  const handle = await startDemoServer()
+
+  try {
+    const unknown = await getJson(handle.url, `/demo-runs/${UNKNOWN_UUID_V7}`)
+    assert.equal(unknown.status, 404)
+    assert.match(unknown.body.message, /was not found/)
+
+    const malformed = await getJson(handle.url, '/demo-runs/not-a-uuid')
+    assert.equal(malformed.status, 400)
+    assert.match(malformed.body.message, /UUIDv7/)
+  } finally {
+    await handle.close()
+  }
+})
+
+test('a demo run leaves retained state and storage untouched', async () => {
+  const storage = createInMemoryStorage()
+  const handle = await startDemoServer({ storage })
+
+  try {
+    const user = await createTestUser(handle)
+    const game = await (await post(handle.url, '/games', {})).json()
+    const sessionResponse = await post(handle.url, '/game-sessions', {
+      userId: user.id,
+      gameId: game.id,
+    })
+    assert.equal(sessionResponse.status, 201)
+
+    const before = {
+      users: await storage.users.load(),
+      games: await storage.games.load(),
+      sessions: await storage.sessions.load(),
+    }
+
+    const run = await (
+      await post(handle.url, '/demo-runs', { gameCount: 1 })
+    ).json()
+    await waitForDemoRun(handle.url, run.id)
+
+    assert.deepEqual(await storage.users.load(), before.users)
+    assert.deepEqual(await storage.games.load(), before.games)
+    assert.deepEqual(await storage.sessions.load(), before.sessions)
+  } finally {
+    await handle.close()
+  }
+})
+
+test('a demo run is forgotten after a restart', async () => {
+  const first = await startDemoServer()
+  let runId
+
+  try {
+    const run = await (
+      await post(first.url, '/demo-runs', { gameCount: 1 })
+    ).json()
+    runId = run.id
+    await waitForDemoRun(first.url, runId)
+  } finally {
+    await first.close()
+  }
+
+  const second = await startTestServer()
+  try {
+    const { status } = await getJson(second.url, `/demo-runs/${runId}`)
+    assert.equal(status, 404)
+  } finally {
+    await second.close()
+  }
+})
+

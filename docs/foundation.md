@@ -5,8 +5,8 @@ The repository uses an `apps/` and `packages/` layout so the browser client and 
 ## What Exists Today
 
 - `apps/pentix-web`: the browser gameplay client — board rendering at the shared board size, the statistics line and pieces statistics popup, the ten-button level selector, rotation/next-piece settings, pause and restart, and the attract demo that auto-plays whenever no player game is running, cycles as one board set (the main panel holds its finished demo until every rail board has ended, or the player presses Space for the next one), keeps the demo engine the player brought to the main board, and starts every demo session with one settled mino on the row before last
-- `apps/pentix-server`: a Node.js server with user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints
-- `packages/pentix-core`: shared user, piece, board, game, game-session, gameplay-engine, demo-engine, and session-log primitives
+- `apps/pentix-server`: a Node.js server with user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints, plus background demo batches (`POST /demo-runs`, `GET /demo-runs/{id}`)
+- `packages/pentix-core`: shared user, piece, board, game, game-session, gameplay-engine, demo-engine, demo-playback, and session-log primitives
 
 ## HTTP Transport
 
@@ -86,8 +86,17 @@ The main board's attract demo opens on `delphi5`. An AI-authored engine follows 
 
 `demo-engines/index.ts` is the catalog: registering a module there adds a rail board through the registry, with no browser-client change. `DemoEngineRegistry` validates each module's shape and kebab-case id, resolves engines by id, lists them in registration order, and exposes `{ id, name, description }` summaries for the UI, which shows an engine's name on its board and reveals the name and description together in a panel opened from the card's `i` icon. An authored plan function is standalone (no imports) and is wrapped by the shared `adaptAuthoredPlan` adapter, which copies the readonly contract inputs, returns the empty log when the authored body throws, and trims the result to a legal action log. The adapter and the built-in engines use `demo-engine-toolkit.ts` for the minimal geometry helpers (`createDemoEngineInput`, `demoCanPlaceAt`, `demoLandingRow`, `actionsToward(orientation, position, column, lastTickMove)`) and the classic planner. The shared brief for AI-authored engines is [demo-engine-task.md](./demo-engine-task.md); it is self-contained, forbids reusing code or context from another chat, asks for a short algorithm comment above the function, lists every catalog block, explains the scoring, and makes the post-drop side-step a last resort for pockets a straight drop cannot reach.
 
+## Demo Playback And Server Demo Runs
+
+`packages/pentix-core/src/demo-play.ts` holds the timer-free demo driver. `createDemoSession({ id, userId, game, level, seedColumn })` opens a demo session the way the attract demo opens one: one settled `1Line` mino on the row before last (a random column, or the supplied one) and the demo's opening level, `DEFAULT_DEMO_STARTING_LEVEL` (`9`). The seed is an ordinary settled cell: it carries a piece key so it survives line-clear rebuilds and adds no score, line, or locked piece.
+
+`createDemoPlayback` returns a state whose `slot` names the next operation, `advanceDemoPlayback` applies exactly that operation, and `playDemoSession` repeats it until the session ends. An action replays one engine log code through `GameSessionEngine`, a tick applies one gravity step, and a hard drop makes the next slot an action again, so the log's single post-drop side-step lands before the locking tick; once the log ends, ticks alone finish the piece. `playDemoSession` returns the final game and session plus `plans` and `planTimeMs`, where the time is measured only around the engine's `plan` calls — playback overhead, engine operations, and ticks are not billed. The browser client still drives its own React hooks; both paths follow the same rules, and the seed helper is shared.
+
+`apps/pentix-server/src/demo-runs.ts` plays batches on demand. `POST /demo-runs` with an optional `{ "gameCount": n }` (default `1`, maximum `256`) queues a run and answers `202` with its snapshot; the run plays in the background, one batch at a time, yielding whenever a piece is planned. Each game creates one `PentixGame` and one demo session per engine in the shared registry, all opened at level `9` and seeded, so the engines face the same piece sequence and the standings compare planning rather than luck. `GET /demo-runs/{id}` reports `queued`, `running`, `completed`, or `failed` plus the standings ordered by points, lines, pieces, shorter planning time, and engine id. Runs are in memory only: they never touch the user, game, or session repositories, the `32` most recent completions stay readable, and a restart forgets them. There is no browser UI for a run.
+
 ## Next Likely Steps
 
 - add PentixGame history models and durable history endpoints
 - add a PostgreSQL repository implementation behind the existing interfaces
 - connect the browser client to `PentixServer` so a played session becomes a retained session with an action log
+- migrate the browser's attract demo onto the shared playback step rules so one module owns the cadence
