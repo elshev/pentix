@@ -16,7 +16,7 @@ export function Controls({ phase, level, dispatch }: ControlsProps) {
   const playDisabled = phase !== 'playing'
   const pauseDisabled = phase !== 'playing' && phase !== 'paused'
   // During a player game the engine owns the level, so only raising it is
-  // allowed; in the demo a level retunes the live session and on the game-over
+  // allowed. In the demo a level retunes the live session and on the game-over
   // screen it starts that level.
   const levelLocked = phase === 'playing' || phase === 'paused'
 

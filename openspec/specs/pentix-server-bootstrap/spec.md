@@ -23,8 +23,8 @@ The scaffold SHALL:
 - live in its own application directory,
 - have a dedicated TypeScript entry point,
 - integrate with repository-level scripts or workspace commands,
-- expose exactly the endpoints defined by the capabilities that own them, without restating their request and response contracts here: `POST /games` and `POST /game-sessions/{id}/next-piece` (`game-lifecycle`), `POST /game-sessions` (`game-session-start`), the gameplay endpoints `POST /game-sessions/{id}/move`, `/rotate`, `/tick`, and `/drop` that map one-to-one to the `GameSessionEngine` operations in `gameplay-mechanics`, `POST /users`, `GET /users`, `GET /users/{id}` (`user-management`), `POST /demo-runs` and `GET /demo-runs/{id}` (`server-demo-run`), and `GET /openapi.json` and `GET /docs` (`api-reference`),
-- serve its HTTP endpoints through an OpenAPI-aware Hono application (`OpenAPIHono`) mounted on a Node.js HTTP server via `@hono/node-server`, delegating routing, JSON serialization, and error handling to Hono, and declaring every route's path parameters, request bodies, and responses with the zod schemas that validate the request and generate the OpenAPI document,
+- expose exactly the endpoints defined by the capabilities that own them, without restating their request and response contracts here. `game-lifecycle` owns `POST /games` and `POST /game-sessions/{id}/next-piece`, and `game-session-start` owns `POST /game-sessions`. `user-management` owns `POST /users`, `GET /users`, and `GET /users/{id}`. `gameplay-mechanics` owns the gameplay endpoints `POST /game-sessions/{id}/move`, `/rotate`, `/tick`, and `/drop`, which map one-to-one to the `GameSessionEngine` operations. `server-demo-run` owns `POST /demo-runs` and `GET /demo-runs/{id}`, and `api-reference` owns `GET /openapi.json` and `GET /docs`,
+- serve its HTTP endpoints through an OpenAPI-aware Hono application (`OpenAPIHono`) mounted on a Node.js HTTP server via `@hono/node-server`. The application delegates routing, JSON serialization, and error handling to Hono. It declares every route's path parameters, request bodies, and responses with the zod schemas that validate the request and generate the OpenAPI document,
 - persist users, games, and sessions through the repositories defined by `storage-repositories`,
 - and remain intentionally limited with respect to multiplayer orchestration and durable history APIs.
 
@@ -80,9 +80,9 @@ The PentixServer application SHALL provide user management, game creation, sessi
 
 ### Requirement: Routes validate their declared request contracts
 
-Every route that accepts a request body SHALL validate that body against the schema declared on the route before its handler runs. A body that fails validation SHALL produce `400 Bad Request` with a `{ message }` body, SHALL NOT invoke the handler, and SHALL leave retained state unchanged; the message SHALL name the offending field's rule, including the accepted `1` to `256` range for a demo run's `gameCount`.
+Every route that accepts a request body SHALL validate that body against the schema declared on the route before its handler runs. A body that fails validation SHALL produce `400 Bad Request` with a `{ message }` body, SHALL NOT invoke the handler, and SHALL leave retained state unchanged. The message SHALL name the offending field's rule, including the accepted `1` to `256` range for a demo run's `gameCount`.
 
-A request whose body is present but whose `Content-Type` is not `application/json` or a `+json` type SHALL be rejected with `415 Unsupported Media Type` and a `{ message }` body. A body larger than 1 MiB SHALL be rejected with `400 Bad Request` and a `{ message }` body, and a body that is not valid JSON SHALL be rejected with `400 Bad Request` and a `{ message }` body. Transport rejections and domain rejections SHALL use the same `{ message }` envelope, and no rejection SHALL change retained state.
+A request whose body is present but whose `Content-Type` is not `application/json` or a `+json` type SHALL be rejected with `415 Unsupported Media Type` and a `{ message }` body. A body larger than 1 MiB SHALL be rejected with `400 Bad Request` and a `{ message }` body. A body that is not valid JSON SHALL be rejected with `400 Bad Request` and a `{ message }` body. Transport rejections and domain rejections SHALL use the same `{ message }` envelope, and no rejection SHALL change retained state.
 
 #### Scenario: An invalid body is rejected before the handler runs
 

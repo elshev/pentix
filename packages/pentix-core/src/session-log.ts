@@ -7,7 +7,7 @@ import { gameSessionEngine } from './session-engine.js'
  * The recorded session action alphabet. Each entry maps an operation to its
  * single-character code:
  *
- * - `T` – tick (a gravity step; the active piece may settle on a tick)
+ * - `T` – tick (a gravity step where the active piece may settle)
  * - `L` – move the active piece left
  * - `R` – move the active piece right
  * - `C` – rotate the active piece clockwise

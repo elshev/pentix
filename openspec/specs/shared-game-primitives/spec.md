@@ -65,7 +65,7 @@ The shared rotation mode behavior SHALL also preserve the Delphi constraints:
 
 The shared game-primitives package SHALL include a constant piece catalog derived from the legacy Delphi `TBlockDesc.SetDefaults` data and its associated offset constants.
 
-Each catalog entry SHALL preserve its stable numeric ID, rotation mode, color, and occupied offsets. Each entry SHALL expose its former legacy display name as its single string `key`; entries SHALL NOT expose a `name` field or the legacy `bi*` key identifiers. The shared key type SHALL be named `PieceKey`, and all catalog lookups, board cells, and session piece references SHALL use these keys.
+Each catalog entry SHALL preserve its stable numeric ID, rotation mode, color, and occupied offsets. Each entry SHALL expose its former legacy display name as its single string `key`. Entries SHALL NOT expose a `name` field or the legacy `bi*` key identifiers. The shared key type SHALL be named `PieceKey`, and all catalog lookups, board cells, and session piece references SHALL use these keys.
 
 | Numeric Id | Key | Rotation Mode | Occupied Offsets |
 | --- | --- | --- | --- |

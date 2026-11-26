@@ -5,7 +5,7 @@ TBD - created by archiving change add-server-play-demo. Update Purpose after arc
 ## Requirements
 ### Requirement: `pentix-core` plays a demo session headlessly
 
-`pentix-core` SHALL provide a demo driver that plays a `PentixGameSession` with a `DemoEngine` without timers, I/O, persistence, or DOM or Node.js APIs. It SHALL expose `createDemoPlayback(options)` returning a playback state, `advanceDemoPlayback(playback)` returning the state after exactly one operation, and `playDemoSession(options)` returning the final result. Options SHALL be the engine, the game, the session, an optional `selectPieceId`, and an optional `clock`. The playback SHALL plan only the current piece, SHALL apply every movement, rotation, hard drop, lock, line clear, score, level, and game-over detection through the shared `GameSessionEngine`, SHALL NOT mutate its arguments, and SHALL stop once the session's `status` is `game-over`. `playDemoSession` SHALL return `{ game, session, planTimeMs, plans }` for the finished session.
+`pentix-core` SHALL provide a demo driver that plays a `PentixGameSession` with a `DemoEngine` without timers, I/O, persistence, or DOM or Node.js APIs. It SHALL expose `createDemoPlayback(options)` returning a playback state, `advanceDemoPlayback(playback)` returning the state after exactly one operation, and `playDemoSession(options)` returning the final result. Options SHALL be the engine, the game, the session, an optional `selectPieceId`, and an optional `clock`. The playback SHALL plan only the current piece. It SHALL apply every movement, rotation, hard drop, lock, line clear, score, level, and game-over detection through the shared `GameSessionEngine`. It SHALL NOT mutate its arguments. It SHALL stop once the session's `status` is `game-over`. `playDemoSession` SHALL return `{ game, session, planTimeMs, plans }` for the finished session.
 
 #### Scenario: A playback plays one session to game over
 
@@ -24,7 +24,7 @@ TBD - created by archiving change add-server-play-demo. Update Purpose after arc
 
 ### Requirement: A demo session starts seeded and at the demo level
 
-`pentix-core` SHALL provide `createDemoSession({ id, userId, game, level, seedColumn })` and `withSeededDemoMino(session, seedColumn)`. A created demo session SHALL be a `createPentixGameSession` result with `statistics.level` set to the supplied level and exactly one settled cell added at row `height - 2` in a column chosen when the session starts, unless `seedColumn` is supplied. The seeded cell SHALL carry the `1Line` piece key so it survives line-clear rebuilds, SHALL NOT increment `statistics.blocks`, `statistics.score`, or `statistics.clearedLines`, and SHALL be an ordinary settled cell that stays until its row is cleared. A session with no board rows or no columns SHALL be returned unchanged.
+`pentix-core` SHALL provide `createDemoSession({ id, userId, game, level, seedColumn })` and `withSeededDemoMino(session, seedColumn)`. A created demo session SHALL be a `createPentixGameSession` result with `statistics.level` set to the supplied level. It SHALL carry exactly one settled cell at row `height - 2`, in a column chosen when the session starts, unless `seedColumn` is supplied. The seeded cell SHALL carry the `1Line` piece key, so it survives line-clear rebuilds. It SHALL NOT increment `statistics.blocks`, `statistics.score`, or `statistics.clearedLines`. It SHALL be an ordinary settled cell that stays until its row is cleared. A session with no board rows or no columns SHALL be returned unchanged.
 
 #### Scenario: A demo session opens with one seed mino
 
@@ -50,7 +50,7 @@ TBD - created by archiving change add-server-play-demo. Update Purpose after arc
 
 ### Requirement: Playback applies one action and one tick in the demo's order
 
-A playback SHALL name the operation its next `advanceDemoPlayback` applies as either `action` or `tick`, and SHALL start on `action`. A tick operation SHALL apply exactly one `GameSessionEngine.tick` and switch the next operation to `action`. An action operation SHALL plan the current piece when no log is cached for the session and `nextPieceIndex`, SHALL apply the next code of that log through `GameSessionEngine` (`move`, `rotate`, or `drop`), and SHALL advance the log position by one. After a `H` code the next operation SHALL be `action` again, so a log's single post-drop `L` or `R` lands before the locking tick; after any other code, and after an exhausted or empty log, the next operation SHALL be `tick`. When the hard drop settled the piece and spawned a new one, the following code SHALL be dropped with the finished piece's log and SHALL NOT steer the spawned piece. An action the board blocks SHALL leave the placement unchanged, and the log SHALL still advance. The playback SHALL keep planning and ticking until the session ends, and SHALL apply no action codes once the log is exhausted.
+A playback SHALL name the operation its next `advanceDemoPlayback` applies as either `action` or `tick`, and SHALL start on `action`. A tick operation SHALL apply exactly one `GameSessionEngine.tick` and switch the next operation to `action`. An action operation SHALL plan the current piece when no log is cached for the session and `nextPieceIndex`. It SHALL apply the next code of that log through `GameSessionEngine` (`move`, `rotate`, or `drop`), and it SHALL advance the log position by one. After a `H` code the next operation SHALL be `action` again. In this way a log's single post-drop `L` or `R` lands before the locking tick. After any other code, and after an exhausted or empty log, the next operation SHALL be `tick`. When the hard drop settled the piece and spawned a new one, the following code SHALL be dropped with the finished piece's log. That code SHALL NOT steer the spawned piece. An action the board blocks SHALL leave the placement unchanged, and the log SHALL still advance. The playback SHALL keep planning and ticking until the session ends, and SHALL apply no action codes once the log is exhausted.
 
 #### Scenario: The action precedes the tick
 
@@ -115,7 +115,7 @@ A playback SHALL name the operation its next `advanceDemoPlayback` applies as ei
 
 ### Requirement: Playback keeps the game's piece sequence
 
-Every operation that returns an extended `PentixGame` SHALL make the playback keep the longer piece list, so the next spawned piece is read from the returned game rather than a regenerated one. The returned result SHALL carry that merged game with the finished session, and the session's `gameId` SHALL be unchanged.
+Every operation that returns an extended `PentixGame` SHALL make the playback keep the longer piece list. In this way the playback reads the next spawned piece from the returned game, not from a regenerated one. The returned result SHALL carry that merged game with the finished session. The session's `gameId` SHALL be unchanged.
 
 #### Scenario: An extended sequence is returned
 

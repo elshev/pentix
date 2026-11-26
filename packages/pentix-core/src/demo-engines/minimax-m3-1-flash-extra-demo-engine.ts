@@ -1,8 +1,10 @@
 /**
- * MiniMax M3.1 Flash in Extra mode (3-4 hours of thinking): a breadth-first search over reachable states that scores each landing with the caller's exact points plus tuned stack-quality weights.
+ * MiniMax M3.1 Flash in Extra mode (3-4 hours of thinking). It runs a
+ * breadth-first search over reachable states. Each landing is scored with the
+ * caller's exact points plus tuned stack-quality weights.
  *
- * Authored from docs/demo-engine-task.md and wrapped by the shared adapter;
- * the planning body is kept as authored.
+ * Authored from docs/demo-engine-task.md and wrapped by the shared adapter.
+ * The planning body is kept as authored.
  */
 import { adaptAuthoredPlan } from '../demo-engine-toolkit.js'
 

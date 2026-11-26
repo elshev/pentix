@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Define the interactive browser gameplay client that renders the shared board at its stored dimensions with `26.4px` minos (`19.2px` on small screens), translates player input into shared `pentix-core` engine operations, runs the gravity loop, shows a title-less statistics row above the board whose `Pieces` counter opens a pieces statistics popup that pauses the game, names the main board's occupant (`Player01` or the demo engine) in a line above those statistics, aligns the gameplay area `4` px past the PENTIX header on each side, places every on-screen control and the level selector below the board, and manages the demo (including its post-game-over delay) / playing / paused / game-over / restart states.
+Define the interactive browser gameplay client. The client renders the shared board at its stored dimensions with `26.4px` minos (`19.2px` on small screens). It translates player input into shared `pentix-core` engine operations and runs the gravity loop. It shows a title-less statistics row above the board. The `Pieces` counter in that row opens a pieces statistics popup that pauses the game. The client names the main board's occupant (`Player01` or the demo engine) in a line above those statistics. It aligns the gameplay area `4` px past the PENTIX header on each side. It places every on-screen control and the level selector below the board. It manages the demo (including its post-game-over delay) / playing / paused / game-over / restart states.
 ## Requirements
 ### Requirement: The browser renders the shared board and active piece
 
-The browser gameplay UI SHALL render the current session's board at its stored `width`-by-`height` dimensions, color each occupied cell by its `pieceKey`, and SHALL overlay the active piece's minos at the cells derived from the active piece origin and its occupied offsets. Each rendered mino SHALL measure `26.4` by `26.4` pixels at desktop widths and `19.2` by `19.2` pixels when the viewport is `900px` wide or narrower, without changing the number of rendered rows or columns.
+The browser gameplay UI SHALL render the current session's board at its stored `width`-by-`height` dimensions. The UI SHALL color each occupied cell by its `pieceKey`. The UI SHALL overlay the active piece's minos at the cells derived from the active piece origin and its occupied offsets. Each rendered mino SHALL measure `26.4` by `26.4` pixels at desktop widths. Each rendered mino SHALL measure `19.2` by `19.2` pixels when the viewport is `900px` wide or narrower. Neither case SHALL change the number of rendered rows or columns.
 
 #### Scenario: The board and spawn piece render on an empty board
 
@@ -38,7 +38,7 @@ The browser gameplay UI SHALL render the current session's board at its stored `
 
 ### Requirement: Player controls map to shared engine operations
 
-The browser gameplay UI SHALL translate player input into the shared `GameSessionEngine` operations — `move`, `rotate`, and `drop` (hard drop). The client has no manual soft drop: a piece descends only through gravity ticks and hard drops. Keyboard keys and on-screen buttons SHALL trigger the same operations. The client plays its session locally and SHALL NOT call `PentixServer`, so it records no session action log; the log defined by `session-replay` covers sessions played through the REST gameplay endpoints.
+The browser gameplay UI SHALL translate player input into the shared `GameSessionEngine` operations — `move`, `rotate`, and `drop` (hard drop). The client has no manual soft drop: a piece descends only through gravity ticks and hard drops. Keyboard keys and on-screen buttons SHALL trigger the same operations. The client plays its session locally and SHALL NOT call `PentixServer`. The client records no session action log. The log defined by `session-replay` covers sessions played through the REST gameplay endpoints.
 
 #### Scenario: Move controls shift the active piece
 
@@ -70,7 +70,7 @@ The browser gameplay UI SHALL translate player input into the shared `GameSessio
 
 ### Requirement: Gravity advances the active piece on a level-based schedule
 
-During active play, the UI SHALL invoke `engine.tick` on an interval that matches the Delphi schedule `1000 − 100 × level` milliseconds — `1000` ms at level `0` down to `100` ms at level `9` — so the duration decreases as the session's level increases. The loop SHALL stop while paused or game-over.
+During active play, the UI SHALL invoke `engine.tick` on an interval that matches the Delphi schedule `1000 − 100 × level` milliseconds. The interval is `1000` ms at level `0` down to `100` ms at level `9`. The duration therefore decreases as the session's level increases. The loop SHALL stop while paused or game-over.
 
 #### Scenario: A tick advances the active piece
 
@@ -93,7 +93,7 @@ During active play, the UI SHALL invoke `engine.tick` on an interval that matche
 
 ### Requirement: The HUD shows live statistics and an optional next piece
 
-The UI SHALL present an untitled statistics panel above the board that displays the session's score, cleared lines, and locked-piece count (presented as "Pieces" and read from `session.statistics.blocks`) on a single horizontal line, updating after every state change. Above that statistics line the panel SHALL render one name line naming the current occupant of the main board: `Player01` while a player game is in progress (`playing`, `paused`, or `game-over`) and the display name of the demo engine currently assigned to the main board (`Random` for `random`, `Delphi 5` for `delphi5`) while the main board runs its attract demo (`demo` or `demo-over`), including during the post-game-over demo delay. The name line SHALL be read from the same game state as the phase and the session and SHALL NOT be editable. The panel SHALL NOT render a "MainStatistics" title or any other panel heading, and SHALL NOT render a level line, level value, or secondary statistics panel beneath it. The locked-piece counter SHALL be a drop-down toggle that opens the pieces statistics popup described below. When the next-piece preview setting is enabled, the next piece SHALL be shown in the statistics line as the leftmost item, and SHALL render inside a fixed-size frame so its dimensions do not change between pieces and never resize the panel. The preview minos SHALL scale with the board minos by the same 20%. The preview SHALL be disabled on first load (the default is off) and SHALL be toggleable by the player at any phase.
+The UI SHALL present an untitled statistics panel above the board. This panel SHALL show the session's score, cleared lines, and locked-piece count on a single horizontal line. The panel labels the locked-piece count "Pieces" and reads it from `session.statistics.blocks`. The panel SHALL update after every state change. Above that statistics line the panel SHALL render one name line. This name line names the current occupant of the main board. The line reads `Player01` while a player game is in progress (`playing`, `paused`, or `game-over`). It reads the name of the demo engine currently assigned to the main board. This happens while the main board runs its attract demo (`demo` or `demo-over`), including the post-game-over demo delay. The demo engine name is `Random` for `random` and `Delphi 5` for `delphi5`. The name line SHALL be read from the same game state as the phase and the session and SHALL NOT be editable. The panel SHALL NOT render a "MainStatistics" title or any other panel heading. The panel SHALL NOT render a level line, level value, or secondary statistics panel beneath it. The locked-piece counter SHALL be a drop-down toggle that opens the pieces statistics popup described below. When the next-piece preview setting is enabled, the statistics line SHALL show the next piece as the leftmost item. The preview SHALL render inside a fixed-size frame. The frame dimensions SHALL NOT change between pieces, and the preview SHALL never resize the panel. The preview minos SHALL scale with the board minos by the same 20%. The preview SHALL be disabled on first load (the default is off) and SHALL be toggleable by the player at any phase.
 
 #### Scenario: The HUD reflects the session snapshot
 
@@ -163,7 +163,7 @@ The browser UI SHALL NOT reimplement movement, rotation, locking, scoring, line 
 
 ### Requirement: The game-over overlay shows restart and demo hotkeys as tooltips
 
-On game-over, the game-over overlay SHALL show a title and "Play again"/"Demo" buttons whose hotkeys are exposed as popup tooltips (hover tooltips) rather than inline text on the buttons. The overlay SHALL NOT include the statistics popup or a keyboard hint row; statistics are shown in the pieces statistics popup instead.
+On game-over, the game-over overlay SHALL show a title and "Play again"/"Demo" buttons. The overlay exposes the button hotkeys as popup tooltips (hover tooltips) rather than inline text on the buttons. The overlay SHALL NOT include the statistics popup or a keyboard hint row. The pieces statistics popup shows the statistics instead.
 
 #### Scenario: The buttons expose hotkeys as tooltips
 
@@ -175,7 +175,7 @@ On game-over, the game-over overlay SHALL show a title and "Play again"/"Demo" b
 
 ### Requirement: Game-over actions wait for a short cooldown
 
-After a player game reaches game-over, the browser gameplay UI SHALL immediately render the game-over overlay and keep the final locked board visible, but SHALL ignore requests to start a new player game (`start`/`restart`), to enter the demo, or to start a game from a level button until a fixed cooldown (`700` ms) has elapsed. The cooldown SHALL be enforced wherever the client leaves the game-over phase, so keyboard hotkeys, the overlay buttons, and the level buttons are blocked equally. The "Play again" and "Demo" buttons SHALL render disabled while the cooldown runs and SHALL enable once it elapses. The cooldown SHALL also delay the attract demo's automatic restart: a demo that reaches game-over keeps its final board for the same delay before the next demo starts.
+After a player game reaches game-over, the browser gameplay UI SHALL immediately render the game-over overlay. The UI SHALL keep the final locked board visible. The UI SHALL ignore some requests until a fixed cooldown (`700` ms) has elapsed. The ignored requests are a new player game (`start`/`restart`), entry to the demo, and a game start from a level button. The cooldown SHALL apply wherever the client leaves the game-over phase. The keyboard hotkeys, the overlay buttons, and the level buttons are therefore blocked equally. The "Play again" and "Demo" buttons SHALL render disabled while the cooldown runs and SHALL enable once it elapses. The cooldown SHALL also delay the attract demo's automatic restart. A demo that reaches game-over keeps its final board for the same delay before the next demo starts.
 
 #### Scenario: Stray input right after game over is ignored
 
@@ -208,7 +208,7 @@ After a player game reaches game-over, the browser gameplay UI SHALL immediately
 
 ### Requirement: The page header shows only the PENTIX wordmark
 
-The browser UI page header SHALL render only the `PENTIX` wordmark and SHALL NOT render an eyebrow line, a tagline heading, or an explanatory paragraph. The wordmark SHALL be rendered larger than any other page text so it remains the single header element, and the header SHALL stay compact — roughly `46px` tall at desktop widths — so it never pushes the board out of view.
+The browser UI page header SHALL render only the `PENTIX` wordmark and SHALL NOT render an eyebrow line, a tagline heading, or an explanatory paragraph. The wordmark SHALL be rendered larger than any other page text, so it remains the single header element. The header SHALL stay compact — roughly `46px` tall at desktop widths — so it never pushes the board out of view.
 
 #### Scenario: The header renders a single, compact wordmark
 
@@ -220,17 +220,17 @@ The browser UI page header SHALL render only the `PENTIX` wordmark and SHALL NOT
 
 ### Requirement: The level buttons select the level, start a game, or retune the demo
 
-The browser UI SHALL render a level selector of the ten levels `0`-`9` directly beneath the `Hard drop` control, highlighting the current session level (`session.statistics.level` while a player game is playing or paused, otherwise the configured starting level) and rendering nothing else in that selector — no label and no incremental level control. The configured starting level SHALL default to `9` and SHALL always be clamped to `0`-`9`.
+The browser UI SHALL render a level selector of the ten levels `0`-`9` directly beneath the `Hard drop` control. The selector SHALL highlight the current session level. The current session level is `session.statistics.level` while a player game is playing or paused. Otherwise it is the configured starting level. The selector SHALL render nothing else — no label and no incremental level control. The configured starting level SHALL default to `9` and SHALL always be clamped to `0`-`9`.
 
 Level selection SHALL behave as follows:
 
-- A session created by the shared engine opens at level `1`; the client applies the configured starting level to the session it creates, so a first game starts at the configured level.
-- While a player game is playing or paused, only the levels **above** the current session level SHALL be enabled. Choosing one raises the live session level through the client's session snapshot and becomes the configured starting level; the current and lower levels SHALL be disabled, because the engine raises the level every `30` locked pieces and lowering it would rewind that progression.
-- During the attract demo, activating a level SHALL set the configured starting level and apply it to the live demo session so its gravity speed changes immediately; during the demo's post-game-over delay it SHALL set the configured starting level used by the next demo.
-- In the game-over phase, activating a level SHALL start a fresh player game at that level, and SHALL be ignored while the game-over cooldown is still running.
-- The `+` (or `=`) and `-` (or `_`) keys SHALL step the level by one under exactly the same rules as the buttons, so `+` raises a running game while `-` is refused there. The `0`-`9` keys SHALL select the matching level while the client is not in the playing phase; while a player game is playing those digits drive gameplay instead (`5`/`8` rotate, `7`/`9` move).
+- A session created by the shared engine opens at level `1`. The client applies the configured starting level to the session it creates, so a first game starts at the configured level.
+- While a player game is playing or paused, only the levels **above** the current session level SHALL be enabled. Choosing one raises the live session level through the client's session snapshot. It also becomes the configured starting level. The current and lower levels SHALL be disabled, because the engine raises the level every `30` locked pieces and lowering it would rewind that progression.
+- During the attract demo, activating a level SHALL set the configured starting level. It SHALL also apply that level to the live demo session, so its gravity speed changes immediately. During the demo's post-game-over delay, activating a level SHALL set the configured starting level used by the next demo.
+- In the game-over phase, activating a level SHALL start a fresh player game at that level. That activation SHALL be ignored while the game-over cooldown is still running.
+- The `+` (or `=`) and `-` (or `_`) keys SHALL step the level by one. They follow exactly the same rules as the buttons, so `+` raises a running game while `-` is refused there. The `0`-`9` keys SHALL select the matching level while the client is not in the playing phase. While a player game is playing, those digits drive gameplay instead (`5`/`8` rotate, `7`/`9` move).
 
-The engine owns level progression: it raises the level every `30` locked pieces up to `9` and never lowers it. The client only sets the level of the session it creates and may raise a live level; it SHALL NOT lower a level the engine has already raised.
+The engine owns level progression. It raises the level every `30` locked pieces up to `9` and never lowers it. The client only sets the level of the session it creates and may raise a live level. It SHALL NOT lower a level the engine has already raised.
 
 #### Scenario: The current level is highlighted under Hard drop
 
@@ -288,7 +288,7 @@ The engine owns level progression: it raises the level every `30` locked pieces 
 
 - **GIVEN** an active demo session whose level the player changed
 - **WHEN** the player starts a player game, or the demo auto-restarts after its delay
-- **THEN** the new session begins at the changed starting level
+- **THEN** the new session starts at the changed starting level
 
 #### Scenario: Choosing a level after game over starts that level
 
@@ -306,7 +306,7 @@ The engine owns level progression: it raises the level every `30` locked pieces 
 
 ### Requirement: The attract demo restarts after the game-over delay
 
-When the main board's demo session reaches `status` `'game-over'`, the browser UI SHALL keep that demo's final board visible, SHALL stop advancing it, SHALL NOT present the player-facing game-over overlay, and SHALL hold it until every demo board's session has also reached `'game-over'` or a swap brings an `active` session to the main board. Once the whole board set is over, the UI SHALL keep the finished boards visible for the same game-over delay (`GAME_OVER_COOLDOWN_MS`, `700` ms) used after a player game, measured from the last board's end, SHALL stop advancing the demo during that delay, and SHALL then start a fresh demo cycle — a fresh main demo session and a fresh session for every demo board, all from one new `PentixGame` — without any player action. The finished demo SHALL also accept a manual restart: pressing Space while the main board holds a finished demo SHALL start that fresh demo cycle at once, without waiting for the other boards or the delay, while Enter SHALL still start a player game. Every demo restart SHALL use the currently configured starting level, and the main board SHALL keep the demo engine it was playing.
+When the main board's demo session reaches `status` `'game-over'`, the browser UI SHALL keep that demo's final board visible. The UI SHALL stop advancing it. The UI SHALL NOT present the player-facing game-over overlay. The UI SHALL hold the final board until every demo board's session has also reached `'game-over'` or a swap brings an `active` session to the main board. Once the whole board set is over, the UI SHALL keep the finished boards visible for the same game-over delay as a player game. That delay is `GAME_OVER_COOLDOWN_MS`, or `700` ms, measured from the last board's end. The UI SHALL stop advancing the demo during that delay. The UI SHALL then start a fresh demo cycle without any player action. That cycle is a fresh main demo session and a fresh session for every demo board, all from one new `PentixGame`. The finished demo SHALL also accept a manual restart. Pressing Space while the main board holds a finished demo SHALL start that fresh demo cycle at once. That restart does not wait for the other boards or the delay. Enter SHALL still start a player game. Every demo restart SHALL use the currently configured starting level, and the main board SHALL keep the demo engine it was playing.
 
 #### Scenario: The demo pauses on its final board
 
@@ -349,18 +349,18 @@ When the main board's demo session reaches `status` `'game-over'`, the browser U
 
 ### Requirement: The pieces statistics popup shows the session's action and per-piece counts
 
-The browser UI SHALL render the engine-owned action counts and the per-piece lock counts in a pieces statistics popup that opens beneath the statistics line when the player activates the Pieces drop-down toggle and closes when it is activated again; the popup SHALL be closed on first render. While the popup is open the main board SHALL be paused: its gravity and the attract demo stop advancing, the demo boards keep advancing, and the paused overlay SHALL NOT be shown for a player game that the popup itself paused; closing the popup SHALL resume a game it paused and SHALL leave an already-paused game paused.
+The browser UI SHALL render the engine-owned action counts and the per-piece lock counts in a pieces statistics popup. The popup opens beneath the statistics line when the player activates the Pieces drop-down toggle. The popup closes when the player activates the toggle again. The popup SHALL be closed on first render. While the popup is open, the main board SHALL be paused. Its gravity and the attract demo stop advancing, and the demo boards keep advancing. The paused overlay SHALL NOT be shown for a player game that the popup itself paused. Closing the popup SHALL resume a game it paused and SHALL leave an already-paused game paused.
 
-The popup SHALL show a combined move count read from `session.statistics.actions.moves` (left and right moves summed by the engine and shown without separate left/right values), a rotate count read from `session.statistics.actions.rotates`, and a drop count read from `session.statistics.actions.drops`, plus a counter for each of the 29 catalog pieces read from `session.statistics.pieceCounts`. Each per-piece counter SHALL draw a small version of the piece whose minos are 5×5 pixels with the count beside it, and the counters SHALL wrap onto as many centred rows as the popup width requires so that no counter overlaps another.
+The popup SHALL show a combined move count read from `session.statistics.actions.moves`. The engine sums the left and right moves and shows them without separate left/right values. The popup SHALL also show a rotate count read from `session.statistics.actions.rotates` and a drop count read from `session.statistics.actions.drops`. It SHALL show a counter for each of the 29 catalog pieces, read from `session.statistics.pieceCounts`. Each per-piece counter SHALL draw a small version of the piece whose minos are 5×5 pixels, with the count beside it. The counters SHALL wrap onto as many centred rows as the popup width requires, so that no counter overlaps another.
 
-Every rendered value SHALL come from the current `PentixGameSession` snapshot — the client SHALL NOT keep its own copies of the counters — so the popup updates in every phase, including the attract demo, and a freshly started session shows zeroed values without any client-side reset step.
+Every rendered value SHALL come from the current `PentixGameSession` snapshot, and the client SHALL NOT keep its own copies of the counters. The popup therefore updates in every phase, including the attract demo. A freshly started session shows zeroed values without any client-side reset step.
 
 #### Scenario: The popup opens from the Pieces toggle and is closed by default
 
 - **GIVEN** the gameplay screen
 - **WHEN** it first renders
 - **THEN** the pieces statistics popup is not rendered
-- **AND** activating the Pieces toggle renders the popup beneath the statistics line with a combined move count, a rotate count, and a drop count taken from the session statistics
+- **AND** activating the Pieces toggle renders the popup beneath the statistics line. The popup shows a combined move count, a rotate count, and a drop count taken from the session statistics
 - **AND** activating the toggle again hides it
 
 #### Scenario: Opening the popup pauses a playing game
@@ -421,7 +421,7 @@ Every rendered value SHALL come from the current `PentixGameSession` snapshot �
 
 ### Requirement: The lifecycle spans demo, demo-over, playing, paused, and game-over
 
-The UI SHALL present a demo state on first load, transition to playing when the player starts by creating a fresh `PentixGame` and `PentixGameSession`, support pause and resume, hold a finished attract demo in a `demo-over` state until the whole board set has finished and its restart delay has run, and enter a game-over state when `session.status` becomes `'game-over'`. On game-over the UI SHALL preserve the final locked board (drawing no active, failed spawn piece) and SHALL offer both a fresh player game and re-entry to the demo.
+The UI SHALL present a demo state on first load. The UI SHALL transition to playing when the player starts, by creating a fresh `PentixGame` and `PentixGameSession`. The UI SHALL support pause and resume. It SHALL hold a finished attract demo in a `demo-over` state until the whole board set has finished and its restart delay has run. It SHALL enter a game-over state when `session.status` becomes `'game-over'`. On game-over the UI SHALL preserve the final locked board and draw no active, failed spawn piece. The UI SHALL offer both a fresh player game and re-entry to the demo.
 
 #### Scenario: The client starts in demo mode on first load
 
@@ -461,7 +461,7 @@ The UI SHALL present a demo state on first load, transition to playing when the 
 
 ### Requirement: The gameplay screen pairs the board-width main column with a demo-board rail
 
-The browser gameplay UI SHALL arrange the statistics line, the (popup) pieces statistics, the board, the on-screen gameplay buttons, the level buttons, the settings controls, and the status line in one main column whose width equals the board width, and SHALL render the demo boards in a rail to the right of that column, starting at the same top edge as the main column so the rail's first row is level with the statistics line. The rail SHALL lay the demo boards out in a grid of four slots per row and up to three rows — twelve slots — filling from its top-left corner, and SHALL reserve that space even while fewer boards are rendered, so the planned twelve-board wall needs no layout change. The on-screen gameplay buttons (`◀`, `⟳ Rotate`, `▶`, `Hard drop`, `Pause`/`Resume`, `Restart`) and the settings controls (`Rotation: clockwise|anticlockwise`, `Next piece: on|off`) SHALL be rendered beneath the board, together with the level buttons directly beneath `Hard drop`.
+The browser gameplay UI SHALL arrange one main column whose width equals the board width. The main column holds the statistics line, the (popup) pieces statistics, the board, and the status line. It also holds the on-screen gameplay buttons, the level buttons, and the settings controls. The UI SHALL render the demo boards in a rail to the right of that column. The rail starts at the same top edge as the main column, so its first row is level with the statistics line. The rail SHALL lay the demo boards out in a grid of four slots per row and up to three rows — twelve slots. The grid fills from the rail's top-left corner. The rail SHALL reserve that space even while fewer boards are rendered, so the planned twelve-board wall needs no layout change. The UI SHALL render the on-screen gameplay buttons beneath the board. The buttons are `◀`, `⟳ Rotate`, `▶`, `Hard drop`, `Pause`/`Resume`, and `Restart`. The settings controls (`Rotation: clockwise|anticlockwise`, `Next piece: on|off`) SHALL render beneath the board as well. The level buttons SHALL render directly beneath `Hard drop`.
 
 #### Scenario: Statistics stack above the board
 
@@ -510,7 +510,7 @@ The browser gameplay UI SHALL arrange the statistics line, the (popup) pieces st
 
 ### Requirement: The gameplay area aligns with the PENTIX header
 
-The browser gameplay UI SHALL place the gameplay area so that its left edge sits exactly `4` px to the left of the PENTIX header's left edge and its right edge exactly `4` px to the right of the header's right edge. The main column — the statistics panel, the board, and the controls beneath it — SHALL start at that left edge, so the board sits as far left as the header allows, and the demo-board rail SHALL fill the remaining width up to that right edge. Where the viewport leaves no room for the overhang, it SHALL be clipped rather than scrolled, so the page never gains a horizontal scrollbar. At the stacking breakpoint the rail SHALL move beneath the main column while the same left and right boundaries apply.
+The browser gameplay UI SHALL place the left edge of the gameplay area `4` px to the left of the PENTIX header's left edge. It SHALL place the right edge `4` px to the right of the header's right edge. The main column SHALL start at that left edge. The main column holds the statistics panel, the board, and the controls beneath it. The board therefore sits as far left as the header allows. The demo-board rail SHALL fill the remaining width up to that right edge. Where the viewport leaves no room for the overhang, the UI SHALL clip it rather than scroll it. The page therefore never gains a horizontal scrollbar. At the stacking breakpoint the rail SHALL move beneath the main column while the same left and right boundaries apply.
 
 #### Scenario: The board starts 4px left of the header
 

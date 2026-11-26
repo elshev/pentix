@@ -48,7 +48,7 @@ The opening state SHALL use:
 - the game piece at sequence index `1` as one next-piece preview,
 - and `nextPieceIndex` equal to `1`.
 
-#### Scenario: A started session begins on an empty default board
+#### Scenario: A started session starts on an empty default board
 
 - **GIVEN** a caller starts a new `PentixGameSession` using a default game
 - **WHEN** the returned opening board and statistics are inspected
@@ -71,7 +71,7 @@ The opening state SHALL use:
 - **AND** the active piece uses rotation angle `0` and origin row `1`, column `floor(width / 2)`
 
 ### Requirement: PentixServer can start a game session through REST
-`PentixServer` SHALL expose `POST /game-sessions` as the supported endpoint for creating and retaining a new `PentixGameSession`. The required JSON `userId` field SHALL identify a retained `User`. The optional JSON `gameId` field SHALL select the parent game. An omitted or null `gameId`, or an empty/whitespace-only `gameId`, SHALL cause a new game to be initialized; a supplied valid ID SHALL reuse the existing game.
+`PentixServer` SHALL expose `POST /game-sessions` as the supported endpoint for creating and retaining a new `PentixGameSession`. The required JSON `userId` field SHALL identify a retained `User`. The optional JSON `gameId` field SHALL select the parent game. An omitted or null `gameId`, or an empty/whitespace-only `gameId`, SHALL cause a new game to be initialized. A supplied valid ID SHALL reuse the existing game.
 
 The endpoint SHALL:
 

@@ -26,7 +26,7 @@ import type {
 } from './repositories.js'
 
 export interface SqliteStorageOptions {
-  /** Path of the SQLite file; created (with its parent directory) when missing. */
+  /** Path of the SQLite file. The store creates the file and its parent directory when they are missing. */
   readonly dataFile: string
 }
 
@@ -312,7 +312,7 @@ function readSessionLog(row: GameSessionRow): SessionActionLog {
 
 /**
  * Durable storage backed by a single SQLite file. Users, games, and sessions
- * live in separate tables; a game's piece sequence is one ordered JSON field.
+ * live in separate tables. A game's piece sequence is one ordered JSON field.
  */
 export function createSqliteStorage(
   options: SqliteStorageOptions,

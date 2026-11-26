@@ -31,7 +31,7 @@ export const DEFAULT_DEMO_RUN_GAME_COUNT = 1
 /** How many completed runs stay readable before the oldest is dropped. */
 export const MAX_RETAINED_DEMO_RUNS = 32
 
-/** The synthetic user id of a demo session; demo sessions are never retained. */
+/** The synthetic user id of a demo session. Demo sessions are never retained. */
 export const DEMO_RUN_USER_ID = 'demo'
 
 export type DemoRunStatus = 'queued' | 'running' | 'completed' | 'failed'
@@ -64,7 +64,7 @@ export interface DemoRunSnapshot {
 export interface DemoRunServiceOptions {
   /** Piece selector applied to every demo game, as the lifecycle does. */
   readonly selectPieceId?: PieceIdSelector
-  /** The competing engines; defaults to every registered demo engine. */
+  /** The competing engines. Defaults to every registered demo engine. */
   readonly engines?: readonly DemoEngine[]
   /** The level every demo session opens at. */
   readonly startingLevel?: number

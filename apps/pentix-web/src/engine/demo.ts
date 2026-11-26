@@ -51,7 +51,7 @@ export function resolveDemoPlan(
 
 /**
  * The next action in the plan, or `null` when the log is exhausted. A character
- * outside the demo alphabet is treated as no action; the paired tick still runs.
+ * outside the demo alphabet is treated as no action. The paired tick still runs.
  */
 export function nextDemoAction(plan: DemoPlan): DemoAction | null {
   const code = plan.actions[plan.index]

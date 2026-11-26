@@ -31,7 +31,7 @@ function resolveSwaggerUiAssets(): string {
   }
 
   throw new Error(
-    'swagger-ui-dist is not installed or its assets cannot be located; run npm install before starting PentixServer.',
+    'swagger-ui-dist is not installed or its assets cannot be located. Run npm install before starting PentixServer.',
   )
 }
 

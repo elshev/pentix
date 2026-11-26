@@ -6,7 +6,7 @@ scores every action and lock, and your plan decides where each piece goes.
 Everything you need is in this document: no other file, repository, package, or
 documentation is required. Answer from this document alone — do not reuse code,
 notes, or context from another chat or a previous answer. Return the function
-with one short comment above it that describes your algorithm; do not return
+with one short comment above it that describes your algorithm. Do not return
 metadata, a file name, or a module.
 
 ## The game
@@ -129,7 +129,7 @@ The shapes, in the orientation the piece appears in (rows top to bottom):
 5RMir   ..X.
         XX@X
 ```
-The table above is the authoritative list; the drawing is only a quick
+The table above is the authoritative list. The drawing is only a quick
 reference.
 
 A **rotation** turns the piece a quarter turn clockwise (`C`) or anticlockwise
@@ -159,8 +159,8 @@ Three parameters, one result.
 The visible board, including settled cells but **not** the falling piece.
 
 - `board` is an array of rows: `board[row][column]`.
-- `board.length` is the board height; `board[0].length` is the board width.
-- `1` means the cell is occupied by a settled cell; `0` means it is free.
+- `board.length` is the board height. `board[0].length` is the board width.
+- `1` means the cell is occupied by a settled cell. `0` means it is free.
 - Rows and columns are 0-based from the top-left corner.
 
 Example of a `6 x 4` board (6 rows, 4 columns), with a settled cell at the
@@ -194,7 +194,7 @@ const piece: { row: number; column: number }[][] = [
   the last orientation it wraps back to `piece[0]`.
 - `A` goes one step the other way through the same list.
 - A piece that cannot rotate has exactly one orientation. Others have two or
-  four; use `piece.length` rather than assuming four.
+  four. Use `piece.length` rather than assuming four.
 - The rotation point itself is the cell `{ row: 0, column: 0 }` in every
   orientation. A cell at `{ row: -1, column: 0 }` is one row above it.
 
@@ -217,7 +217,7 @@ Cells above the board (negative rows) are allowed: pieces enter from the top.
 
 ### The result
 
-A **string**. It is not an object and not an array; for example `"LLCH"`.
+A **string**. It is not an object and not an array. For example `"LLCH"`.
 
 Every character is one action:
 
@@ -231,8 +231,8 @@ Every character is one action:
 
 Return the empty string `""` when you have no actions for this piece.
 
-Only these five characters are accepted; any other character in the string is
-ignored.
+Only these five characters are accepted. The game ignores any other character
+in the string.
 
 ## How the caller executes your string
 
@@ -254,16 +254,16 @@ Your string is read in order:
 2. Apply one tick: the piece moves down one row, or locks when it cannot.
 3. Repeat until the string ends. Then ticks continue alone until the piece locks.
 
-At the last position, where the piece can no longer move down, one more action is
-still applied: it happens before the tick that locks the piece. That action is
-your last chance to shift or rotate the piece.
+At the last position, the piece can no longer move down. One more action is
+still applied there, and it happens before the tick that locks the piece. That
+action is your last chance to shift or rotate the piece.
 
 Consequences you must respect:
 
 - Each action costs one tick, so the piece also falls while you steer it.
 - An impossible action (for example, moving into a wall) is ignored, but its tick
   still happens.
-- `H` moves the piece to its lowest possible position; the next tick locks it
+- `H` moves the piece to its lowest possible position. The next tick locks it
   there, unless the action after `H` moved it sideways.
 - If the piece locks before your string ends, the remaining characters are
   discarded. Put the important actions first.
@@ -286,8 +286,9 @@ while it turns. Prefer the fewest rotations that reach the orientation you want.
 ### Rotate before you move
 
 A rotation turns the piece around its rotation point. When the turned shape would
-overlap a wall or a settled cell, the game shifts the piece sideways, or up when
-it is against the top, until it fits. This is a "wall kick". The plan still runs,
+overlap a wall or a settled cell, the game shifts the piece sideways until it
+fits. It shifts the piece up instead when the piece is against the top. This is a
+"wall kick". The plan still runs,
 but the piece can end up a column away from where you aimed.
 
 So rotate first, then move:
@@ -301,10 +302,10 @@ So rotate first, then move:
 ## The last-tick move after the hard drop (pockets only)
 
 **End the log at `H` whenever your chosen placement is reachable by a straight
-drop in the target column.** Do not append a lateral move in that case: the demo
+drop in the target column.** Do not append a lateral move in that case. The demo
 replays one action per tick, so `H` followed by `L` or `R` makes the piece land
-and then walk sideways — it costs a row of fall, it looks wrong, and the same
-placement was already reachable before the drop.
+and then walk sideways. That walk costs a row of fall and it looks wrong. The
+same placement was already reachable before the drop.
 
 Some placements genuinely cannot be reached by a straight drop at all: they sit
 under an overhang, with a settled cell above them. For exactly those placements —
@@ -315,9 +316,9 @@ such a pocket:
 
 - The drop happens first, so the piece comes to rest as low as it can in the
   column you steered to.
-- The `L` or `R` is the action after the drop, and the piece has not locked yet:
-  it moves one column at that same row, into the pocket if the pocket is beside
-  it.
+- The `L` or `R` is the action after the drop, and the piece has not locked yet.
+  The piece moves one column at that same row, into the pocket if the pocket is
+  beside it.
 - The next tick then locks the piece in its new column, or lets it fall one more
   row when the side-step uncovered a drop.
 - Nothing else may follow: no rotation, no second drop, and never more than one
@@ -337,7 +338,7 @@ under the settled mino.
   row 21    .  *  .  .      * = where the piece should end up
 ```
 
-A straight drop in column `7` would stop on top of the mino at row `19`, so the
+A straight drop in column `7` would stop on top of the mino at row `19`. So the
 piece has to drop in column `8` and step left on the last tick:
 
 1. `R` — move from column `6` to `7`, then a tick.
@@ -369,65 +370,65 @@ applies. The score is the goal, so plan the piece that scores most.
 | Emptying the board | `1000` extra |
 
 `minos` is the block's size, `1` to `5`. `dropRow` is the row of the rotation
-point at the moment `H` is applied, `row` is a cleared row (`0` at the top), and
+point at the moment `H` is applied. `row` is a cleared row (`0` at the top).
 `clearedIndex` counts the rows this lock clears, from the top one (`1`) down.
 Every term except the `1000` bonus is multiplied by the level.
 
 - **Drop the piece as early as you can.** The drop score counts the rows between
-  the piece and the bottom, so a piece dropped near the top is worth far more
+  the piece and the bottom. So a piece dropped near the top is worth far more
   than one that has already fallen. Every action costs one tick and therefore
-  one row — even an action the board blocks — so keep the plan short: reach the
-  placement with as few rotations and moves as it takes, then `H`.
-- A drop with no free row below scores nothing for the fall; the piece just
+  one row, even an action that the board blocks. So keep the plan short. Reach
+  the placement with as few rotations and moves as it takes, then `H`.
+- A drop with no free row below scores nothing for the fall. The piece just
   locks. The lock score still applies.
 - Larger blocks earn more: a five-mino block is worth five times a single mino,
   both per lock and per row of drop.
-- A cleared row scores by its height: `height − row` is the number of rows from
-  that row down to the floor, so a line cleared higher up is worth more than one
+- A cleared row scores by its height. `height − row` is the number of rows from
+  that row down to the floor. So a line cleared higher up is worth more than one
   cleared on the floor. Clearing several rows with one piece also multiplies the
-  later ones (the second cleared row ×2, the third ×3, and so on), so a double or
+  later ones (the second cleared row ×2, the third ×3, and so on). So a double or
   triple clear is worth much more than the same rows cleared one at a time.
 - Emptying the whole board by clearing the bottom row adds a flat `1000`.
 - The level is the level the caller chose, raised by one every 30 locked pieces
   up to `9`. It multiplies everything, so a long, clean game is worth far more
   than a short one.
 
-Example, on an empty `12 x 22` board at level `1`: emitting `H` for the
-single-mino `1Line` from row `1` scores `floor(1 × 21 ÷ 10) = 2` for the drop,
-and locking it scores another `1`, so the piece is worth `3` points. The same
+Example, on an empty `12 x 22` board at level `1`. Emitting `H` for the
+single-mino `1Line` from row `1` scores `floor(1 × 21 ÷ 10) = 2` for the drop.
+Locking it scores another `1`, so the piece is worth `3` points. The same
 piece dropped from row `11` scores `1` for the fall, and a piece that is already
 resting scores nothing for the fall.
 
 ## What a good plan looks like
 
-The score is the goal, and three things you control decide it: how high the piece
-is when you drop it, how many rows the placement clears, and how long the game
-keeps running. So keep settled cells low, avoid covered holes (an empty cell with
-an occupied cell above it in the same column), and prefer placements that
-complete rows. Any strategy is acceptable as long as it returns a valid action
-string; simple heuristics are welcome.
+The score is the goal, and three things you control decide it. They are how high
+the piece is when you drop it, how many rows the placement clears, and how long
+the game keeps running. So keep settled cells low, and avoid covered holes (an
+empty cell with an occupied cell above it in the same column). Also prefer
+placements that complete rows. Any strategy is acceptable as long as it returns
+a valid action string. Simple heuristics are welcome.
 
 ## Rules for your function
 
 You **can**:
 
-- read `board`, `piece`, and `position`;
-- compute with plain TypeScript in the function body;
-- call `Math.random()` if your strategy is random;
-- define small helper functions inside your answer;
+- read `board`, `piece`, and `position`.
+- compute with plain TypeScript in the function body.
+- call `Math.random()` if your strategy is random.
+- define small helper functions inside your answer.
 - return any number of actions, including none.
 
 You **cannot**:
 
-- mutate `board`, `piece`, or `position`;
-- keep state between calls — each call plans a new piece from scratch;
-- use files, network, timers, the DOM, Node.js APIs, `import`, or `require`;
-- depend on data from previous pieces or on anything outside the arguments;
-- reuse code, notes, or context from another chat or from a previous answer — the function must be produced from this document alone;
-- return a character other than `L`, `R`, `C`, `A`, or `H`;
-- return an array or an object instead of a string;
-- return more than one action after `H`, or anything other than `L`/`R` there;
-- write JavaScript instead of TypeScript, or leave a parameter unannotated;
+- mutate `board`, `piece`, or `position`.
+- keep state between calls — each call plans a new piece from scratch.
+- use files, network, timers, the DOM, Node.js APIs, `import`, or `require`.
+- depend on data from previous pieces or on anything outside the arguments.
+- reuse code, notes, or context from another chat or from a previous answer — the function must be produced from this document alone.
+- return a character other than `L`, `R`, `C`, `A`, or `H`.
+- return an array or an object instead of a string.
+- return more than one action after `H`, or anything other than `L`/`R` there.
+- write JavaScript instead of TypeScript, or leave a parameter unannotated.
 - throw for a valid board, piece, and position.
 
 The function must be pure: the same arguments and the same `Math.random()`
@@ -435,10 +436,11 @@ sequence must produce the same string.
 
 ## Answer format
 
-Return exactly one **TypeScript** function, named `plan`, preceded by a short
-**comment block** that describes your algorithm — a few lines saying what the
-plan enumerates, how it scores a placement, and why it ends where it does — with
-the three parameters described above, each annotated, and a `string` return type:
+Return exactly one **TypeScript** function, named `plan`. Put a short
+**comment block** above it that describes your algorithm. The comment says in a
+few lines what the plan enumerates, how it scores a placement, and why it ends
+where it does. The function takes the three parameters described above, each
+annotated, and it returns `string`:
 
 ```ts
 // Describe your algorithm here in a few lines.
@@ -449,15 +451,16 @@ function plan(
 ): string
 ```
 
-No imports, no exports, no metadata (the caller supplies the engine name and
-description itself), and no explanation after the function — the algorithm
-comment above it is the only prose the answer may carry. JavaScript answers are
+Do not add imports, exports, or metadata. The caller supplies the engine name
+and description itself. Do not add an explanation after the function. The
+algorithm comment above it is the only prose that the answer may carry.
+JavaScript answers are
 not accepted: the function is compiled by a strict TypeScript build, so annotate
 the parameters and the return type. Put the whole answer in a single code block.
 
 ## Example answer
 
-This example is deliberately simple: it drops the piece straight down in the
+This example is deliberately simple. It drops the piece straight down in the
 reachable column whose landing row is lowest, without rotating, and adds no
 last-tick move. It is valid, not optimal. Write your own strategy.
 
@@ -531,7 +534,7 @@ function plan(
 - The string contains only `L`, `R`, `C`, `A`, and `H`.
 - It returns `""` when it has no actions.
 - Its log ends at `H` whenever a straight drop reaches the chosen placement.
-- Any action after `H` is a single `L` or `R`, placed last, and it appears only
+- Any action after `H` is a single `L` or `R`, placed last. It appears only
   when a straight drop cannot reach the placement (a pocket under an overhang).
 - It plans for points: it drops the piece early and prefers placements that clear
   rows.

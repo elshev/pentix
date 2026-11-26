@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Define the shared gameplay rules the engine implements for the active piece: movement, rotation with near-wall kicks, gravity ticks that lock and clear, hard drops, scoring, level progression, spawn, and game over.
+Define the shared gameplay rules that the engine implements for the active piece. These rules cover movement, rotation with near-wall kicks, gravity ticks that lock and clear, hard drops, scoring, level progression, spawn, and game over.
 
 ## Requirements
 ### Requirement: The active piece can move left and right
-The shared `pentix-core` engine SHALL provide a move operation that shifts the active piece one column left or right. The move SHALL succeed only when every occupied cell of the shifted piece is within the board and unoccupied; otherwise the session SHALL be returned unchanged. A successful move SHALL increment `statistics.actions.moves` by one; a rejected move SHALL leave every statistic unchanged.
+The shared `pentix-core` engine SHALL provide a move operation that shifts the active piece one column left or right. The move SHALL succeed only when every occupied cell of the shifted piece is within the board and unoccupied. Otherwise the session SHALL be returned unchanged. A successful move SHALL increment `statistics.actions.moves` by one. A rejected move SHALL leave every statistic unchanged.
 
 #### Scenario: A piece moves into empty space
 
@@ -31,7 +31,7 @@ The shared `pentix-core` engine SHALL provide a move operation that shifts the a
 - **AND** `statistics.actions.moves` is unchanged
 
 ### Requirement: The active piece rotates with Delphi near-wall kicks
-The shared engine SHALL provide a rotate operation that applies the next 90-degree step: clockwise subtracts `90` and counterclockwise adds `90`, normalized to the piece's rotation mode. If the rotated piece overlaps a wall, the engine SHALL apply a Delphi near-wall kick (right collision → column `width - maxX - 1`; left collision → column `-minX`; top collision → row `-minY`, where `minX`/`maxX`/`minY` are the rotated offsets' extremes). If the rotated piece still overlaps a wall or a buried cell, the session SHALL be returned unchanged. A rotation that changes the piece, including one that requires a kick, SHALL increment `statistics.actions.rotates` by one; a rejected rotation SHALL leave every statistic unchanged.
+The shared engine SHALL provide a rotate operation that applies the next 90-degree step. Clockwise subtracts `90` and counterclockwise adds `90`, normalized to the piece's rotation mode. If the rotated piece overlaps a wall, the engine SHALL apply a Delphi near-wall kick. For a right collision, the engine SHALL set the origin column to `width - maxX - 1`. For a left collision, the engine SHALL set the origin column to `-minX`. For a top collision, the engine SHALL set the origin row to `-minY`. In those formulas, `minX`, `maxX`, and `minY` are the extremes of the rotated offsets. If the rotated piece still overlaps a wall or a buried cell, the session SHALL be returned unchanged. A rotation that changes the piece, including one that requires a kick, SHALL increment `statistics.actions.rotates` by one. A rejected rotation SHALL leave every statistic unchanged.
 
 #### Scenario: A piece rotates in open space
 
@@ -56,7 +56,7 @@ The shared engine SHALL provide a rotate operation that applies the next 90-degr
 - **AND** `statistics.actions.rotates` is unchanged
 
 ### Requirement: A tick steps gravity and settles a resting piece
-The shared engine SHALL provide a tick that moves the active piece down one row when the cells below are empty and in bounds. When the piece cannot move down, the engine SHALL lock it into the board, award the lock score, clear full lines, update score and level, and spawn the next piece.
+The shared engine SHALL provide a tick that moves the active piece down one row when the cells below are empty and in bounds. When the piece cannot move down, the engine SHALL lock it into the board and award the lock score. The engine SHALL then clear full lines, update score and level, and spawn the next piece.
 
 #### Scenario: A tick moves the piece down
 
@@ -74,7 +74,7 @@ The shared engine SHALL provide a tick that moves the active piece down one row 
 - **AND** the preview cursor advances
 
 ### Requirement: A drop moves to the lowest position and defers locking
-The shared engine SHALL provide a drop that awards the drop score and moves the active piece to its lowest in-bounds resting position WITHOUT locking it. Move and rotate SHALL remain available after a drop, and the piece SHALL lock on a subsequent tick when it can no longer move down.
+The shared engine SHALL provide a drop that awards the drop score. The drop SHALL move the active piece to its lowest in-bounds resting position WITHOUT locking it. Move and rotate SHALL remain available after a drop, and the piece SHALL lock on a subsequent tick when it can no longer move down.
 
 #### Scenario: A drop settles the piece without locking it
 
@@ -91,7 +91,7 @@ The shared engine SHALL provide a drop that awards the drop score and moves the 
 - **AND** the returned session's active piece equals the previous next piece at the default spawn origin
 
 ### Requirement: Locking buries the piece and scores by piece points
-When a piece locks, the shared engine SHALL bury its cells into the board and add `points × level` to the score, where `points` is the piece's mino count and `level` is the session's level.
+When a piece locks, the shared engine SHALL bury its cells into the board and add `points × level` to the score. In that expression, `points` is the piece's mino count and `level` is the session's level.
 
 #### Scenario: A lock adds the bury score
 
@@ -100,7 +100,7 @@ When a piece locks, the shared engine SHALL bury its cells into the board and ad
 - **THEN** `statistics.score` increases by `4`
 
 ### Requirement: Full lines are cleared and rows shift down
-When locking completes one or more rows, the shared engine SHALL remove those rows and shift every row above them down, preserving each surviving cell's column.
+When locking completes one or more rows, the shared engine SHALL remove those rows. The engine SHALL shift every row above them down, and it SHALL preserve each surviving cell's column.
 
 #### Scenario: A completed line is removed
 
@@ -111,7 +111,7 @@ When locking completes one or more rows, the shared engine SHALL remove those ro
 - **AND** `statistics.clearedLines` increases by one
 
 ### Requirement: Clearing lines scores by row distance with an empty-field bonus
-For each cleared line in a single settle, the shared engine SHALL add `lineIndex × (10 + (height − row)) × level` to the score, where `lineIndex` is the 1-based position of the line within the settle, `row` is the cleared row's index, and `height` is the board height. If a settle clears the bottom row and leaves the board empty, the engine SHALL add an additional `1000` points.
+For each cleared line in a single settle, the shared engine SHALL add `lineIndex × (10 + (height − row)) × level` to the score. In that expression, `lineIndex` is the 1-based position of the line within the settle. `row` is the cleared row's index, and `height` is the board height. If a settle clears the bottom row and leaves the board empty, the engine SHALL add an additional `1000` points.
 
 #### Scenario: Clearing a line scores by its row
 
@@ -127,7 +127,7 @@ For each cleared line in a single settle, the shared engine SHALL add `lineIndex
 - **THEN** `statistics.score` increases by an additional `1000`
 
 ### Requirement: Dropping scores by fall distance
-The shared engine SHALL add `points × (height − originRow) × level ÷ 10` (integer division) to the score when a drop is performed, where `originRow` is the active piece's origin row at the moment of the drop.
+The shared engine SHALL add `points × (height − originRow) × level ÷ 10` (integer division) to the score when it drops the active piece. `originRow` is the active piece's origin row at the moment of the drop.
 
 #### Scenario: A drop awards fall-distance score
 
@@ -146,7 +146,7 @@ The shared engine SHALL track the number of locked pieces as `blocks` and SHALL 
 - **AND** `statistics.blocks` becomes `30`
 
 ### Requirement: Spawn uses the default origin and detects game over
-On spawn, the shared engine SHALL set the active piece to the previous next piece at rotation angle `0` and origin row `1`, column `floor(width / 2)`, SHALL advance the preview cursor, and SHALL extend the game sequence when needed. If the spawned piece overlaps a buried cell or is out of bounds, the engine SHALL set `status` to `'game-over'`.
+On spawn, the shared engine SHALL set the active piece to the previous next piece at rotation angle `0` and origin row `1`, column `floor(width / 2)`. The engine SHALL advance the preview cursor and SHALL extend the game sequence when needed. If the spawned piece overlaps a buried cell or is out of bounds, the engine SHALL set `status` to `'game-over'`.
 
 #### Scenario: A new piece spawns at the default origin
 
@@ -171,7 +171,7 @@ The shared engine SHALL return a `'game-over'` session unchanged for move, rotat
 - **THEN** the returned session equals the input session
 
 ### Requirement: The engine records action and per-piece statistics
-The shared engine SHALL record gameplay statistics inside the session snapshot. `statistics.actions` SHALL contain `moves`, `rotates`, and `drops` counters: `moves` SHALL count successful left and right moves without distinguishing direction, `rotates` SHALL count successful rotations in either direction, and `drops` SHALL count hard-drop operations. A hard drop SHALL be counted whether it moves the active piece down or settles it immediately. `statistics.pieceCounts` SHALL hold a lock count for every `PIECE_CATALOG` piece key and SHALL increment only the count of the piece that locks during a settle. Gravity ticks SHALL NOT be counted as actions. Rejected operations and operations on a session whose status is `'game-over'` SHALL NOT change any counter. A newly created session SHALL start with all counters at zero and with a `0` entry for each of the 29 catalog piece keys.
+The shared engine SHALL record gameplay statistics inside the session snapshot. `statistics.actions` SHALL contain `moves`, `rotates`, and `drops` counters. `moves` SHALL count successful left and right moves without distinguishing direction. `rotates` SHALL count successful rotations in either direction. `drops` SHALL count hard-drop operations. A hard drop SHALL be counted whether it moves the active piece down or settles it immediately. `statistics.pieceCounts` SHALL hold a lock count for every `PIECE_CATALOG` piece key and SHALL increment only the count of the piece that locks during a settle. Gravity ticks SHALL NOT be counted as actions. Rejected operations and operations on a session whose status is `'game-over'` SHALL NOT change any counter. A newly created session SHALL start with all counters at zero and with a `0` entry for each of the 29 catalog piece keys.
 
 #### Scenario: Successful moves accumulate a single move count
 

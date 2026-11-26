@@ -1,8 +1,10 @@
 /**
- * Claude Sonnet 5.5 in Extra mode (40 min of thinking): exact-replay reachability, a twelve-feature board weight vector, and a one-piece lookahead over every catalog block.
+ * Claude Sonnet 5.5 in Extra mode (40 min of thinking). It replays every
+ * reachable placement exactly. It scores each placement with a twelve-feature
+ * board weight vector and a one-piece lookahead over every catalog block.
  *
- * Authored from docs/demo-engine-task.md and wrapped by the shared adapter;
- * the planning body is kept as authored.
+ * Authored from docs/demo-engine-task.md and wrapped by the shared adapter.
+ * The planning body is kept as authored.
  */
 import { adaptAuthoredPlan } from '../demo-engine-toolkit.js'
 
@@ -173,8 +175,9 @@ function authoredPlan(
   }
   let lastEmpty = false
 
-  // Scores a lock position. Returns the heuristic value; the immediate part and (if asked) the board
-  // after clears are left in outImm / outGrid. The grid g is restored before returning.
+  // Scores a lock position. Returns the heuristic value. The immediate part
+  // and (if asked) the board after clears are left in outImm / outGrid. The
+  // grid g is restored before returning.
   function evaluate(g: number[], s: Shape, row: number, col: number, drop: number, wantGrid: boolean): number {
     const n = s.r.length
     for (let i = 0; i < n; i += 1) {

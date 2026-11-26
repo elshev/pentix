@@ -1,11 +1,11 @@
 # storage-repositories Specification
 
 ## Purpose
-Define the engine-agnostic persistence contract for users, games, and sessions, with durable SQLite and non-durable in-memory implementations that `PentixServer` reloads at startup and writes to on every successful state change.
+Define the engine-agnostic persistence contract for users, games, and sessions. The contract has durable SQLite and non-durable in-memory implementations. `PentixServer` reloads them at startup and writes to them on every successful state change.
 ## Requirements
 ### Requirement: Engine-agnostic repository interfaces for each entity
 
-The server SHALL define repository interfaces for users, games, and sessions that expose create, read, and (where needed) save operations without referencing any specific storage engine. Application code SHALL depend only on these interfaces.
+The server SHALL define repository interfaces for users, games, and sessions. Those interfaces expose create, read, and save operations, where needed, without referencing any specific storage engine. Application code SHALL depend only on these interfaces.
 
 #### Scenario: Application code depends on interfaces, not engines
 
@@ -32,7 +32,7 @@ The system SHALL store users, games, and sessions as separate collections. A gam
 
 ### Requirement: SQLite and in-memory implementations share the interface
 
-A SQLite-backed implementation SHALL persist each entity to durable storage and reload it, and an in-memory implementation SHALL provide the same interface for tests and non-durable runs.
+A SQLite-backed implementation SHALL persist each entity to durable storage and reload it. An in-memory implementation SHALL provide the same interface for tests and non-durable runs.
 
 #### Scenario: SQLite round-trips entities
 

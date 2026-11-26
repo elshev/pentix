@@ -1,8 +1,10 @@
 /**
- * DeepSeek v4 Pro Max (12 min of thinking): exact replay of every orientation, column, and post-drop side-step, ranking placements by immediate points minus holes, height, and bumpiness.
+ * DeepSeek v4 Pro Max (12 min of thinking). It replays every orientation,
+ * column, and post-drop side-step exactly. It ranks placements by immediate
+ * points minus holes, height, and bumpiness.
  *
- * Authored from docs/demo-engine-task.md and wrapped by the shared adapter;
- * the planning body is kept as authored.
+ * Authored from docs/demo-engine-task.md and wrapped by the shared adapter.
+ * The planning body is kept as authored.
  */
 import { adaptAuthoredPlan } from '../demo-engine-toolkit.js'
 
@@ -16,7 +18,7 @@ export const description =
 // rotations: k `C`s or `len-k` `A`s), a target column (direct lateral moves),
 // and an optional single side-step right after the hard drop. Replay each
 // candidate's action string exactly like the caller does: apply one action, then
-// one tick; the piece locks one tick after it first fails to move down,
+// one tick. The piece locks one tick after it first fails to move down,
 // impossible moves are ignored, and rotations that collide are kicked sideways
 // (tried in place, then -1, +1, -2, +2 columns). Score the resulting board:
 // line clears (index x (10 + height - row)), +1000 for emptying the board,

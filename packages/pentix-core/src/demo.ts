@@ -448,7 +448,7 @@ export function planDemoDestinationForOrientations(
 
     for (let column = 0; column < width; column += 1) {
       // `demoLandingRow` returns null when the column's shaft is blocked at the
-      // top, otherwise the lowest reachable row; every row above it down to the
+      // top, otherwise the lowest reachable row. Every row above it down to the
       // spawn top is also reachable, matching the Delphi `CheckUp` scan.
       const landingRow = demoLandingRow(board, cells, column)
       if (landingRow === null) {
@@ -497,7 +497,7 @@ export function planDemoDestinationForOrientations(
   }
 
   // Iterate in a stable order (bottom-up by row, then left-to-right by column,
-  // then by orientation); indistinguishable tied candidates are picked at random.
+  // then by orientation). Indistinguishable tied candidates are picked at random.
   candidates.sort(
     (a, b) =>
       b.row - a.row || a.column - b.column || a.orientation - b.orientation,
@@ -539,7 +539,7 @@ export function canDemoPieceMoveDown(session: PentixGameSession): boolean {
  * at the same row. A side-step that keeps the piece falling is scored at its
  * further landing, so it is prioritized over one that merely parks the piece. The
  * better placement is taken only when it beats the resting placement on the shared
- * ordering (score, then the deterministic tie-breaks); an indistinguishable
+ * ordering (score, then the deterministic tie-breaks). An indistinguishable
  * side-step is not taken, which keeps the demo from shuffling back and forth.
  * The returned destination is the side-step column, so the ordinary steering
  * dispatches exactly that one step.
@@ -572,7 +572,7 @@ export function planDemoLastTickMove(
     }
 
     const candidate: DemoChoice = {
-      // The last-tick move keeps the current orientation; the index only
+      // The last-tick move keeps the current orientation. The index only
       // orders candidates inside the destination planner.
       orientation: 0,
       landingColumn: origin.column + shift,

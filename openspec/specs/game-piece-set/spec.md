@@ -5,7 +5,7 @@ Define the available piece set carried by a `PentixGame` and the engine's fixed 
 ## Requirements
 ### Requirement: A game exposes an available piece set
 
-The engine SHALL associate every `PentixGame` with a set of available pieces, identified by their stable numeric catalog IDs, and SHALL draw the game's piece sequence only from that set.
+The engine SHALL associate every `PentixGame` with a set of available pieces, identified by their stable numeric catalog IDs. It SHALL draw the game's piece sequence only from that set.
 
 #### Scenario: The sequence stays within the set
 
@@ -26,7 +26,7 @@ The engine SHALL provide a private, non-exported factory that builds a game from
 
 ### Requirement: The engine exposes Pentix and Tetris presets
 
-The engine SHALL expose public factories `createPentixGame` and `createTetrisGame`. `createPentixGame` SHALL use the full catalog and the Pentix board size; `createTetrisGame` SHALL use the 4-mino (tetromino) piece set and the Tetris board size. Both SHALL delegate to the private arbitrary builder.
+The engine SHALL expose public factories `createPentixGame` and `createTetrisGame`. `createPentixGame` SHALL use the full catalog and the Pentix board size. `createTetrisGame` SHALL use the 4-mino (tetromino) piece set and the Tetris board size. Both SHALL delegate to the private arbitrary builder.
 
 #### Scenario: Starting a Pentix game uses the full catalog
 

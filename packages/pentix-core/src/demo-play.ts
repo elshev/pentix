@@ -107,7 +107,7 @@ export interface DemoSessionOptions {
   readonly id: string
   readonly userId: string
   readonly game: PentixGame
-  /** The level the session opens at; the browser demo starts at `9`. */
+  /** The level the session opens at. The browser demo starts at `9`. */
   readonly level: number
   /** Fixes the seed column instead of choosing one at random. */
   readonly seedColumn?: number
@@ -150,13 +150,13 @@ export interface DemoPlaybackOptions {
   readonly session: PentixGameSession
   /** Piece selector used when a spawn extends the game's sequence. */
   readonly selectPieceId?: PieceIdSelector
-  /** Millisecond clock used to time `plan` calls; defaults to `performance.now()`. */
+  /** Millisecond clock used to time `plan` calls. Defaults to `performance.now()`. */
   readonly clock?: () => number
 }
 
 /**
  * One session's demo playback. `slot` names the operation that comes next, and
- * the cached log belongs to `plannedPieceIndex`; a spawned piece replaces it.
+ * the cached log belongs to `plannedPieceIndex`. A spawned piece replaces it.
  */
 export interface DemoPlayback {
   readonly engine: DemoEngine
@@ -166,7 +166,7 @@ export interface DemoPlayback {
   /** The cached log of the piece at `plannedPieceIndex`. */
   readonly actions: DemoActionLog
   readonly actionIndex: number
-  /** The `nextPieceIndex` the cached log was planned for; `-1` until planned. */
+  /** The `nextPieceIndex` the cached log was planned for. `-1` until planned. */
   readonly plannedPieceIndex: number
   readonly plans: number
   readonly planTimeMs: number
@@ -224,7 +224,7 @@ export function createDemoPlayback(
 
 /**
  * Plans the current piece when the cached log belongs to another piece. Only the
- * engine's `plan` call is timed; building the planning input happens outside the
+ * engine's `plan` call is timed. Building the planning input happens outside the
  * measured window.
  */
 function planIfNeeded(playback: DemoPlayback): DemoPlayback {
@@ -288,7 +288,7 @@ function applyDemoAction(
 
 /**
  * Applies exactly the operation named by `slot` and returns the next state.
- * A tick moves the piece down or locks it; an action replays one log code. After
+ * A tick moves the piece down or locks it. An action replays one log code. After
  * a hard drop the next operation is an action again, so the log's post-drop
  * side-step lands before the locking tick. An exhausted log applies no action and
  * the paired tick still runs. A session that is no longer active is left as it is
