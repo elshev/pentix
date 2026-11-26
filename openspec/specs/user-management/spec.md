@@ -24,11 +24,11 @@ The shared `pentix-core` package SHALL define a JSON-serializable `User` with a 
 ### Requirement: PentixServer manages users through REST
 `PentixServer` SHALL expose `POST /users` to create and retain a user, `GET /users` to list retained users, and `GET /users/{id}` to fetch a single user.
 
-`POST /users` SHALL require a JSON object body with a non-empty string `name`, return `201 Created` with the user JSON (`id` and `name`) on success, and return `400 Bad Request` for invalid JSON, a non-object body, or a missing, empty, or non-string `name`.
+`POST /users` SHALL require a JSON object body with a non-empty string `name`. It SHALL return `201 Created` with the user JSON (`id` and `name`) on success. It SHALL return `400 Bad Request` for invalid JSON, a non-object body, or a missing, empty, or non-string `name`.
 
 `GET /users` SHALL return `200 OK` with an object whose `users` array contains all retained users, and SHALL return an empty `users` array when none exist.
 
-`GET /users/{id}` SHALL return `200 OK` with the user JSON for a known user, `400 Bad Request` for a malformed id, and `404 Not Found` for a well-formed id that does not identify a retained user.
+`GET /users/{id}` SHALL return `200 OK` with the user JSON for a known user. It SHALL return `400 Bad Request` for a malformed id. It SHALL return `404 Not Found` for a well-formed id that does not identify a retained user.
 
 #### Scenario: A client creates a user
 

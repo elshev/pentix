@@ -172,7 +172,7 @@ export const DemoRunSnapshotSchema = z
   })
   .openapi('DemoRunSnapshot') satisfies z.ZodType<DemoRunSnapshot>
 
-/** An object body that must be present; used by the required-body routes. */
+/** An object body that must be present. The required-body routes use it. */
 export const CreateUserRequestSchema = z
   .object(
     {

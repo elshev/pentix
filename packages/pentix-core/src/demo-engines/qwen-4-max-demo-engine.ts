@@ -1,8 +1,10 @@
 /**
- * Qwen 4 in Max mode (Chat): replays every orientation, column, and side-step candidate and ranks them by clear and drop points minus survival penalties.
+ * Qwen 4 in Max mode (Chat). It replays every orientation, column, and
+ * side-step candidate. It ranks the candidates by clear and drop points minus
+ * survival penalties.
  *
- * Authored from docs/demo-engine-task.md and wrapped by the shared adapter;
- * the planning body is kept as authored.
+ * Authored from docs/demo-engine-task.md and wrapped by the shared adapter.
+ * The planning body is kept as authored.
  */
 import { adaptAuthoredPlan } from '../demo-engine-toolkit.js'
 

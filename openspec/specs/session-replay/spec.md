@@ -1,11 +1,11 @@
 # session-replay Specification
 
 ## Purpose
-Define how a `PentixGameSession` is recorded as a compact action log (each played piece's numeric ID plus its ordered actions) and reconstructed by replaying those actions through the deterministic engine, without storing every intermediate board state.
+Define how the system records a `PentixGameSession` as a compact action log. Each played piece's numeric ID plus its ordered actions form that log. The system reconstructs the session by replaying those actions through the deterministic engine, without storing every intermediate board state.
 ## Requirements
 ### Requirement: A session action alphabet defines recorded play
 
-The system SHALL define a session action alphabet: `T` for a gravity tick, `L` for left, `R` for right, `C` for clockwise rotation, `A` for anticlockwise rotation, and `H` for hard drop. Soft drop SHALL NOT be represented.
+The system SHALL define a session action alphabet. `T` stands for a gravity tick, `L` for left, and `R` for right. `C` stands for clockwise rotation, `A` for anticlockwise rotation, and `H` for hard drop. Soft drop SHALL NOT be represented.
 
 #### Scenario: The alphabet covers every recorded operation
 
@@ -26,7 +26,7 @@ A session's recorded representation SHALL consist of the active piece's numeric 
 
 ### Requirement: Replay reconstructs the session state
 
-Given a game's piece sequence and a session's action log, the system SHALL reproduce the session state by applying the recorded actions in order through the deterministic engine.
+Given a game's piece sequence and a session's action log, the system SHALL reproduce the session state. The system SHALL apply the recorded actions in order through the deterministic engine.
 
 #### Scenario: Replay matches live play
 
@@ -36,9 +36,9 @@ Given a game's piece sequence and a session's action log, the system SHALL repro
 
 ### Requirement: The server records every gameplay request in the session action log
 
-`PentixServer` SHALL append one action code to the session's `SessionActionLog` for every gameplay request it accepts: `L` or `R` for a move, `C` or `A` for a rotation (clockwise or anticlockwise), `T` for a gravity tick, and `H` for a hard drop. A request the engine rejects SHALL still be recorded, because replaying it is a no-op and the log must stay an exact transcript of what the player did.
+`PentixServer` SHALL append one action code to the session's `SessionActionLog` for every gameplay request it accepts. The code SHALL be `L` or `R` for a move, and `C` or `A` for a rotation (clockwise or anticlockwise). A `T` code SHALL record a gravity tick, and an `H` code SHALL record a hard drop. The server SHALL still record a request that the engine rejects. Replaying that request is a no-op, and the log must stay an exact transcript of what the player did.
 
-The codes SHALL be grouped under the numeric ID of the piece that was active when the request arrived, and a new entry SHALL start when that piece ID changes. The log SHALL carry the `sessionId`, `userId`, and `gameId` of the session it belongs to and SHALL be persisted through the session repository on every gameplay request, so the log — not a per-action board snapshot — is the retained form of the session. On startup the server SHALL rebuild each retained session by replaying its log through the deterministic shared engine against the parent game's piece sequence, extending that sequence when the log needs pieces the game does not yet hold.
+The codes SHALL be grouped under the numeric ID of the piece that was active when the request arrived. A new entry SHALL start when that piece ID changes. The log SHALL carry the `sessionId`, `userId`, and `gameId` of the session it belongs to. The server SHALL persist the log through the session repository on every gameplay request. In this way the log — not a per-action board snapshot — is the retained form of the session. On startup the server SHALL rebuild each retained session by replaying its log through the deterministic shared engine against the parent game's piece sequence. The server SHALL extend that sequence when the log needs pieces the game does not yet hold.
 
 #### Scenario: A move appends its direction code
 

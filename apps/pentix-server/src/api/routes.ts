@@ -321,7 +321,7 @@ const getDemoRunRoute = createRoute({
   },
 })
 
-/** Every API route, in registration order; the table below pairs them with handlers. */
+/** Every API route, in registration order. The table below pairs them with handlers. */
 export const PENTIX_ROUTE_CONFIGS = [
   createGameRoute,
   createGameSessionRoute,

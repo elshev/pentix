@@ -5,7 +5,7 @@ TBD - created by archiving change add-server-play-demo. Update Purpose after arc
 ## Requirements
 ### Requirement: The server starts demo batches on demand
 
-`PentixServer` SHALL expose `POST /demo-runs` that starts a demo batch in the background and answers `202 Accepted` with the new run's snapshot. The request body SHALL be optional and SHALL accept one field, `gameCount`, which is the number of games the batch plays. An absent field SHALL mean `1`. A supplied value SHALL be an integer from `1` to `256`; any other value — zero, a negative number, a fraction, a string, `null`, or more than `256` — SHALL be rejected with `400 Bad Request` and a message that names the accepted range. The endpoint SHALL NOT play a game before it responds, SHALL NOT require a user, game, or session id, and SHALL have no UI counterpart.
+`PentixServer` SHALL expose `POST /demo-runs` that starts a demo batch in the background and answers `202 Accepted` with the new run's snapshot. The request body SHALL be optional and SHALL accept one field, `gameCount`, which is the number of games the batch plays. An absent field SHALL mean `1`. A supplied value SHALL be an integer from `1` to `256`. The server SHALL reject any other value with `400 Bad Request` and a message that names the accepted range. Zero, a negative number, a fraction, a string, `null`, or a value more than `256` are such other values. The endpoint SHALL NOT play a game before it responds, SHALL NOT require a user, game, or session id, and SHALL have no UI counterpart.
 
 #### Scenario: A run starts with the default game count
 
@@ -39,7 +39,7 @@ TBD - created by archiving change add-server-play-demo. Update Purpose after arc
 
 ### Requirement: A batch plays one session per registered engine per game
 
-Each game of a run SHALL create one `PentixGame` through the server's id and piece-selection seams and SHALL create one demo session for every engine registered in the shared demo engine registry, in registration order. All sessions of one game SHALL belong to that one game, so engines at the same `nextPieceIndex` hold the same pieces; a playback that extends the sequence SHALL extend it for the engines that follow. Each session SHALL be created through the shared demo-session factory, seeded with one settled mino and opened at the run's demo starting level. The run's engine set SHALL be fixed when the run starts and reported in the snapshot, so a registry change during a batch does not add or remove a competitor mid-run.
+Each game of a run SHALL create one `PentixGame` through the server's id and piece-selection seams. The game SHALL create one demo session for every engine registered in the shared demo engine registry, in registration order. All sessions of one game SHALL belong to that one game. In this way the engines at the same `nextPieceIndex` hold the same pieces. A playback that extends the sequence SHALL extend it for the engines that follow. Each session SHALL be created through the shared demo-session factory, seeded with one settled mino and opened at the run's demo starting level. The run's engine set SHALL be fixed when the run starts and reported in the snapshot. In this way a registry change during a batch does not add or remove a competitor mid-run.
 
 #### Scenario: Every registered engine competes
 
@@ -167,7 +167,7 @@ Once a run completes, `standings` SHALL list every engine that started the run e
 
 ### Requirement: Batch games follow the shared demo rules
 
-Every session of a run SHALL be played by the shared demo playback in `pentix-core`: the engine plans once per spawned piece, its log is replayed one action per beat with a tick between actions, a hard drop restarts the beat for its post-drop code, and ticks continue after the log ends until the piece locks or the session ends. Sessions SHALL open with the demo's seeded mino and the run's demo starting level, and gameplay SHALL NOT be re-implemented in the server. `PentixServer` SHALL expose the demo starting level and the competing engine list as server-context options so a test can pin them.
+The shared demo playback in `pentix-core` SHALL play every session of a run. In that playback, the engine plans once per spawned piece. The playback replays the log one action per beat, with a tick between actions. A hard drop restarts the beat for its post-drop code. Ticks continue after the log ends until the piece locks or the session ends. Sessions SHALL open with the demo's seeded mino and the run's demo starting level. The server SHALL NOT re-implement gameplay. `PentixServer` SHALL expose the demo starting level and the competing engine list as server-context options, so a test can pin them.
 
 #### Scenario: A batch session starts like the browser demo
 
@@ -186,7 +186,7 @@ Every session of a run SHALL be played by the shared demo playback in `pentix-co
 
 ### Requirement: Runs live in memory only
 
-A demo run SHALL NOT use the user, game, or session repositories. It SHALL NOT create, update, or delete any retained user, game, or session, whatever storage the server was started with. Finished runs SHALL be retained in server memory, bounded to the `32` most recent completions, and a run SHALL be forgotten when the server process restarts. A run id that was evicted or forgotten SHALL answer `404`.
+A demo run SHALL NOT use the user, game, or session repositories. It SHALL NOT create, update, or remove any retained user, game, or session, whatever storage the server was started with. Finished runs SHALL be retained in server memory, bounded to the `32` most recent completions, and a run SHALL be forgotten when the server process restarts. A run id that was evicted or forgotten SHALL answer `404`.
 
 #### Scenario: Retained state is untouched
 

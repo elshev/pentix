@@ -38,7 +38,7 @@ export function buildRenderGrid(session: PentixGameSession): RenderCell[][] {
     })),
   )
 
-  // A game-over session keeps its final locked board; the failed spawn piece is
+  // A game-over session keeps its final locked board. The failed spawn piece is
   // not drawn so the last board state stays visible.
   if (session.status !== 'game-over') {
     for (const { row, column } of getActiveCells(session)) {

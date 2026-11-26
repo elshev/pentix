@@ -32,7 +32,7 @@ export function mapKeyToAction(
     }
   }
 
-  // Digits pick the starting level before a game; while playing, numeric keys
+  // Digits pick the starting level before a game. While playing, numeric keys
   // drive movement (7 left, 9 right) and rotation (5 or 8).
   if (DIGIT_PATTERN.test(key)) {
     if (!playing) {

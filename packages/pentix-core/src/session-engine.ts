@@ -112,7 +112,7 @@ function recordAction(
   })
 }
 
-/** Counts one effective operation; rejected operations must not call this. */
+/** Counts one effective operation. Rejected operations must not call this. */
 function withRecordedAction(
   session: PentixGameSession,
   action: RecordedAction,

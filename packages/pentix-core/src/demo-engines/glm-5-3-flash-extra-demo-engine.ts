@@ -1,8 +1,10 @@
 /**
- * GLM 5.3 Flash in Extra mode (15 min of thinking): an exhaustive candidate search with kick-free rotation placement, ranked by immediate points minus holes, bumpiness, and stack penalties.
+ * GLM 5.3 Flash in Extra mode (15 min of thinking). It runs an exhaustive
+ * candidate search with kick-free rotation placement. It ranks each candidate
+ * by immediate points minus holes, bumpiness, and stack penalties.
  *
- * Authored from docs/demo-engine-task.md and wrapped by the shared adapter;
- * the planning body is kept as authored.
+ * Authored from docs/demo-engine-task.md and wrapped by the shared adapter.
+ * The planning body is kept as authored.
  */
 import { adaptAuthoredPlan } from '../demo-engine-toolkit.js'
 
@@ -25,7 +27,7 @@ export const description =
 // fires, hence the exact immediate score: hard-drop points + lock points +
 // indexed clear points + 1000 for emptying the board. Candidates are ranked
 // by that score minus penalties for covered holes, bumpiness, stack height,
-// landing height and rows pushed near the top; ties prefer fewer actions
+// landing height and rows pushed near the top. Ties prefer fewer actions
 // before the drop, so the piece falls as early as possible and a side-step
 // is emitted only when it actually changes the outcome.
 function authoredPlan(

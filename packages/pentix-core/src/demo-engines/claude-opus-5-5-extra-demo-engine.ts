@@ -1,8 +1,10 @@
 /**
- * Claude Opus 5.5 in Extra mode (40 min of thinking): a breadth-first search over every reachable placement, scored by a board heuristic plus earned points, then re-ranked by a 29-block one-piece lookahead.
+ * Claude Opus 5.5 in Extra mode (40 min of thinking). It runs a breadth-first
+ * search over every reachable placement. A board heuristic plus earned points
+ * scores each placement, and a 29-block one-piece lookahead re-ranks the result.
  *
- * Authored from docs/demo-engine-task.md and wrapped by the shared adapter;
- * the planning body is kept as authored.
+ * Authored from docs/demo-engine-task.md and wrapped by the shared adapter.
+ * The planning body is kept as authored.
  */
 import { adaptAuthoredPlan } from '../demo-engine-toolkit.js'
 
@@ -199,7 +201,7 @@ function authoredPlan(
       const lr = land(o, r, c)
       const dv = lr > r ? (minos * (height - r)) / 10 : 0
       addCand(o, lr, c, p + 'H', dv, k, 0)
-      // one side-step after the drop; it may uncover at most one more row
+      // one side-step after the drop. It may uncover at most one more row
       if (fits(o, lr, c - 1)) {
         const sl = land(o, lr, c - 1)
         if (sl <= lr + 1) {
@@ -588,7 +590,7 @@ function authoredPlan(
   let stamp = 0
 
   // Value of the prepared board after adding cells that clear no row and lie
-  // inside the board. g is the prepared board; it is restored on return.
+  // inside the board. g is the prepared board. It is restored on return.
   function incrementalValue(g: number[], rs: number[], cs: number[], r: number, c: number): number {
     stamp += 1
     const count = rs.length
@@ -744,7 +746,7 @@ function authoredPlan(
   const scratch: number[] = grid.slice()
 
   // Value of locking a piece with cells (rs, cs) at (r, c) on board g: the
-  // move itself plus the board it leaves. g is left unchanged; the resulting
+  // move itself plus the board it leaves. g is left unchanged. The resulting
   // board is written to `out` when one is given.
   function evalPlacement(g: number[], rs: number[], cs: number[], r: number, c: number, drop: number, out: number[] | null): number {
     const count = rs.length

@@ -97,7 +97,7 @@ export interface GameState {
   readonly gravityEpoch: number
   /** The piece list every board of this state draws from. */
   readonly game: PentixGame
-  /** The engine planning the main board's attract demo; travels with a swap. */
+  /** The engine planning the main board's attract demo. It travels with a swap. */
   readonly mainEngineId: DemoEngineId
   /** The main board's session. */
   readonly session: PentixGameSession
@@ -182,7 +182,7 @@ function applyLevelToDemoBoards(
 /**
  * Applies a chosen level to the configured starting level and to the live
  * session. The demo takes the new level at once so its gravity speed changes
- * without waiting for the next session; a running player game may only be
+ * without waiting for the next session. A running player game may only be
  * raised, because lowering it would rewind the engine's own progression.
  */
 function changeLevel(state: GameState, level: number): GameState {
@@ -271,7 +271,7 @@ function isDemoPhase(phase: GamePhase): boolean {
 /**
  * Creates one `PentixGame` and the whole board set that plays it, so the main
  * session and every demo board draw from the same piece list. The main session
- * gets the demo's seeded mino only when it is a demo session; every demo board
+ * gets the demo's seeded mino only when it is a demo session. Every demo board
  * always does.
  */
 function createBoardSet(
@@ -371,7 +371,7 @@ function applyAdvance(
 ): GameState {
   const game = mergeGame(state.game, result.game)
   // A demo session that ends keeps its final board for the same delay a player
-  // game over uses; `demoRestart` starts the next demo once that delay elapses.
+  // game over uses. `demoRestart` starts the next demo once that delay elapses.
   if (result.session.status === 'game-over' && state.phase === 'demo') {
     return { ...state, phase: 'demo-over', game, session: result.session }
   }
@@ -613,8 +613,8 @@ export function createGameReducer(deps: GameDependencies) {
           )
         }
 
-        // A finished demo board keeps its final board and ignores further steps;
-        // a stale step leaves the whole board set unchanged.
+        // A finished demo board keeps its final board and ignores further steps.
+        // A stale step leaves the whole board set unchanged.
         const board = activeDemoBoard(state, action.boardId)
         if (board === undefined || !isCurrentDemoStep(board.session, action)) {
           return state

@@ -6,7 +6,7 @@ Define the stateless `GameSessionEngine` that groups the active-piece `move`, `r
 
 ## Requirements
 ### Requirement: Gameplay operations are exposed on a single GameSessionEngine
-The shared `pentix-core` package SHALL expose a `GameSessionEngine` that groups the active-piece gameplay operations. Its instances SHALL provide the operations as methods named `move`, `rotate`, `tick`, and `drop`. `move` and `rotate` SHALL accept a `PentixGameSession` plus a direction and return a `PentixGameSession`; `tick` and `drop` SHALL accept a `PentixGameSession`, a `PentixGame`, and (for `tick`) an optional piece selector, and return an `AdvancePentixGameSessionResult`.
+The shared `pentix-core` package SHALL expose a `GameSessionEngine` that groups the active-piece gameplay operations. Its instances SHALL provide the operations as methods named `move`, `rotate`, `tick`, and `drop`. `move` and `rotate` SHALL accept a `PentixGameSession` plus a direction and return a `PentixGameSession`. `tick` and `drop` SHALL accept a `PentixGameSession`, a `PentixGame`, and (for `tick`) an optional piece selector, and return an `AdvancePentixGameSessionResult`.
 
 #### Scenario: A consumer runs all active-piece operations through one engine
 
@@ -17,7 +17,7 @@ The shared `pentix-core` package SHALL expose a `GameSessionEngine` that groups 
 - **AND** the gameplay, scoring, and `game-over` rules described by the `gameplay-mechanics` capability are preserved
 
 ### Requirement: Engine operations are stateless
-The `GameSessionEngine` SHALL expose pure operations that do not mutate their inputs; each operation SHALL return new session and game values rather than modifying the ones passed in.
+The `GameSessionEngine` SHALL expose pure operations that do not mutate their inputs. Each operation SHALL return new session and game values rather than modifying the ones passed in.
 
 #### Scenario: A successful operation leaves the input session unchanged
 

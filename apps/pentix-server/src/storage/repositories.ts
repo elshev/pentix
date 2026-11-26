@@ -11,10 +11,11 @@ import type {
 
 /**
  * Persistence contract for `User` entities. Implementations may be relational
- * (SQLite now, PostgreSQL later) or in-memory; callers never depend on which.
+ * (SQLite now, PostgreSQL later) or in-memory. Callers never depend on which
+ * one is in use.
  */
 export interface UserRepository {
-  /** Returns every retained user; an empty collection when nothing is stored. */
+  /** Returns every retained user, or an empty collection when nothing is stored. */
   load(): Promise<UserCollection>
   /** Persists a newly created user. */
   create(user: User): Promise<void>
@@ -29,7 +30,7 @@ export interface UserRepository {
  * stored as a single ordered field alongside the rest of the game.
  */
 export interface GameRepository {
-  /** Returns every retained game; an empty collection when nothing is stored. */
+  /** Returns every retained game, or an empty collection when nothing is stored. */
   load(): Promise<GameCollection>
   /** Persists a newly created game. */
   create(game: PentixGame): Promise<void>
@@ -44,7 +45,7 @@ export interface GameRepository {
  * replayable action logs (piece ID + ordered actions) rather than full state.
  */
 export interface GameSessionRepository {
-  /** Returns every retained session log; an empty collection when nothing is stored. */
+  /** Returns every retained session log, or an empty collection when nothing is stored. */
   load(): Promise<GameSessionCollection>
   /** Persists a newly created session log. */
   create(log: SessionActionLog): Promise<void>
@@ -60,6 +61,6 @@ export interface PentixStorage {
   readonly users: UserRepository
   readonly games: GameRepository
   readonly sessions: GameSessionRepository
-  /** Releases any store handle; in-memory storage has nothing to release. */
+  /** Releases any store handle. In-memory storage has nothing to release. */
   close(): void
 }

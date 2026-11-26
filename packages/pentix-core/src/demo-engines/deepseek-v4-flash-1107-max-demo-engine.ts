@@ -1,8 +1,11 @@
 /**
- * DeepSeek v4 Flash 1107 in Max mode (13 min of thinking): generates every orientation, column, and side-step candidate, replays it faithfully with wall kicks, and judges the resulting board by holes, transitions, wells, and stack height.
+ * DeepSeek v4 Flash 1107 in Max mode (13 min of thinking). It generates every
+ * orientation, column, and side-step candidate. It replays each candidate
+ * faithfully with wall kicks. It judges the resulting board by holes,
+ * transitions, wells, and stack height.
  *
- * Authored from docs/demo-engine-task.md and wrapped by the shared adapter;
- * the planning body is kept as authored.
+ * Authored from docs/demo-engine-task.md and wrapped by the shared adapter.
+ * The planning body is kept as authored.
  */
 import { adaptAuthoredPlan } from '../demo-engine-toolkit.js'
 

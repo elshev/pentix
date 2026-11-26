@@ -35,11 +35,11 @@ export interface PentixServerContext {
    * and non-durable runs stay deterministic.
    */
   readonly storage?: PentixStorage
-  /** The engines a demo run competes; defaults to every registered engine. */
+  /** The engines a demo run competes. Defaults to every registered engine. */
   readonly demoEngines?: readonly DemoEngine[]
-  /** The level demo sessions open at; defaults to the demo's starting level. */
+  /** The level demo sessions open at. Defaults to the demo's starting level. */
   readonly demoStartingLevel?: number
-  /** Millisecond clock used to time demo `plan` calls; defaults to `performance.now()`. */
+  /** Millisecond clock used to time demo `plan` calls. Defaults to `performance.now()`. */
   readonly demoPlanClock?: () => number
 }
 
@@ -79,7 +79,8 @@ export class PentixGameLifecycle {
 
   /**
    * Hydrates the working set from the repositories. Must run once before the
-   * lifecycle accepts requests; `createPentixServer` does it during startup.
+   * lifecycle accepts requests. `createPentixServer` starts the lifecycle during
+   * startup.
    */
   async load(): Promise<void> {
     const [users, games, sessionLogs] = await Promise.all([

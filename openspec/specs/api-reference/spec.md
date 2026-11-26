@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Define the OpenAPI 3.1 document and the browser Swagger UI that expose and exercise every `PentixServer` endpoint, and how that document stays consistent with the route handlers.
+Define the OpenAPI 3.1 document and the browser Swagger UI that expose and exercise every `PentixServer` endpoint. Define how that document stays consistent with the route handlers.
 ## Requirements
 ### Requirement: PentixServer publishes a machine-readable OpenAPI document
 
 `PentixServer` SHALL serve `GET /openapi.json` with `200 OK` and an OpenAPI `3.1.0` JSON document. The document SHALL describe every API endpoint the server exposes — `POST /games`, `POST /game-sessions`, `POST /game-sessions/{id}/next-piece`, `POST /game-sessions/{id}/move`, `POST /game-sessions/{id}/rotate`, `POST /game-sessions/{id}/tick`, `POST /game-sessions/{id}/drop`, `POST /users`, `GET /users`, `GET /users/{id}`, `POST /demo-runs`, and `GET /demo-runs/{id}` — without restating their business rules. The two documentation endpoints SHALL be excluded from the document, so the console lists API operations only.
 
-Each operation in the document SHALL carry its HTTP method, path, a summary, a tag grouping it with the capability that owns it, its path parameters, its request body schema when it accepts one, and the response schemas for the status codes it returns. The document SHALL be generated from the same zod schemas that the routes use to validate requests; it SHALL NOT be a separately maintained file. The document's `servers` entry SHALL be the origin of the request that fetched it, so a client executing operations from the document targets the running host and port.
+Each operation in the document SHALL carry its HTTP method, path, and a summary. It SHALL carry a tag that groups the operation with the capability that owns it. It SHALL carry its path parameters and its request body schema when it accepts one. It SHALL carry the response schemas for the status codes it returns. The document SHALL be generated from the same zod schemas that the routes use to validate requests. It SHALL NOT be a separately maintained file. The document's `servers` entry SHALL be the origin of the request that fetched it. A client that executes operations from the document then targets the running host and port.
 
 #### Scenario: The document lists every endpoint
 
@@ -41,7 +41,7 @@ Each operation in the document SHALL carry its HTTP method, path, a summary, a t
 
 ### Requirement: PentixServer serves a Swagger UI to exercise the API
 
-`PentixServer` SHALL serve `GET /docs` with `200 OK` and an HTML page that renders the document from `GET /openapi.json` through Swagger UI, titled `PentixServer API`, with **Try it out** available on every operation. The page SHALL load the Swagger UI stylesheet and script from this server under `/docs/swagger-ui-dist/*`, served from the installed `swagger-ui-dist` package, so the page needs no CDN, internet access, or build-time asset copy. Both the page and its assets SHALL be read-only and available whenever the server runs, without an extra command-line flag or environment variable.
+`PentixServer` SHALL serve `GET /docs` with `200 OK` and an HTML page that renders the document from `GET /openapi.json` through Swagger UI, titled `PentixServer API`, with **Try it out** available on every operation. The page SHALL load the Swagger UI stylesheet and script from this server under `/docs/swagger-ui-dist/*`. The server SHALL serve those files from the installed `swagger-ui-dist` package, so the page needs no CDN, internet access, or build-time asset copy. Both the page and its assets SHALL be read-only and available whenever the server runs, without an extra command-line flag or environment variable.
 
 #### Scenario: The browser console is served
 
@@ -75,13 +75,13 @@ Each operation in the document SHALL carry its HTTP method, path, a summary, a t
 
 ### Requirement: The document cannot drift from the handlers
 
-The server's test suite SHALL validate the responses of every endpoint against the same zod schemas the document publishes, and SHALL assert that the set of documented operations equals the set of API routes the server registers, excluding the two documentation endpoints. A handler payload that stops matching its documented schema, or an API route added or removed without its declaration, SHALL fail the test suite.
+The server's test suite SHALL validate the responses of every endpoint against the same zod schemas the document publishes. It SHALL assert that the set of documented operations equals the set of API routes the server registers. The two documentation endpoints are excluded from that comparison. A handler payload that stops matching its documented schema SHALL fail the test suite. An API route that is added or deleted without its declaration SHALL also fail the test suite.
 
 #### Scenario: A response that outgrows its schema fails
 
 - **GIVEN** a handler that renames or drops a documented response field
 - **WHEN** the server test suite runs
-- **THEN** the contract check fails and names the offending field
+- **THEN** the contract test fails and names the offending field
 - **AND** the failure is reported without contacting an external service
 
 #### Scenario: Every API route is documented
@@ -93,7 +93,7 @@ The server's test suite SHALL validate the responses of every endpoint against t
 
 ### Requirement: The API reference stays additive
 
-The documentation endpoints SHALL be read-only GET operations that add no state, no authentication requirement, and no behavior change to the existing API. `GET /` SHALL keep answering the `404 Not Found` fallback, and that fallback's message SHALL name `GET /docs` and `GET /openapi.json` alongside the supported API endpoints.
+The documentation endpoints SHALL be read-only `GET` operations that add no state, no authentication requirement, and no behavior change to the existing API. `GET /` SHALL keep answering the `404 Not Found` fallback, and that fallback's message SHALL name `GET /docs` and `GET /openapi.json` alongside the supported API endpoints.
 
 #### Scenario: The root path is still not found
 

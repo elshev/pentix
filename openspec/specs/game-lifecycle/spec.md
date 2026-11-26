@@ -4,9 +4,9 @@
 Define reusable `PentixGame` state with a server-owned piece sequence, and the retained session lifecycle that promotes previews and advances the piece cursor.
 ## Requirements
 ### Requirement: Games define reusable initial state and piece sequences
-The system SHALL define a JSON-serializable `PentixGame` with a UUIDv7 string `id`, a `name` that can be empty, a board snapshot, an `availablePieceIds` set of numeric catalog IDs, and `pieceIds` referencing numeric IDs in `PIECE_CATALOG` that are drawn from `availablePieceIds`.
+The system SHALL define a JSON-serializable `PentixGame`. Its fields are a UUIDv7 string `id`, a `name` that can be empty, a board snapshot, and an `availablePieceIds` set of numeric catalog IDs. Its `pieceIds` reference numeric IDs in `PIECE_CATALOG` that are drawn from `availablePieceIds`.
 
-`POST /games` SHALL create and retain an independent Pentix game, returning `201 Created` and its JSON representation. Unless a valid optional name is supplied, the name SHALL be empty. Initialization SHALL use the default empty board, set the available piece set to the full catalog, and provide at least two valid piece IDs for active and preview pieces.
+`POST /games` SHALL create and retain an independent Pentix game, returning `201 Created` and its JSON representation. Unless a valid optional name is supplied, the name SHALL be empty. Initialization SHALL use the default empty board. It SHALL set the available piece set to the full catalog. It SHALL provide at least two valid piece IDs for active and preview pieces.
 
 #### Scenario: A client initializes a game
 
@@ -23,7 +23,7 @@ The system SHALL define a JSON-serializable `PentixGame` with a UUIDv7 string `i
 - **AND** their board snapshots do not share mutable session state
 
 ### Requirement: A game's piece sequence is extended with valid catalog IDs
-The lifecycle service SHALL retain each game's piece sequence and SHALL append a catalog-valid numeric piece ID whenever a session needs a preview beyond the current sequence. Different sessions using one game SHALL observe the same sequence values while maintaining independent cursors.
+The lifecycle service SHALL retain each game's piece sequence. It SHALL append a catalog-valid numeric piece ID whenever a session needs a preview beyond the current sequence. Different sessions using one game SHALL observe the same sequence values while maintaining independent cursors.
 
 #### Scenario: A session reaches the end of the initialized sequence
 
@@ -33,9 +33,9 @@ The lifecycle service SHALL retain each game's piece sequence and SHALL append a
 - **AND** existing sequence values do not change
 
 ### Requirement: Next-piece requests advance a retained session
-`PentixServer` SHALL expose `POST /game-sessions/{id}/next-piece` as a state-changing operation. For a known session, it SHALL promote the previous preview to the active piece at rotation angle `0` and the default spawn origin, advance `nextPieceIndex` by one, provide the piece at the new index as the preview, and return `200 OK` with the complete updated `PentixGameSession` snapshot.
+`PentixServer` SHALL expose `POST /game-sessions/{id}/next-piece` as a state-changing operation. For a known session, it SHALL promote the previous preview to the active piece at rotation angle `0` and the default spawn origin. It SHALL advance `nextPieceIndex` by one. It SHALL provide the piece at the new index as the preview, and SHALL return `200 OK` with the complete updated `PentixGameSession` snapshot.
 
-The server SHALL return `404 Not Found` for a well-formed session ID that does not exist and `400 Bad Request` for a malformed session ID. A successful request SHALL NOT alter the session's board, statistics, `userId`, or `gameId`.
+The server SHALL return `404 Not Found` for a well-formed session ID that does not exist and `400 Bad Request` for a malformed session ID. A successful request SHALL NOT change the session's board, statistics, `userId`, or `gameId`.
 
 #### Scenario: The next piece becomes active
 
