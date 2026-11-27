@@ -11,6 +11,7 @@ import {
   type PieceKey,
   type SessionActionLog,
   type User,
+  type UserType,
 } from '../../../../packages/pentix-core/dist/index.js'
 import type {
   GameCollection,
@@ -33,7 +34,9 @@ export interface SqliteStorageOptions {
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL
+  name TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'human',
+  engine_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS games (
@@ -48,13 +51,40 @@ CREATE TABLE IF NOT EXISTS game_sessions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   game_id TEXT NOT NULL,
+  level INTEGER,
+  seed_column INTEGER,
   pieces TEXT NOT NULL
 );
 `
 
+/** A column that a database written by an earlier version does not yet hold. */
+interface MissingColumn {
+  readonly name: string
+  /** The `ALTER TABLE` statement that adds the column. */
+  readonly sql: string
+}
+
+const USER_MIGRATION_COLUMNS: readonly MissingColumn[] = [
+  {
+    name: 'type',
+    sql: "ALTER TABLE users ADD COLUMN type TEXT NOT NULL DEFAULT 'human'",
+  },
+  { name: 'engine_id', sql: 'ALTER TABLE users ADD COLUMN engine_id TEXT' },
+]
+
+const GAME_SESSION_MIGRATION_COLUMNS: readonly MissingColumn[] = [
+  { name: 'level', sql: 'ALTER TABLE game_sessions ADD COLUMN level INTEGER' },
+  {
+    name: 'seed_column',
+    sql: 'ALTER TABLE game_sessions ADD COLUMN seed_column INTEGER',
+  },
+]
+
 interface UserRow {
   readonly id: string
   readonly name: string
+  readonly type: string
+  readonly engine_id: string | null
 }
 
 interface GameRow {
@@ -69,11 +99,55 @@ interface GameSessionRow {
   readonly id: string
   readonly user_id: string
   readonly game_id: string
+  readonly level: number | null
+  readonly seed_column: number | null
   readonly pieces: string
 }
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** The columns a table currently holds, so a migration adds only the missing ones. */
+function tableColumnNames(
+  database: DatabaseSync,
+  table: string,
+): ReadonlySet<string> {
+  const rows = database
+    .prepare(`PRAGMA table_info(${table})`)
+    .all() as unknown as readonly { readonly name?: unknown }[]
+  const names = new Set<string>()
+
+  for (const row of rows) {
+    if (typeof row.name === 'string') {
+      names.add(row.name)
+    }
+  }
+
+  return names
+}
+
+function addMissingColumns(
+  database: DatabaseSync,
+  table: string,
+  columns: readonly MissingColumn[],
+): void {
+  const existing = tableColumnNames(database, table)
+
+  for (const column of columns) {
+    if (!existing.has(column.name)) {
+      database.exec(column.sql)
+    }
+  }
+}
+
+/**
+ * Adds the columns that a database written by an earlier version lacks. Every
+ * statement runs once per missing column, so a repeated start changes nothing.
+ */
+function migrateSchema(database: DatabaseSync): void {
+  addMissingColumns(database, 'users', USER_MIGRATION_COLUMNS)
+  addMissingColumns(database, 'game_sessions', GAME_SESSION_MIGRATION_COLUMNS)
 }
 
 /**
@@ -105,6 +179,7 @@ function openDatabase(dataFile: string): DatabaseSync {
   try {
     assertDatabaseIsReadable(database, dataFile)
     database.exec(SCHEMA_SQL)
+    migrateSchema(database)
   } catch (error) {
     database.close()
     if (error instanceof StorageError) {
@@ -246,10 +321,25 @@ function decodeBoard(value: string, label: string): BoardSnapshot {
   })
 }
 
+function readUserType(value: unknown): UserType {
+  if (value !== 'human' && value !== 'ai') {
+    throw new StorageError('Pentix storage contains an invalid user type.')
+  }
+
+  return value
+}
+
 function readUserRow(row: UserRow): User {
+  const engineId =
+    typeof row.engine_id === 'string' && row.engine_id.trim().length > 0
+      ? row.engine_id
+      : undefined
+
   return Object.freeze({
     id: row.id,
     name: row.name,
+    type: readUserType(row.type),
+    ...(engineId === undefined ? {} : { engineId }),
   })
 }
 
@@ -293,6 +383,22 @@ function readPieceLog(value: unknown, label: string): PieceActionLog {
   })
 }
 
+/** Reads an optional integer column, rejecting a value of the wrong kind. */
+function readOptionalInteger(
+  value: number | null,
+  label: string,
+): number | undefined {
+  if (value === null) {
+    return undefined
+  }
+
+  if (!Number.isInteger(value)) {
+    throw new StorageError(`Pentix storage contains an invalid ${label}.`)
+  }
+
+  return value
+}
+
 function readSessionLog(row: GameSessionRow): SessionActionLog {
   const label = `game session ${row.id}`
   const decoded = decodeJson(row.pieces, `${label} pieces`)
@@ -300,10 +406,15 @@ function readSessionLog(row: GameSessionRow): SessionActionLog {
     throw new StorageError(`Pentix storage contains an invalid ${label} pieces.`)
   }
 
+  const level = readOptionalInteger(row.level, `${label} level`)
+  const seedColumn = readOptionalInteger(row.seed_column, `${label} seed column`)
+
   return Object.freeze({
     sessionId: row.id,
     userId: row.user_id,
     gameId: row.game_id,
+    ...(level === undefined ? {} : { level }),
+    ...(seedColumn === undefined ? {} : { seedColumn }),
     pieces: Object.freeze(
       decoded.map((piece) => readPieceLog(piece, `${label} piece`)),
     ),
@@ -345,24 +456,35 @@ function writeGameRow(statement: StatementSync, game: PentixGame): void {
   )
 }
 
+function writeUserRow(statement: StatementSync, user: User): void {
+  statement.run(user.id, user.name, user.type, user.engineId ?? null)
+}
+
 function writeSessionLog(statement: StatementSync, log: SessionActionLog): void {
   statement.run(
     log.sessionId,
     log.userId,
     log.gameId,
+    log.level ?? null,
+    log.seedColumn ?? null,
     JSON.stringify(log.pieces),
   )
 }
 
 function createRepositories(database: DatabaseSync): PentixStorage {
   const selectUsers = database.prepare(
-    'SELECT id, name FROM users ORDER BY rowid',
+    'SELECT id, name, type, engine_id FROM users ORDER BY rowid',
   )
   const selectUserById = database.prepare(
-    'SELECT id, name FROM users WHERE id = ?',
+    'SELECT id, name, type, engine_id FROM users WHERE id = ?',
   )
   const upsertUser = database.prepare(
-    'INSERT INTO users (id, name) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name',
+    `INSERT INTO users (id, name, type, engine_id)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       name = excluded.name,
+       type = excluded.type,
+       engine_id = excluded.engine_id`,
   )
 
   const selectGames = database.prepare(
@@ -382,14 +504,16 @@ function createRepositories(database: DatabaseSync): PentixStorage {
   )
 
   const selectSessions = database.prepare(
-    'SELECT id, user_id, game_id, pieces FROM game_sessions ORDER BY rowid',
+    'SELECT id, user_id, game_id, level, seed_column, pieces FROM game_sessions ORDER BY rowid',
   )
   const upsertSession = database.prepare(
-    `INSERT INTO game_sessions (id, user_id, game_id, pieces)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO game_sessions (id, user_id, game_id, level, seed_column, pieces)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        user_id = excluded.user_id,
        game_id = excluded.game_id,
+       level = excluded.level,
+       seed_column = excluded.seed_column,
        pieces = excluded.pieces`,
   )
 
@@ -399,10 +523,10 @@ function createRepositories(database: DatabaseSync): PentixStorage {
       return { users: rows.map(readUserRow) }
     },
     async create(user: User): Promise<void> {
-      upsertUser.run(user.id, user.name)
+      writeUserRow(upsertUser, user)
     },
     async save(user: User): Promise<void> {
-      upsertUser.run(user.id, user.name)
+      writeUserRow(upsertUser, user)
     },
     async findById(userId: string): Promise<User | undefined> {
       const row = selectUserById.get(userId) as unknown as UserRow | undefined

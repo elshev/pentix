@@ -5,7 +5,7 @@ TBD - created by archiving change add-server-play-demo. Update Purpose after arc
 ## Requirements
 ### Requirement: `pentix-core` plays a demo session headlessly
 
-`pentix-core` SHALL provide a demo driver that plays a `PentixGameSession` with a `DemoEngine` without timers, I/O, persistence, or DOM or Node.js APIs. It SHALL expose `createDemoPlayback(options)` returning a playback state, `advanceDemoPlayback(playback)` returning the state after exactly one operation, and `playDemoSession(options)` returning the final result. Options SHALL be the engine, the game, the session, an optional `selectPieceId`, and an optional `clock`. The playback SHALL plan only the current piece. It SHALL apply every movement, rotation, hard drop, lock, line clear, score, level, and game-over detection through the shared `GameSessionEngine`. It SHALL NOT mutate its arguments. It SHALL stop once the session's `status` is `game-over`. `playDemoSession` SHALL return `{ game, session, planTimeMs, plans }` for the finished session.
+`pentix-core` SHALL provide a demo driver that plays a `PentixGameSession` with a `DemoEngine` without timers, I/O, persistence, or DOM or Node.js APIs. It SHALL expose `createDemoPlayback(options)` returning a playback state, `advanceDemoPlayback(playback)` returning the state after exactly one operation, and `playDemoSession(options)` returning the final result. Options SHALL be the engine, the game, the session, an optional `selectPieceId`, and an optional `clock`. The playback SHALL plan only the current piece. It SHALL apply every movement, rotation, hard drop, lock, line clear, score, level, and game-over detection through the shared `GameSessionEngine`. It SHALL NOT mutate its arguments. It SHALL stop once the session's `status` is `game-over`. `playDemoSession` SHALL return `{ game, session, log, planTimeMs, plans }` for the finished session, where `log` is the `SessionActionLog` that the playback recorded.
 
 #### Scenario: A playback plays one session to game over
 
@@ -21,6 +21,13 @@ TBD - created by archiving change add-server-play-demo. Update Purpose after arc
 - **WHEN** the playback advances to game over
 - **THEN** the original session and game objects still hold their opening snapshots
 - **AND** every change is returned in a new playback state
+
+#### Scenario: A finished playback returns its log
+
+- **GIVEN** a playback that reached `game-over`
+- **WHEN** `playDemoSession` returns its result
+- **THEN** the result carries a `SessionActionLog`
+- **AND** that log names the played session, its user, and its game
 
 ### Requirement: A demo session starts seeded and at the demo level
 
@@ -51,6 +58,8 @@ TBD - created by archiving change add-server-play-demo. Update Purpose after arc
 ### Requirement: Playback applies one action and one tick in the demo's order
 
 A playback SHALL name the operation its next `advanceDemoPlayback` applies as either `action` or `tick`, and SHALL start on `action`. A tick operation SHALL apply exactly one `GameSessionEngine.tick` and switch the next operation to `action`. An action operation SHALL plan the current piece when no log is cached for the session and `nextPieceIndex`. It SHALL apply the next code of that log through `GameSessionEngine` (`move`, `rotate`, or `drop`), and it SHALL advance the log position by one. After a `H` code the next operation SHALL be `action` again. In this way a log's single post-drop `L` or `R` lands before the locking tick. After any other code, and after an exhausted or empty log, the next operation SHALL be `tick`. When the hard drop settled the piece and spawned a new one, the following code SHALL be dropped with the finished piece's log. That code SHALL NOT steer the spawned piece. An action the board blocks SHALL leave the placement unchanged, and the log SHALL still advance. The playback SHALL keep planning and ticking until the session ends, and SHALL apply no action codes once the log is exhausted.
+
+The playback SHALL also record the log that it applies. It SHALL append each applied code to a `SessionActionLog`, under the numeric id of the piece that was active when the operation arrived. A tick SHALL append `T`. A blocked action SHALL append its code, because the recorded log is the transcript of the plan. A code that the settling hard drop discards SHALL NOT be appended. The playback SHALL take `level` from the session's opening `statistics.level`. It SHALL take `seedColumn` from the single occupied cell on the row before last, and it SHALL omit `seedColumn` when the opening board holds any other occupancy.
 
 #### Scenario: The action precedes the tick
 
@@ -92,6 +101,24 @@ A playback SHALL name the operation its next `advanceDemoPlayback` applies as ei
 - **THEN** the blocked action leaves the placement unchanged
 - **AND** the tick still applies
 - **AND** the playback keeps making progress
+
+#### Scenario: The recorded log matches the applied operations
+
+- **GIVEN** a playback that applied a blocked action, a hard drop, a post-drop code, and ticks
+- **WHEN** its recorded pieces are inspected
+- **THEN** the blocked action appears under the piece that was active
+- **AND** the hard drop and the post-drop code appear in that order
+- **AND** every applied tick appears as `T`
+- **AND** the settling code that was discarded does not appear
+
+#### Scenario: The log records the opening state
+
+- **GIVEN** a fresh demo session at level `9` with one seed mino in column `7`
+- **WHEN** its playback records a log
+- **THEN** the log reports `level` `9`
+- **AND** the log reports `seedColumn` `7`
+
+- **AND** the log replays to the returned session state
 
 ### Requirement: Playback reports only the time spent planning
 

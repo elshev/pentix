@@ -6,6 +6,7 @@ import {
   createPentixGame,
   createPentixGameSession,
   createUser,
+  demoEngineRegistry,
   gameSessionEngine,
   getPieceDefinition,
   replayPentixGameSession,
@@ -66,15 +67,18 @@ export class PentixGameLifecycle {
   private readonly createId: () => string
   private readonly selectPieceId?: PieceIdSelector
   private readonly storage: PentixStorage
+  private readonly demoEngines: readonly DemoEngine[]
 
   constructor(
     createId: () => string,
     selectPieceId?: PieceIdSelector,
     storage: PentixStorage = createInMemoryStorage(),
+    demoEngines: readonly DemoEngine[] = demoEngineRegistry.list(),
   ) {
     this.createId = createId
     this.selectPieceId = selectPieceId
     this.storage = storage
+    this.demoEngines = demoEngines
   }
 
   /**
@@ -94,6 +98,8 @@ export class PentixGameLifecycle {
       this.users.set(user.id, user)
     }
 
+    await this.seedDemoEngineUsers()
+
     this.games.clear()
     for (const game of games.games) {
       this.games.set(game.id, game)
@@ -111,6 +117,35 @@ export class PentixGameLifecycle {
 
       this.sessionLogs.set(log.sessionId, log)
       this.sessions.set(log.sessionId, replayPentixGameSession(log, game))
+    }
+  }
+
+  /**
+   * Retains one AI user per configured demo engine. A retained row with the same
+   * engine binding is reused, so a restart creates nothing twice.
+   */
+  private async seedDemoEngineUsers(): Promise<void> {
+    const byEngineId = new Map<string, User>()
+    for (const user of this.users.values()) {
+      if (user.engineId !== undefined) {
+        byEngineId.set(user.engineId, user)
+      }
+    }
+
+    for (const engine of this.demoEngines) {
+      if (byEngineId.has(engine.id)) {
+        continue
+      }
+
+      const user = createUser({
+        id: this.createId(),
+        name: engine.name,
+        type: 'ai',
+        engineId: engine.id,
+      })
+      await this.storage.users.create(user)
+      this.users.set(user.id, user)
+      byEngineId.set(engine.id, user)
     }
   }
 
@@ -140,6 +175,7 @@ export class PentixGameLifecycle {
     const user = createUser({
       id: this.createId(),
       name: normalizedName,
+      type: 'human',
     })
     await this.storage.users.create(user)
     this.users.set(user.id, user)
@@ -148,6 +184,17 @@ export class PentixGameLifecycle {
 
   getUser(userId: string): User | undefined {
     return this.users.get(userId)
+  }
+
+  /** Returns the AI user id bound to a demo engine, or `undefined`. */
+  getEngineUserId(engineId: string): string | undefined {
+    for (const user of this.users.values()) {
+      if (user.engineId === engineId) {
+        return user.id
+      }
+    }
+
+    return undefined
   }
 
   listUsers(): User[] {
@@ -324,17 +371,29 @@ function formatHostForUrl(host: string): string {
 export async function createPentixServer(
   context: PentixServerContext = {},
 ): Promise<Server> {
+  const storage = context.storage ?? createInMemoryStorage()
+  const engines = context.demoEngines ?? demoEngineRegistry.list()
   const lifecycle = new PentixGameLifecycle(
     context.createId ?? uuidv7,
     context.selectPieceId,
-    context.storage ?? createInMemoryStorage(),
+    storage,
+    engines,
   )
   await lifecycle.load()
   const demoRuns = new DemoRunService(context.createId ?? uuidv7, {
     selectPieceId: context.selectPieceId,
-    engines: context.demoEngines,
+    engines,
     startingLevel: context.demoStartingLevel,
     clock: context.demoPlanClock,
+    storage,
+    resolveEngineUserId(engineId: string): string {
+      const userId = lifecycle.getEngineUserId(engineId)
+      if (userId === undefined) {
+        throw new Error(`No AI user is bound to demo engine '${engineId}'.`)
+      }
+
+      return userId
+    },
   })
   const app = createPentixApp(lifecycle, demoRuns)
 

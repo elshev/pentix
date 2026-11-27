@@ -3,6 +3,10 @@
  * reachable placement exactly. It scores each placement with a twelve-feature
  * board weight vector and a one-piece lookahead over every catalog block.
  *
+ * A hard drop is followed by one side-step only when no other route reaches the
+ * lock cell. A cell that a plain drop or ordinary moves reach never gets a
+ * side-step.
+ *
  * Authored from docs/demo-engine-task.md and wrapped by the shared adapter.
  * The planning body is kept as authored.
  */
@@ -11,8 +15,23 @@ import { adaptAuthoredPlan } from '../demo-engine-toolkit.js'
 export const id = 'claude-sonnet-5-5-extra'
 export const name = 'Claude Sonnet 5.5 Extra'
 export const description =
-  'Claude Sonnet 5.5 in Extra mode (40 min of thinking): exact-replay reachability, a twelve-feature board weight vector, and a one-piece lookahead over every catalog block.'
+  'Claude Sonnet 5.5 in Extra mode (40 min of thinking): exact-replay reachability, a twelve-feature board weight vector, and a one-piece lookahead over every catalog block. It adds a side-step after H only for cells that no other route reaches.'
 
+/*
+ * Pentix planner (one falling piece -> one action string).
+ * 1. Reachability: replays the engine exactly ("action, then tick") as a layer-by-layer search over
+ *    (row, column, orientation) from the current position, using moves, rotations that fit in place
+ *    (no wall kicks) and blocked moves that only cost a tick. At every state it also tries H, and H
+ *    dropped one column beside a pocket plus one last-tick side-step. Result: every lock cell the
+ *    piece can really reach, with an action log for it.
+ * 2. Log choice: a cell reachable by a plain drop (log ends at H) never gets a side-step; H followed by
+ *    exactly one L/R is emitted only when no other route reaches that cell (pocket under an overhang).
+ * 3. Scoring: each lock cell is scored with a Dellacherie/BCTS-style heuristic on the board after row
+ *    clears (landing height, cleared rows, row/column transitions, holes, wells, hole depth, rows with
+ *    holes, bumpiness, stack-height danger) plus real clear and drop points; weights tuned by simulation.
+ * 4. Lookahead: the 6 best cells are re-scored by the average, over all 29 blocks (assumed equally
+ *    likely), of the best heuristic value of the next piece placed on the resulting board.
+ */
 function authoredPlan(
   board: number[][],
   piece: { row: number; column: number }[][],
@@ -33,7 +52,16 @@ function authoredPlan(
   const DEAD = 3000
 
   type Shape = { r: number[]; c: number[] }
-  type Final = { row: number; column: number; o: number; text: string; drop: number; waits: number }
+  type Final = {
+    row: number
+    column: number
+    o: number
+    text: string // the action log that will be emitted for this lock cell
+    drop: number // drop points used for scoring: best over every route to this cell
+    textDrop: number // drop points of the route behind `text`
+    waits: number
+    side: number // 1 when `text` ends with H plus a side-step
+  }
 
   const grid: number[] = new Array(height * width).fill(0)
   for (let r = 0; r < height; r += 1) {
@@ -175,9 +203,8 @@ function authoredPlan(
   }
   let lastEmpty = false
 
-  // Scores a lock position. Returns the heuristic value. The immediate part
-  // and (if asked) the board after clears are left in outImm / outGrid. The
-  // grid g is restored before returning.
+  // Scores a lock position. Returns the heuristic value; the immediate part and (if asked) the board
+  // after clears are left in outImm / outGrid. The grid g is restored before returning.
   function evaluate(g: number[], s: Shape, row: number, col: number, drop: number, wantGrid: boolean): number {
     const n = s.r.length
     for (let i = 0; i < n; i += 1) {
@@ -252,22 +279,40 @@ function authoredPlan(
   const finals: Final[] = []
   const finalIndex: { [key: number]: number } = {}
 
-  // Several plans can end in the same cell: keep the one that scores most, then the one that
-  // relies on the fewest ignored (blocked) moves, then the shortest.
-  function addFinal(row: number, column: number, o: number, text: string, drop: number, waits: number): void {
+  // Several routes can end in the same lock cell. Scoring keeps the best drop points over all of them,
+  // but the emitted log prefers: no side-step (a plain drop or ordinary moves), then more drop points,
+  // then fewer ignored (blocked) moves, then the shortest. H plus L/R is used only for cells that no
+  // other route reaches.
+  function addFinal(
+    row: number,
+    column: number,
+    o: number,
+    text: string,
+    drop: number,
+    waits: number,
+    side: number,
+  ): void {
     const key = ((row + 50) * 400 + (column + 100)) * 8 + o
     const at = finalIndex[key]
     if (at === undefined) {
       finalIndex[key] = finals.length
-      finals.push({ row, column, o, text, drop, waits })
+      finals.push({ row, column, o, text, drop, textDrop: drop, waits, side })
       return
     }
     const old = finals[at]
+    if (drop > old.drop) {
+      old.drop = drop
+    }
     if (
-      drop > old.drop ||
-      (drop === old.drop && (waits < old.waits || (waits === old.waits && text.length < old.text.length)))
+      side < old.side ||
+      (side === old.side &&
+        (drop > old.textDrop ||
+          (drop === old.textDrop && (waits < old.waits || (waits === old.waits && text.length < old.text.length)))))
     ) {
-      finals[at] = { row, column, o, text, drop, waits }
+      old.text = text
+      old.textDrop = drop
+      old.waits = waits
+      old.side = side
     }
   }
 
@@ -285,14 +330,22 @@ function authoredPlan(
     for (let n = 0; n < layer.length; n += 1) {
       const node = layer[n]
       const here = shapes[node.o]
-      // Hard drop here, optionally followed by one side-step.
+      // Hard drop here (plain), or dropped beside a pocket and followed by one last-tick side-step.
       const dr = dropRowOf(grid, here, node.row, node.column)
       const dropPts = dr > node.row ? Math.floor((minos * (height - node.row)) / 10) : 0
-      addFinal(dr, node.column, node.o, node.text + 'H', dropPts, node.waits)
+      addFinal(dr, node.column, node.o, node.text + 'H', dropPts, node.waits, 0)
       for (let d = -1; d <= 1; d += 2) {
         const nc = node.column + d
         if (dr > node.row && fits(grid, here, dr, nc)) {
-          addFinal(dropRowOf(grid, here, dr, nc), nc, node.o, node.text + 'H' + (d < 0 ? 'L' : 'R'), dropPts, node.waits)
+          addFinal(
+            dropRowOf(grid, here, dr, nc),
+            nc,
+            node.o,
+            node.text + 'H' + (d < 0 ? 'L' : 'R'),
+            dropPts,
+            node.waits,
+            1,
+          )
         }
       }
       // One ordinary action followed by its tick.
@@ -327,7 +380,8 @@ function authoredPlan(
             next[at] = { row: node.row + 1, column: nc, o: no, text: node.text + act, waits }
           }
         } else {
-          addFinal(node.row, nc, no, node.text + act, 0, waits)
+          // Lock right after this action: a move that changes the column is a last-tick side-step.
+          addFinal(node.row, nc, no, node.text + act, 0, waits, nc !== node.column ? 1 : 0)
         }
       }
     }

@@ -1,8 +1,9 @@
 /**
- * DeepSeek v4 Flash 1107 in Max mode (13 min of thinking). It generates every
- * orientation, column, and side-step candidate. It replays each candidate
- * faithfully with wall kicks. It judges the resulting board by holes,
- * transitions, wells, and stack height.
+ * DeepSeek v4 Flash 1107 in Max mode (13 min of thinking). It searches each
+ * orientation, target column, and side-step option. It replays each candidate
+ * through a model of the engine and scores the lock points, the drop points,
+ * the cleared rows, and the remaining board. It ends the chosen candidate at H
+ * when a straight drop in the landing column reaches the same placement.
  *
  * Authored from docs/demo-engine-task.md and wrapped by the shared adapter.
  * The planning body is kept as authored.
@@ -12,16 +13,16 @@ import { adaptAuthoredPlan } from '../demo-engine-toolkit.js'
 export const id = 'deepseek-v4-flash-1107-max'
 export const name = 'DeepSeek v4 Flash 1107 Max'
 export const description =
-  'DeepSeek v4 Flash 1107 in Max mode (13 min of thinking): generates every orientation, column, and side-step candidate, replays it faithfully with wall kicks, and judges the resulting board by holes, transitions, wells, and stack height.'
+  'DeepSeek v4 Flash 1107 in Max mode (13 min of thinking): searches every orientation, target column, and side-step option, replays each candidate through an engine model, and scores lock points, drop points, cleared rows, holes, transitions, wells, bumpiness, and height.'
 
-/**
-A single pure TypeScript function that simulates every reachable placement and scores it:
-
-1. Candidate generation — for every orientation (choosing the cheaper of C-rotations or A-rotations), every target column, and each side-step option ("", L, R after the hard drop), it builds the action string rotations + lateral + "H" + sideStep.
-2. Faithful replay — each candidate is replayed with the real turn/tick rules: action → tick (falls or locks), no tick consumed by the hard drop (so the trailing L/R works), wall-kick fallback on rotation, and remaining characters discarded after an early lock.
-3. Real scoring — it reproduces lock points, floor(minos × (height − dropRow) / 10) drop points, clearedIndex × (10 + height − row) per cleared row, and the flat 1000 for emptying the board.
-4. Board judgement — the resulting board is rated with hole count/column transitions (strongest), row transitions, well depth, bumpiness, aggregate and landing height, eroded piece cells, plus a quadratic "danger" term when the stack nears the top, and a heavy penalty for locking cells above the board.
- */
+// The planner searches each reachable placement for the piece.
+// The planner tries each orientation, each target column, and each side-step option.
+// The planner replays each candidate through a model of the engine.
+// The planner scores the lock points, the drop points, and the cleared rows.
+// The planner rates the remaining board with holes, transitions, wells, bumpiness, and height.
+// The planner keeps the candidate with the highest value.
+// The planner ends the chosen candidate at H when a straight drop in the landing column reaches the same placement.
+// The planner appends one L or R only when the placement needs a drop beside the landing column.
 function authoredPlan(
   board: number[][],
   piece: { row: number; column: number }[][],
@@ -54,9 +55,8 @@ function authoredPlan(
     return true
   }
 
-  // When a rotation does not fit, the game kicks the piece sideways, or up
-  // against the top, until it does.  The same offsets are tried here so the
-  // simulation follows the engine closely.
+  // The engine kicks a rotation sideways, or up against the top, when the turned piece does not fit.
+  // The planner tries the same offsets so the simulation follows the engine.
   const kickOffsets: number[][] = [
     [0, 0],
     [0, 1],
@@ -73,12 +73,14 @@ function authoredPlan(
     [0, -3],
   ]
 
-  const simulate = (sequence: string): {
+  interface Landing {
     row: number
     column: number
     orientation: number
     dropRow: number
-  } => {
+  }
+
+  const simulate = (sequence: string): Landing => {
     let row = position.row
     let column = position.column
     let orientation = 0
@@ -113,8 +115,8 @@ function authoredPlan(
         while (fits(row + 1, column, orientation)) {
           row += 1
         }
-        // The action after a hard drop is applied before the tick that locks
-        // the piece, so the drop itself does not consume a tick.
+        // The engine applies the side-step before the tick that locks the piece.
+        // The hard drop therefore does not consume a tick.
         continue
       } else {
         continue
@@ -141,8 +143,8 @@ function authoredPlan(
     return out
   }
 
-  // Score one candidate plan: replay it, settle the piece, clear rows, add the
-  // points the engine would award and judge the board that is left behind.
+  // The planner replays one candidate and settles the piece.
+  // The planner clears the rows, adds the awarded points, and rates the board.
   const evaluate = (sequence: string): number => {
     const landing = simulate(sequence)
     const cells = piece[landing.orientation]
@@ -350,6 +352,7 @@ function authoredPlan(
 
   const sideSteps: string[] = ['', 'L', 'R']
   let best = ''
+  let bestRotations = ''
   let bestValue = Number.NEGATIVE_INFINITY
   for (let k = 0; k < orientationCount; k += 1) {
     const forward = k
@@ -366,9 +369,26 @@ function authoredPlan(
         if (value > bestValue) {
           bestValue = value
           best = sequence
+          bestRotations = rotations
         }
       }
     }
+  }
+
+  // The planner checks the direct candidate from the landing column.
+  // The planner returns the direct candidate when the direct candidate reaches the same placement.
+  const landing = simulate(best)
+  const directDelta = landing.column - position.column
+  const direct = bestRotations +
+    (directDelta < 0 ? repeat('L', -directDelta) : repeat('R', directDelta)) +
+    'H'
+  const directLanding = simulate(direct)
+  if (
+    directLanding.row === landing.row &&
+    directLanding.column === landing.column &&
+    directLanding.orientation === landing.orientation
+  ) {
+    return direct
   }
   return best
 }

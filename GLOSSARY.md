@@ -13,8 +13,14 @@ Each entry gives the term, the code name in parentheses, a definition, and the w
 
 ## Game objects
 
-**User** (`User`) — A registered player. A `User` has a UUIDv7 `id` and a required non-empty `name`.
+**User** (`User`) — A registered player. A `User` has a UUIDv7 `id`, a required non-empty `name`, and a `type` of `human` or `ai`. An AI user also carries the `engineId` of the demo engine that owns it.
 Avoid: player, account, profile.
+
+**User type** (`UserType`) — The value `human` or `ai` that states whether a user is a person or a demo engine. The user field is `type`, and `createUser` defaults it to `human`.
+Avoid: role, kind, user flag.
+
+**AI user** — The `User` row that one registered demo engine owns. It has `type` `ai` and an `engineId`, and every demo session it plays names it as `userId`.
+Avoid: bot user, engine account, demo user.
 
 **Game** (`PentixGame`) — A reusable game definition. A game has a board size, a set of available piece IDs, and a theoretically infinite piece sequence.
 Avoid: match, round, board.
@@ -106,7 +112,7 @@ Avoid: move symbol, opcode.
 **Piece action log** (`PieceActionLog`) — One played piece with its numeric catalog ID and its action string, for example `"RCTT"`.
 Avoid: piece record, move list.
 
-**Session action log** (`SessionActionLog`) — The ordered per-piece action log of one session. It is the durable representation of the session.
+**Session action log** (`SessionActionLog`) — The ordered per-piece action log of one session. It is the durable representation of the session. A demo log also carries its opening `level` and its `seedColumn`, so replay reproduces the seeded mino and the starting level. A human log carries neither field.
 Avoid: history, recording, transcript.
 
 **Replay** (`replayPentixGameSession`) — The reconstruction of a session by folding the recorded actions through the deterministic engine.
@@ -129,6 +135,9 @@ Avoid: engine list, engine catalog.
 **Demo session** — The headless demo play of one game by one engine. It opens with one settled mino on the row before last (`height - 2`) and the default demo level `9`.
 Avoid: demo game, demo run.
 
+**Demo session log** (`SessionActionLog` of a demo session) — The stored action log of one finished demo session. It carries the AI user, the game, the opening level, the seed column, and every applied code, including `T`. `DemoRunService` writes one when the session reaches `game-over`.
+Avoid: demo history, run log, replay file.
+
 **Attract demo** — The browser demo that runs while no player game is active. It cycles as one board set.
 Avoid: screensaver, idle mode, auto play.
 
@@ -138,7 +147,7 @@ Avoid: sidebar, engine list, panel.
 **Demo board** (`demo-slot-N`) — One board on the rail that one registered engine owns. Each board keeps its own session, statistics, and piece index.
 Avoid: rail panel, mini game.
 
-**Demo run** — One server demo batch that `POST /v1/demo-runs` starts. Every registered engine plays every game of the run.
+**Demo run** — One server demo batch that `POST /v1/demo-runs` starts. Every registered engine plays every game of the run. The run record stays in memory, while each finished demo session log is durable.
 Avoid: batch job, tournament, demo game.
 
 **Standing** — One result line of a finished demo run. It carries `name`, `points`, `lines`, `pieces`, and `playingTimeMs`. Ties break on lines, then pieces, then the shorter playing time, then the engine ID.

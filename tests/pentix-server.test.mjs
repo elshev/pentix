@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { v7 as uuidv7 } from 'uuid'
 
@@ -28,8 +29,10 @@ import {
   createPentixGameSession,
   createUser,
   DEFAULT_DEMO_STARTING_LEVEL,
+  demoEngineRegistry,
   PIECE_CATALOG,
   playDemoSession,
+  replayPentixGameSession,
 } from '../packages/pentix-core/dist/index.js'
 
 const UNKNOWN_UUID_V7 = '018cc251-f400-7000-8000-000000000000'
@@ -483,6 +486,7 @@ test('server context makes identities and piece selection deterministic', async 
     context: {
       createId: () => createdIds.shift(),
       selectPieceId: () => 3,
+      demoEngines: [],
     },
   })
 
@@ -595,20 +599,32 @@ test('POST /users rejects duplicate names case-insensitively', async () => {
 
     const listResponse = await fetch(apiUrl(handle.url, '/users'))
     const payload = await listResponse.json()
-    assert.equal(payload.users.length, 1)
+    assert.equal(
+      payload.users.filter((user) => user.type === 'human').length,
+      1,
+    )
   } finally {
     await handle.close()
   }
 })
 
-test('GET /users lists retained users', async () => {
+test('GET /users lists retained human and AI users', async () => {
+  const engineCount = demoEngineRegistry.list().length
   const handle = await startTestServer()
 
   try {
-    const emptyResponse = await fetch(apiUrl(handle.url, '/users'))
-    const emptyPayload = await emptyResponse.json()
-    assert.equal(emptyResponse.status, 200)
-    assert.deepEqual(emptyPayload, { users: [] })
+    const seededResponse = await fetch(apiUrl(handle.url, '/users'))
+    const seededPayload = await seededResponse.json()
+    assert.equal(seededResponse.status, 200)
+    assert.equal(seededPayload.users.length, engineCount)
+    assert.equal(
+      seededPayload.users.every((user) => user.type === 'ai'),
+      true,
+    )
+    assert.deepEqual(
+      seededPayload.users.map((user) => user.engineId),
+      demoEngineRegistry.list().map((engine) => engine.id),
+    )
 
     await createTestUser(handle, 'Ada')
     await createTestUser(handle, 'Grace')
@@ -616,9 +632,15 @@ test('GET /users lists retained users', async () => {
     const listResponse = await fetch(apiUrl(handle.url, '/users'))
     const payload = await listResponse.json()
     assert.equal(listResponse.status, 200)
-    assert.equal(payload.users.length, 2)
+    assert.equal(
+      payload.users.filter((user) => user.type === 'human').length,
+      2,
+    )
     assert.deepEqual(
-      payload.users.map((user) => user.name).sort(),
+      payload.users
+        .filter((user) => user.type === 'human')
+        .map((user) => user.name)
+        .sort(),
       ['Ada', 'Grace'],
     )
   } finally {
@@ -941,7 +963,11 @@ test('a created user, game, and session survive a server restart with SQLite sto
   try {
     const usersResponse = await fetch(apiUrl(second.url, '/users'))
     assert.equal(usersResponse.status, 200)
-    assert.deepEqual(await usersResponse.json(), { users: [user] })
+    const listedUsers = await usersResponse.json()
+    assert.deepEqual(
+      listedUsers.users.filter((entry) => entry.type === 'human'),
+      [user],
+    )
 
     const userResponse = await fetch(apiUrl(second.url, `/users/${user.id}`))
     assert.deepEqual(await userResponse.json(), user)
@@ -970,7 +996,7 @@ test('a missing database file starts empty', async () => {
   const handle = await startPentixServer({
     host: '127.0.0.1',
     port: 0,
-    context: { storage },
+    context: { storage, demoEngines: [] },
   })
 
   try {
@@ -1030,6 +1056,17 @@ function stubDemoEngine(id, plan) {
   return { id, name: `Engine ${id}`, description: 'stub engine', plan }
 }
 
+/** Options for a direct service test: in-memory storage and AI user ids. */
+function demoRunOptions(overrides = {}) {
+  return {
+    selectPieceId: () => 0,
+    seedColumn: 0,
+    storage: createInMemoryStorage(),
+    resolveEngineUserId: (engineId) => `ai-${engineId}`,
+    ...overrides,
+  }
+}
+
 /** The statistics one demo game with the same seeds produces. */
 function expectedDemoGameStats(plan, selectPieceId = () => 0) {
   const game = createPentixGame({ id: 'expected-game', selectPieceId })
@@ -1085,15 +1122,16 @@ async function startDemoServer(context = {}) {
 
 test('a demo run plays every engine and completes', async () => {
   let ids = 0
-  const service = new DemoRunService(() => `demo-${ids++}`, {
-    engines: [
-      stubDemoEngine('alpha', () => 'H'),
-      stubDemoEngine('beta', () => 'H'),
-    ],
-    selectPieceId: () => 0,
-    seedColumn: 0,
-    clock: () => 0,
-  })
+  const service = new DemoRunService(
+    () => `demo-${ids++}`,
+    demoRunOptions({
+      engines: [
+        stubDemoEngine('alpha', () => 'H'),
+        stubDemoEngine('beta', () => 'H'),
+      ],
+      clock: () => 0,
+    }),
+  )
 
   const run = service.startRun(2)
   assert.equal(run.status, 'queued')
@@ -1118,15 +1156,16 @@ test('demo standings sum the games and rank equal engines by id', async () => {
   const expected = expectedDemoGameStats(() => 'H')
   let ids = 0
   let read = 0
-  const service = new DemoRunService(() => `demo-${ids++}`, {
-    engines: [
-      stubDemoEngine('beta', () => 'H'),
-      stubDemoEngine('alpha', () => 'H'),
-    ],
-    selectPieceId: () => 0,
-    seedColumn: 0,
-    clock: () => read++,
-  })
+  const service = new DemoRunService(
+    () => `demo-${ids++}`,
+    demoRunOptions({
+      engines: [
+        stubDemoEngine('beta', () => 'H'),
+        stubDemoEngine('alpha', () => 'H'),
+      ],
+      clock: () => read++,
+    }),
+  )
 
   const run = service.startRun(2)
   await service.whenIdle()
@@ -1147,15 +1186,16 @@ test('demo standings sum the games and rank equal engines by id', async () => {
 })
 
 test('a throwing planner fails the run without standings', async () => {
-  const service = new DemoRunService(() => 'demo-1', {
-    engines: [
-      stubDemoEngine('broken', () => {
-        throw new Error('planner exploded')
-      }),
-    ],
-    selectPieceId: () => 0,
-    seedColumn: 0,
-  })
+  const service = new DemoRunService(
+    () => 'demo-1',
+    demoRunOptions({
+      engines: [
+        stubDemoEngine('broken', () => {
+          throw new Error('planner exploded')
+        }),
+      ],
+    }),
+  )
 
   const run = service.startRun(1)
   await service.whenIdle()
@@ -1167,7 +1207,10 @@ test('a throwing planner fails the run without standings', async () => {
 })
 
 test('a demo run rejects a game count outside its bounds', async () => {
-  const service = new DemoRunService(() => 'demo-1', { engines: [] })
+  const service = new DemoRunService(
+    () => 'demo-1',
+    demoRunOptions({ engines: [] }),
+  )
 
   for (const gameCount of [0, -1, 1.5, 257, Number.NaN]) {
     assert.throws(() => service.startRun(gameCount), /1 to 256/)
@@ -1181,7 +1224,10 @@ test('a demo run rejects a game count outside its bounds', async () => {
 
 test('finished runs are retained up to the boundary', async () => {
   let ids = 0
-  const service = new DemoRunService(() => `demo-${ids++}`, { engines: [] })
+  const service = new DemoRunService(
+    () => `demo-${ids++}`,
+    demoRunOptions({ engines: [] }),
+  )
 
   const runs = []
   for (let index = 0; index < 33; index += 1) {
@@ -1278,7 +1324,7 @@ test('GET /demo-runs/{id} rejects unknown and malformed ids', async () => {
   }
 })
 
-test('a demo run leaves retained state and storage untouched', async () => {
+test('a demo run leaves every human row unchanged', async () => {
   const storage = createInMemoryStorage()
   const handle = await startDemoServer({ storage })
 
@@ -1291,24 +1337,302 @@ test('a demo run leaves retained state and storage untouched', async () => {
     })
     assert.equal(sessionResponse.status, 201)
 
-    const before = {
-      users: await storage.users.load(),
-      games: await storage.games.load(),
-      sessions: await storage.sessions.load(),
-    }
+    const beforeHumans = (await storage.users.load()).users.filter(
+      (entry) => entry.type === 'human',
+    )
+    const beforeGames = (await storage.games.load()).games
+    const beforeSessions = (await storage.sessions.load()).sessions
 
     const run = await (
       await post(handle.url, apiPath('/demo-runs'), { gameCount: 1 })
     ).json()
     await waitForDemoRun(handle.url, run.id)
 
-    assert.deepEqual(await storage.users.load(), before.users)
-    assert.deepEqual(await storage.games.load(), before.games)
-    assert.deepEqual(await storage.sessions.load(), before.sessions)
+    const afterUsers = (await storage.users.load()).users
+    const afterGames = (await storage.games.load()).games
+    const afterSessions = (await storage.sessions.load()).sessions
+
+    assert.deepEqual(
+      afterUsers.filter((entry) => entry.type === 'human'),
+      beforeHumans,
+    )
+    assert.deepEqual(afterGames.slice(0, beforeGames.length), beforeGames)
+    assert.deepEqual(
+      afterSessions.slice(0, beforeSessions.length),
+      beforeSessions,
+    )
+    assert.equal(afterGames.length, beforeGames.length + 1)
+    assert.equal(afterSessions.length, beforeSessions.length + 2)
   } finally {
     await handle.close()
   }
 })
+
+test('a demo run stores one game and one session log per engine', async () => {
+  const storage = createInMemoryStorage()
+  const handle = await startDemoServer({ storage })
+
+  try {
+    const run = await (
+      await post(handle.url, apiPath('/demo-runs'), { gameCount: 2 })
+    ).json()
+    await waitForDemoRun(handle.url, run.id)
+
+    const games = (await storage.games.load()).games
+    const sessions = (await storage.sessions.load()).sessions
+    const aiUserIds = new Set(
+      (await storage.users.load()).users
+        .filter((entry) => entry.type === 'ai')
+        .map((entry) => entry.id),
+    )
+
+    assert.equal(games.length, 2)
+    assert.equal(sessions.length, 4)
+
+    for (const log of sessions) {
+      assert.equal(games.some((game) => game.id === log.gameId), true)
+      assert.equal(aiUserIds.has(log.userId), true)
+      assert.equal(log.level, DEFAULT_DEMO_STARTING_LEVEL)
+      assert.ok(
+        Number.isInteger(log.seedColumn),
+        'a stored demo log names its seed column',
+      )
+      assert.equal(
+        log.pieces.every((piece) => /^[TLRCAH]+$/.test(piece.actions)),
+        true,
+      )
+      assert.equal(
+        log.pieces.some((piece) => piece.actions.includes('T')),
+        true,
+      )
+      assert.equal(log.pieces.length > 0, true)
+    }
+  } finally {
+    await handle.close()
+  }
+})
+test('a rejected session write fails the run', async () => {
+  const storage = createInMemoryStorage()
+  const failingStorage = {
+    ...storage,
+    sessions: {
+      ...storage.sessions,
+      create: async () => {
+        throw new Error('disk full')
+      },
+    },
+  }
+  const handle = await startDemoServer({ storage: failingStorage })
+
+  try {
+    const run = await (
+      await post(handle.url, apiPath('/demo-runs'), { gameCount: 1 })
+    ).json()
+    const done = await waitForDemoRun(handle.url, run.id, 'failed')
+
+    assert.match(done.error, /disk full/)
+    assert.deepEqual(done.standings, [])
+  } finally {
+    await handle.close()
+  }
+})
+
+test('an in-memory demo run leaves no row after a restart', async () => {
+  const handle = await startDemoServer()
+
+  try {
+    const run = await (
+      await post(handle.url, apiPath('/demo-runs'), { gameCount: 1 })
+    ).json()
+    await waitForDemoRun(handle.url, run.id)
+  } finally {
+    await handle.close()
+  }
+
+  const restarted = createInMemoryStorage()
+  try {
+    assert.deepEqual(await restarted.users.load(), { users: [] })
+    assert.deepEqual(await restarted.games.load(), { games: [] })
+    assert.deepEqual(await restarted.sessions.load(), { sessions: [] })
+  } finally {
+    restarted.close()
+  }
+})
+
+test('a restarted server rebuilds stored demo sessions', async () => {
+  const temp = await createTempDataFile()
+  const firstStorage = createSqliteStorage({ dataFile: temp.dataFile })
+  const first = await startDemoServer({ storage: firstStorage })
+  let logs = []
+
+  try {
+    const run = await (
+      await post(first.url, apiPath('/demo-runs'), { gameCount: 1 })
+    ).json()
+    await waitForDemoRun(first.url, run.id)
+    logs = (await firstStorage.sessions.load()).sessions
+  } finally {
+    await first.close()
+    firstStorage.close()
+  }
+
+  const secondStorage = createSqliteStorage({ dataFile: temp.dataFile })
+  const second = await startDemoServer({ storage: secondStorage })
+
+  try {
+    assert.equal(logs.length, 2)
+
+    for (const log of logs) {
+      const game = await secondStorage.games.findById(log.gameId)
+      assert.notEqual(game, undefined)
+      const replayed = replayPentixGameSession(log, game)
+      assert.equal(replayed.id, log.sessionId)
+      assert.equal(replayed.userId, log.userId)
+      assert.equal(replayed.status, 'game-over')
+    }
+
+    const aiUsers = (await secondStorage.users.load()).users
+    assert.equal(aiUsers.length, 2)
+  } finally {
+    await second.close()
+    secondStorage.close()
+    await temp.cleanup()
+  }
+})
+
+
+
+test('the server seeds one AI user per demo engine', async () => {
+  const storage = createInMemoryStorage()
+  const handle = await startDemoServer({ storage })
+
+  try {
+    const users = (await storage.users.load()).users
+
+    assert.deepEqual(
+      users.map((user) => user.engineId),
+      ['alpha', 'beta'],
+    )
+    assert.deepEqual(
+      users.map((user) => user.type),
+      ['ai', 'ai'],
+    )
+    assert.deepEqual(
+      users.map((user) => user.name),
+      ['Engine alpha', 'Engine beta'],
+    )
+    for (const user of users) {
+      assertUuidV7(user.id)
+    }
+
+    const fetched = await getJson(handle.url, apiPath(`/users/${users[0].id}`))
+    assert.equal(fetched.status, 200)
+    assert.equal(fetched.body.type, 'ai')
+    assert.equal(fetched.body.engineId, 'alpha')
+  } finally {
+    await handle.close()
+  }
+})
+
+test('POST /users always creates a human user', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const response = await post(handle.url, apiPath('/users'), {
+      name: 'Ada',
+      type: 'ai',
+    })
+    assert.equal(response.status, 201)
+
+    const user = await response.json()
+    assert.equal(user.type, 'human')
+    assert.equal('engineId' in user, false)
+  } finally {
+    await handle.close()
+  }
+})
+
+test('a restarted server reuses the seeded AI users', async () => {
+  const temp = await createTempDataFile()
+  const firstStorage = createSqliteStorage({ dataFile: temp.dataFile })
+  const first = await startDemoServer({ storage: firstStorage })
+  let beforeUsers = []
+
+  try {
+    beforeUsers = (await firstStorage.users.load()).users
+  } finally {
+    await first.close()
+    firstStorage.close()
+  }
+
+  const secondStorage = createSqliteStorage({ dataFile: temp.dataFile })
+  const second = await startDemoServer({ storage: secondStorage })
+
+  try {
+    assert.equal(beforeUsers.length, 2)
+    assert.deepEqual((await secondStorage.users.load()).users, beforeUsers)
+  } finally {
+    await second.close()
+    secondStorage.close()
+    await temp.cleanup()
+  }
+})
+
+test('an old database file gains the new columns', async () => {
+  const temp = await createTempDataFile()
+  const userId = uuidv7()
+  const database = new DatabaseSync(temp.dataFile)
+  database.exec(`
+    CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+    CREATE TABLE games (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      board TEXT NOT NULL,
+      available_piece_ids TEXT NOT NULL,
+      piece_ids TEXT NOT NULL
+    );
+    CREATE TABLE game_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      game_id TEXT NOT NULL,
+      pieces TEXT NOT NULL
+    );
+  `)
+  database.prepare('INSERT INTO users (id, name) VALUES (?, ?)').run(userId, 'Ada')
+  database.close()
+
+  let storage = createSqliteStorage({ dataFile: temp.dataFile })
+
+  try {
+    const users = (await storage.users.load()).users
+    assert.deepEqual(users, [{ id: userId, name: 'Ada', type: 'human' }])
+
+    const columns = (table) => {
+      const reopened = new DatabaseSync(temp.dataFile)
+      try {
+        return reopened
+          .prepare(`PRAGMA table_info(${table})`)
+          .all()
+          .map((row) => row.name)
+      } finally {
+        reopened.close()
+      }
+    }
+
+    assert.equal(columns('users').includes('type'), true)
+    assert.equal(columns('users').includes('engine_id'), true)
+    assert.equal(columns('game_sessions').includes('level'), true)
+    assert.equal(columns('game_sessions').includes('seed_column'), true)
+
+    storage.close()
+    storage = createSqliteStorage({ dataFile: temp.dataFile })
+    assert.deepEqual((await storage.users.load()).users, users)
+  } finally {
+    storage.close()
+    await temp.cleanup()
+  }
+})
+
 
 test('a demo run is forgotten after a restart', async () => {
   const first = await startDemoServer()
@@ -1447,7 +1771,12 @@ test('unprefixed and unknown-version paths answer the not-found fallback', async
     assert.equal(unknownVersionBody.path, '/v2/users')
 
     const usersResponse = await fetch(apiUrl(handle.url, '/users'))
-    assert.deepEqual(await usersResponse.json(), { users: [] })
+    const usersPayload = await usersResponse.json()
+    assert.equal(
+      usersPayload.users.every((user) => user.type === 'ai'),
+      true,
+    )
+    assert.equal(usersPayload.users.length, demoEngineRegistry.list().length)
   } finally {
     await handle.close()
   }
@@ -1455,7 +1784,10 @@ test('unprefixed and unknown-version paths answer the not-found fallback', async
 
 test('every route config has exactly one handler', () => {
   const lifecycle = new PentixGameLifecycle(() => UNKNOWN_UUID_V7)
-  const demoRuns = new DemoRunService(() => UNKNOWN_UUID_V7, { engines: [] })
+  const demoRuns = new DemoRunService(
+    () => UNKNOWN_UUID_V7,
+    demoRunOptions({ engines: [] }),
+  )
 
   const tableKeys = buildPentixRoutes(lifecycle, demoRuns).map(
     ({ route }) => `${route.method.toUpperCase()} ${route.path}`,
@@ -1575,7 +1907,10 @@ test('live responses satisfy the documented schemas', async () => {
 
     const usersResponse = await fetch(apiUrl(handle.url, '/users'))
     const users = UserListSchema.parse(await usersResponse.json())
-    assert.deepEqual(users.users, [user])
+    assert.deepEqual(
+      users.users.filter((user) => user.type === 'human'),
+      [user],
+    )
 
     const gameResponse = await post(handle.url, apiPath('/games'), { name: 'Ranked' })
     assert.equal(gameResponse.status, 201)
