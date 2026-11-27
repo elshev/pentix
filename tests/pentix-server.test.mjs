@@ -923,6 +923,105 @@ test('SQLite repositories round-trip users, games, and session logs', async () =
     await temp.cleanup()
   }
 })
+test('a new SQLite file uses WAL and normal synchronization', async () => {
+  const temp = await createTempDataFile()
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+
+  try {
+    assert.deepEqual(storage.pragmas(), {
+      journalMode: 'wal',
+      synchronous: 1,
+    })
+
+    const database = new DatabaseSync(temp.dataFile)
+    try {
+      assert.equal(
+        database.prepare('PRAGMA journal_mode').get().journal_mode,
+        'wal',
+      )
+    } finally {
+      database.close()
+    }
+  } finally {
+    storage.close()
+    await temp.cleanup()
+  }
+})
+
+test('a reopen keeps the WAL settings and the saved rows', async () => {
+  const temp = await createTempDataFile()
+  const game = createPentixGame({
+    id: uuidv7(),
+    name: 'WAL round trip',
+    selectPieceId: () => 3,
+  })
+  const log = {
+    sessionId: uuidv7(),
+    userId: uuidv7(),
+    gameId: game.id,
+    level: 9,
+    seedColumn: 4,
+    pieces: [{ pieceId: 3, actions: 'HT' }],
+  }
+
+  const first = createSqliteStorage({ dataFile: temp.dataFile })
+  try {
+    await first.games.create(game)
+    await first.sessions.create(log)
+    assert.deepEqual(first.pragmas(), {
+      journalMode: 'wal',
+      synchronous: 1,
+    })
+  } finally {
+    first.close()
+  }
+
+  const second = createSqliteStorage({ dataFile: temp.dataFile })
+  try {
+    assert.deepEqual(second.pragmas(), {
+      journalMode: 'wal',
+      synchronous: 1,
+    })
+    assert.deepEqual(await second.games.load(), { games: [game] })
+    assert.deepEqual(await second.sessions.load(), { sessions: [log] })
+  } finally {
+    second.close()
+    await temp.cleanup()
+  }
+})
+
+test('an older rollback-journal file moves to WAL and keeps its rows', async () => {
+  const temp = await createTempDataFile()
+  const userId = uuidv7()
+  const database = new DatabaseSync(temp.dataFile)
+  database.exec(`
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'human',
+      engine_id TEXT
+    );
+  `)
+  database.prepare('INSERT INTO users (id, name) VALUES (?, ?)').run(userId, 'Ada')
+  assert.equal(
+    database.prepare('PRAGMA journal_mode').get().journal_mode,
+    'delete',
+  )
+  database.close()
+
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+  try {
+    assert.equal(storage.pragmas().journalMode, 'wal')
+    assert.deepEqual((await storage.users.load()).users, [
+      { id: userId, name: 'Ada', type: 'human' },
+    ])
+  } finally {
+    storage.close()
+    await temp.cleanup()
+  }
+})
+
+
 
 test('a created user, game, and session survive a server restart with SQLite storage', async () => {
   const temp = await createTempDataFile()

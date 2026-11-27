@@ -12,4 +12,8 @@ export type {
   UserRepository,
 } from './repositories.js'
 export { createSqliteStorage } from './sqlite.js'
-export type { SqliteStorageOptions } from './sqlite.js'
+export type {
+  SqliteStorage,
+  SqliteStorageOptions,
+  SqliteStoragePragmas,
+} from './sqlite.js'
