@@ -9,16 +9,7 @@ Both applications consume `packages/pentix-core`, which holds the piece catalog,
 
 ## Glossary
 
-- `Mino`: one square of a piece
-- `Piece`: a Pentix figure that contains from 1 to 5 minos
-- `Board`: rectangular playfield
-- `BoardCell`: one cell of the board
-- `GameLevel`: the difficulty level. A higher level means higher speed
-- `Tick`: unit of internal game time
-- `PentixGame` (Game): a reusable playfield definition. A game has a board of a defined size, a set of available pieces, and a theoretically infinite sequence drawn from those pieces. The available pieces are identified by stable numeric catalog IDs and their `key`s. In the future a game may restrict its pieces to a subset (for example, Tetris uses only 4-mino pieces).
-- `PentixGameSession` (session): one play of a `PentixGame` by one `User`. Different users can play the same `PentixGame` in different places and at different times, each through their own session.
-- `User`: a registered player with an Id and a Nick/Name. Additional attributes (first name, surname, middle name, creation date, etc.) can be added in the future.
-- `Next piece`: the piece after the current active piece. The client shows it as a preview when the "show next piece" option is on. It comes from the game's piece sequence at `nextPieceIndex`.
+The canonical glossary lives in [GLOSSARY.md](./GLOSSARY.md). It defines `Mino`, `Piece`, `Board`, `BoardCell`, `Level`, `Tick`, `PentixGame`, `PentixGameSession`, `User`, `Next piece`, and every other term the codebase uses, with the code name and the words to avoid for each term.
 
 ## Repository Layout
 
@@ -34,7 +25,17 @@ delphi/
 docs/
   foundation.md    Notes about the current architecture
   demo-engine-task.md  The shared brief for AI-authored demo engines
+  decisions/       Index of the archived decision records
+  agent-skills.md  The skills each agent carries, with the source of each one
+scripts/
+  update-agent-skill.ps1  Refresh one ported skill from its upstream repository
+GLOSSARY.md        Canonical vocabulary: one entry per term, with its code name
+openspec/
+  specs/           One spec per capability: requirements and scenarios
+  changes/         Proposed changes and the archive of shipped ones
 ```
+
+The decision records are indexed in [docs/decisions/README.md](./docs/decisions/README.md).
 
 ## Current Scope
 
