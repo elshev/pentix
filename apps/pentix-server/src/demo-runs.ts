@@ -21,6 +21,7 @@ import {
   type DemoEngine,
   type PieceIdSelector,
 } from '../../../packages/pentix-core/dist/index.js'
+import type { PentixStorage } from './storage/repositories.js'
 
 /** The most games one run may play. */
 export const MAX_DEMO_RUN_GAME_COUNT = 256
@@ -30,9 +31,6 @@ export const DEFAULT_DEMO_RUN_GAME_COUNT = 1
 
 /** How many completed runs stay readable before the oldest is dropped. */
 export const MAX_RETAINED_DEMO_RUNS = 32
-
-/** The synthetic user id of a demo session. Demo sessions are never retained. */
-export const DEMO_RUN_USER_ID = 'demo'
 
 export type DemoRunStatus = 'queued' | 'running' | 'completed' | 'failed'
 
@@ -72,6 +70,10 @@ export interface DemoRunServiceOptions {
   readonly seedColumn?: number
   /** Millisecond clock used to time `plan` calls. */
   readonly clock?: () => number
+  /** Storage for each game and each finished session log. */
+  readonly storage: PentixStorage
+  /** Returns the AI user id that an engine's demo sessions belong to. */
+  readonly resolveEngineUserId: (engineId: string) => string
 }
 
 interface DemoRunTotals {
@@ -151,18 +153,22 @@ export class DemoRunService {
   private readonly startingLevel: number
   private readonly seedColumn?: number
   private readonly clock?: () => number
+  private readonly storage: PentixStorage
+  private readonly resolveEngineUserId: (engineId: string) => string
   private readonly runs = new Map<string, DemoRunRecord>()
   private readonly queue: string[] = []
   private readonly idleWaiters: (() => void)[] = []
   private pumping = false
 
-  constructor(createId: () => string, options: DemoRunServiceOptions = {}) {
+  constructor(createId: () => string, options: DemoRunServiceOptions) {
     this.createId = createId
     this.engines = options.engines ?? demoEngineRegistry.list()
     this.selectPieceId = options.selectPieceId
     this.startingLevel = options.startingLevel ?? DEFAULT_DEMO_STARTING_LEVEL
     this.seedColumn = options.seedColumn
     this.clock = options.clock
+    this.storage = options.storage
+    this.resolveEngineUserId = options.resolveEngineUserId
   }
 
   /** Creates a queued run and returns its snapshot before any game is played. */
@@ -336,11 +342,12 @@ export class DemoRunService {
       id: this.createId(),
       selectPieceId: this.selectPieceId,
     })
+    await this.storage.games.create(game)
 
     for (const engine of record.engines) {
       const session = createDemoSession({
         id: this.createId(),
-        userId: DEMO_RUN_USER_ID,
+        userId: this.resolveEngineUserId(engine.id),
         game,
         level: this.startingLevel,
         seedColumn: this.seedColumn,
@@ -369,7 +376,10 @@ export class DemoRunService {
 
       if (playback.game.pieceIds.length > game.pieceIds.length) {
         game = playback.game
+        await this.storage.games.save(game)
       }
+
+      await this.storage.sessions.create(playback.log)
 
       const engineTotals = totals.get(engine.id)
       if (engineTotals !== undefined) {

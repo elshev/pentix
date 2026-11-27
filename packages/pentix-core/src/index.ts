@@ -138,4 +138,4 @@ export {
 } from './session-engine.js'
 export type { MoveDirection, RotateDirection } from './session-engine.js'
 export { createUser } from './user.js'
-export type { CreateUserOptions, User } from './user.js'
+export type { CreateUserOptions, User, UserType } from './user.js'

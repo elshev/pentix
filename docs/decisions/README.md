@@ -51,6 +51,7 @@ Allowed status values:
 | 2026-11-25 | [add-api-reference-ui](../../openspec/changes/archive/2026-11-25-add-api-reference-ui/design.md) | Schema-first routes through `@hono/zod-openapi`, `/openapi.json`, `/docs`, `415` rule | Accepted |
 | 2026-11-25 | [add-server-play-demo](../../openspec/changes/archive/2026-11-25-add-server-play-demo/design.md) | Demo playback in `pentix-core`, background demo runs, standings, no UI | Accepted |
 | 2026-11-26 | [add-glossary-and-decision-index](../../openspec/changes/archive/2026-11-26-add-glossary-and-decision-index/design.md) | Glossary at the repository root, decision index over the archive, project rule for the index row | Accepted |
+| 2026-11-27 | [save-demo-game-sessions](../../openspec/changes/archive/2026-11-27-save-demo-game-sessions/design.md) | AI user per demo engine, user type, stored demo session logs with opening level and seed, guarded column migration | Accepted |
 
 ## Standing decisions
 

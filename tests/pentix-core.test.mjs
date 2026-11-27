@@ -367,9 +367,32 @@ test('user initializer creates a frozen snapshot with a trimmed name', () => {
     name: '  Ada  ',
   })
 
-  assert.deepEqual(user, { id: 'user-1', name: 'Ada' })
+  assert.deepEqual(user, { id: 'user-1', name: 'Ada', type: 'human' })
   assert.equal(Object.isFrozen(user), true)
   assert.doesNotThrow(() => JSON.stringify(user))
+})
+
+test('an AI user keeps its engine binding', () => {
+  const user = createUser({
+    id: 'engine-user-1',
+    name: 'Random',
+    type: 'ai',
+    engineId: '  random  ',
+  })
+
+  assert.deepEqual(user, {
+    id: 'engine-user-1',
+    name: 'Random',
+    type: 'ai',
+    engineId: 'random',
+  })
+})
+
+test('user initializer rejects an empty engine id', () => {
+  assert.throws(
+    () => createUser({ id: 'user-1', name: 'Ada', engineId: '   ' }),
+    /User engineId must not be empty/,
+  )
 })
 
 test('user initializer rejects empty ids and names', () => {
@@ -947,6 +970,53 @@ test('replay folds a gravity tick like live play', () => {
   }
 
   assert.deepEqual(replayPentixGameSession(log, game), ticked.session)
+})
+
+test('replay applies the opening level and the demo seed', () => {
+  const game = createPentixGame({
+    id: 'game-demo',
+    selectPieceId: createSelector([3, 14]),
+  })
+  let live = createDemoSession({
+    id: 'session-demo',
+    userId: 'engine-user-1',
+    game,
+    level: DEFAULT_DEMO_STARTING_LEVEL,
+    seedColumn: 7,
+  })
+  live = gameSessionEngine.move(live, 'right')
+
+  const log = {
+    sessionId: 'session-demo',
+    userId: 'engine-user-1',
+    gameId: 'game-demo',
+    level: DEFAULT_DEMO_STARTING_LEVEL,
+    seedColumn: 7,
+    pieces: [{ pieceId: 3, actions: 'R' }],
+  }
+
+  assert.deepEqual(replayPentixGameSession(log, game), live)
+})
+
+test('a log without demo fields replays at the default level and seedless', () => {
+  const game = createPentixGame({
+    id: 'game-1',
+    selectPieceId: createSelector([3, 14]),
+  })
+  const log = {
+    sessionId: 'session-1',
+    userId: 'user-1',
+    gameId: 'game-1',
+    pieces: [],
+  }
+
+  const replayed = replayPentixGameSession(log, game)
+
+  assert.equal(replayed.statistics.level, 1)
+  assert.equal(
+    replayed.board.rows.flat().some((cell) => cell.isOccupied),
+    false,
+  )
 })
 
 test('replay folds a hard drop like live play', () => {
@@ -2441,6 +2511,7 @@ test('a blocked action leaves the placement and the tick still applies', () => {
   assert.deepEqual(blocked.session.activePiece.origin, { row: 1, column: 0 })
   assert.equal(blocked.actionIndex, 1)
   assert.equal(blocked.slot, 'tick')
+  assert.equal(blocked.log.pieces.at(-1).actions, 'L')
 
   const ticked = advanceDemoPlayback(blocked)
   assert.deepEqual(ticked.session.activePiece.origin, { row: 2, column: 0 })
@@ -2497,5 +2568,44 @@ test('a full playback ends the session without touching its inputs', () => {
     result.game.pieceIds.length >= result.session.nextPieceIndex,
     true,
   )
+})
+
+test('a playback records every applied code and its opening state', () => {
+  const { game, session } = demoPlaybackSession(7)
+  const engine = demoPlaybackEngine('stub', () => 'HL')
+  const result = playDemoSession({ engine, game, session })
+
+  assert.equal(result.log.sessionId, session.id)
+  assert.equal(result.log.userId, session.userId)
+  assert.equal(result.log.gameId, game.id)
+  assert.equal(result.log.level, DEFAULT_DEMO_STARTING_LEVEL)
+  assert.equal(result.log.seedColumn, 7)
+
+  const actions = result.log.pieces.map((piece) => piece.actions).join('')
+  assert.match(actions, /H/)
+  assert.match(actions, /T/)
+  assert.equal([...actions].every((action) => 'TLRCAH'.includes(action)), true)
+  assert.deepEqual(replayPentixGameSession(result.log, result.game), result.session)
+})
+
+test('a discarded settling code is not recorded', () => {
+  const { game, session } = demoPlaybackSession()
+  const engine = demoPlaybackEngine('stub', () => 'HR')
+
+  let resting = { game, session }
+  for (let ticks = 0; ticks < 40; ticks += 1) {
+    if (!canDemoPieceMoveDown(resting.session)) {
+      break
+    }
+    resting = gameSessionEngine.tick(resting.session, resting.game)
+  }
+
+  const playback = playbackWithLog(resting.game, resting.session, engine, 'HR')
+  const dropped = advanceDemoPlayback(playback)
+
+  assert.equal(dropped.log.pieces.length, 1)
+  assert.equal(dropped.log.pieces[0].actions, 'H')
+  assert.equal(dropped.log.seedColumn, 0)
+  assert.equal(dropped.log.level, resting.session.statistics.level)
 })
 

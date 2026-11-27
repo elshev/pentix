@@ -20,6 +20,8 @@ const UUID_V7_PATTERN =
 
 const UUID_V7_EXAMPLE = '018f0f3a-4a3f-7000-8000-000000000000'
 
+const DEMO_ENGINE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+
 const PIECE_KEYS = PIECE_CATALOG.map((piece) => piece.key) as [
   PieceKey,
   ...PieceKey[],
@@ -74,10 +76,17 @@ export const BoardSnapshotSchema = z
   })
   .openapi('BoardSnapshot') satisfies z.ZodType<BoardSnapshot>
 
+export const UserTypeSchema = z.enum(['human', 'ai']).openapi('UserType')
+
 export const UserSchema = z
   .object({
     id: UuidV7Schema,
     name: z.string().min(1),
+    type: UserTypeSchema,
+    engineId: z
+      .string()
+      .regex(DEMO_ENGINE_ID_PATTERN, 'Value must be a demo engine id.')
+      .optional(),
   })
   .openapi('User') satisfies z.ZodType<User>
 

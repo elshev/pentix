@@ -451,6 +451,13 @@ function plan(
 ): string
 ```
 
+Every comment must follow the `asd-ste100` rules for code comments. Write
+complete sentences in sentence case and the active voice. Use simple present,
+past, or future tense. Name one thing with one term. Keep identifiers, log
+field names, and quoted error strings verbatim. Do not use semicolons. The same
+rule applies to the comment block above the function and to any comment in the
+body.
+
 Do not add imports, exports, or metadata. The caller supplies the engine name
 and description itself. Do not add an explanation after the function. The
 algorithm comment above it is the only prose that the answer may carry.
@@ -528,6 +535,8 @@ function plan(
 - There is exactly one function named `plan`, taking `board`, `piece`, and
   `position`, all annotated, returning `string`.
 - A short comment above `function plan` describes the algorithm.
+- Every comment follows the `asd-ste100` rules for code comments: sentence case,
+  active voice, simple tense, one term per thing, and no semicolons.
 - The answer is produced from this document alone: no code or notes reused from
   another chat or a previous answer.
 - It returns a **string** such as `"LLCH"`.

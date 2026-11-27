@@ -41,7 +41,7 @@ The decision records are indexed in [docs/decisions/README.md](./docs/decisions/
 
 The codebase currently includes:
 
-- a `PentixServer` implemented with Node.js and TypeScript. It has user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints. It persists users, games, and sessions through engine-agnostic repositories. It also has on-demand demo batches (`POST /v1/demo-runs`, `GET /v1/demo-runs/{id}`). A batch plays every registered demo engine in the background and ranks them by points, lines, pieces, and planning time
+- a `PentixServer` implemented with Node.js and TypeScript. It has user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints. It persists users, games, and sessions through engine-agnostic repositories. It also has on-demand demo batches (`POST /v1/demo-runs`, `GET /v1/demo-runs/{id}`). A batch plays every registered demo engine in the background and ranks them by points, lines, pieces, and planning time. Every registered demo engine owns an AI user, and each finished demo session is stored as an action log
 - a shared `pentix-core` package with:
   - `Piece`
   - `Offset`
@@ -67,9 +67,9 @@ With the server running, the API reference is at `/docs` (Swagger UI with **Try 
 
 Every API endpoint carries the `/v1` major-version prefix. A path without the prefix, or with an unknown version such as `/v2`, answers `404 Not Found` with the not-found envelope. The two documentation endpoints stay outside the prefix at `/docs` and `/openapi.json`. The document reports the API version `1.0.0` in its `info.version` field.
 
-- `POST /v1/users` creates a `User` with a UUIDv7 `id` and a required non-empty `name`. The server rejects a duplicate name (compared case-insensitively after trimming) with `409 Conflict`.
-- `GET /v1/users` lists retained users as `{ "users": [...] }`.
-- `GET /v1/users/{id}` returns a single retained user.
+- `POST /v1/users` creates a `User` with a UUIDv7 `id`, a required non-empty `name`, and a `type` of `human` or `ai`. A client-created user is always `human`. The server seeds one `ai` user for every registered demo engine, with that engine's id in `engineId`. The server rejects a duplicate name (compared case-insensitively after trimming) with `409 Conflict`.
+- `GET /v1/users` lists retained users as `{ "users": [...] }`, including the seeded AI users. A client filters on `type` to read only human users.
+- `GET /v1/users/{id}` returns a single retained user, whether human or AI.
 - `POST /v1/games` initializes a `PentixGame` with a UUIDv7 ID, an optional name, an empty default board, and at least two catalog piece IDs.
 - `POST /v1/game-sessions` starts a `PentixGameSession` for a required `userId` that references a retained user. An omitted, null, or empty `gameId` creates a game. A supplied UUIDv7 reuses an existing game. Sessions use `id`, `gameId`, `userId`, and a zero-based `nextPieceIndex`.
 - `POST /v1/game-sessions/{id}/next-piece` promotes the preview to the active piece, advances the cursor, extends the parent game's piece sequence when needed, and returns the updated session.
@@ -78,11 +78,11 @@ Every API endpoint carries the `/v1` major-version prefix. A path without the pr
 - `POST /v1/game-sessions/{id}/tick` steps gravity. When the piece cannot move down, it locks, clears lines, scores, levels, and spawns the next piece.
 - `POST /v1/game-sessions/{id}/drop` scores by fall distance and moves the piece to its lowest position without locking. The following tick locks it.
 - `POST /v1/demo-runs` starts a demo batch in the background and answers `202 Accepted` with the run's snapshot. The optional body carries `{ "gameCount": <integer> }`, the number of games to play. That value is `1` by default and `256` at most. The server rejects any other value with `400 Bad Request`. Every engine registered in the shared demo-engine registry competes in every game. Each engine plays its own demo session, created from one shared `PentixGame`. So all engines face the same piece sequence.
-- `GET /v1/demo-runs/{id}` reports the run: `status` (`queued`, `running`, `completed`, `failed`), `gameCount`, `completedGameCount`, the competing `engines`, and — once completed — `standings` ordered winner to loser. Each standing line carries the engine's `name`, its `points`, `lines`, `pieces`, and `playingTimeMs` (the summed time spent inside that engine's `plan` calls). Ties break on lines, then pieces, then the shorter playing time, then engine id. There is no UI for runs: they live in server memory only, the `32` most recent completions stay readable, and a restart forgets them.
+- `GET /v1/demo-runs/{id}` reports the run: `status` (`queued`, `running`, `completed`, `failed`), `gameCount`, `completedGameCount`, the competing `engines`, and — once completed — `standings` ordered winner to loser. Each standing line carries the engine's `name`, its `points`, `lines`, `pieces`, and `playingTimeMs` (the summed time spent inside that engine's `plan` calls). Ties break on lines, then pieces, then the shorter playing time, then engine id. There is no UI for runs. The run record lives in server memory only, the `32` most recent completions stay readable, and a restart forgets the run id. Each game and each engine's finished session log is durable in the configured store.
 
 Scoring follows [Demo/Pentix/Main.pas](./delphi/Demo/Pentix/Main.pas): a lock scores `points × level`, a drop scores `points × (height − row) × level ÷ 10`, a cleared line scores `lineIndex × (10 + (height − row)) × level`, and emptying the field awards a `1000`-point bonus. Level increases every 30 locked pieces up to level 9.
 
-`PentixServer` persists users, games, and sessions through repository interfaces in `apps/pentix-server/src/storage/`, so neither the HTTP layer nor the lifecycle references a storage engine. `startPentixServer` defaults to in-memory repositories for deterministic tests. `npm run start:server` builds SQLite repositories for the file named by `PENTIX_DATA_FILE` (default `data/pentix.db`). Users, games, and sessions live in separate tables. The server stores a game's piece sequence as a single ordered field. It stores each session as an action log: every played piece's numeric ID plus its ordered `T`/`L`/`R`/`C`/`A`/`H` actions. There is no soft-drop action. Sessions are reloaded at startup by replaying those actions through the deterministic shared engine. Retained state is loaded at startup, a missing database file starts empty, and a corrupt database file fails startup with a clear error. Gameplay and next-piece requests are state-changing and not idempotent, so clients must not blindly retry a successful-looking request after an uncertain network failure.
+`PentixServer` persists users, games, and sessions through repository interfaces in `apps/pentix-server/src/storage/`, so neither the HTTP layer nor the lifecycle references a storage engine. `startPentixServer` defaults to in-memory repositories for deterministic tests. `npm run start:server` builds SQLite repositories for the file named by `PENTIX_DATA_FILE` (default `data/pentix.db`). Users, games, and sessions live in separate tables. The server stores a game's piece sequence as a single ordered field. It stores each session as an action log: every played piece's numeric ID plus its ordered `T`/`L`/`R`/`C`/`A`/`H` actions. There is no soft-drop action. A user row also stores its `type` and its optional `engine_id`. A session row stores its optional opening `level` and demo `seed_column`, so a stored demo log replays its seeded board and its starting level. An older database file gains these four columns in place. Sessions are reloaded at startup by replaying those actions through the deterministic shared engine. Retained state is loaded at startup, a missing database file starts empty, and a corrupt database file fails startup with a clear error. Gameplay and next-piece requests are state-changing and not idempotent, so clients must not blindly retry a successful-looking request after an uncertain network failure.
 
 ## Commands
 
@@ -91,6 +91,7 @@ Scoring follows [Demo/Pentix/Main.pas](./delphi/Demo/Pentix/Main.pas): a lock sc
 - `npm run dev:web`: run the browser app with Vite
 - `npm run test`: verify shared primitives, game/session lifecycle behavior, server APIs, and the browser reducer, engine, and demo planner
 - `npm run lint`: run ESLint across the repository
+- `powershell -NoProfile -File scripts\ste-lint.ps1 [-Change <name>] [-Path <file,...>]`: run the STE linter in one pass. With no option it lints the shipped documents and specs. `-Change` adds one change folder, and `-Path` adds named files
 
 ## Legacy Notes
 

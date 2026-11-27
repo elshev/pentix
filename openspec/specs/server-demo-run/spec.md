@@ -39,7 +39,7 @@ TBD - created by archiving change add-server-play-demo. Update Purpose after arc
 
 ### Requirement: A batch plays one session per registered engine per game
 
-Each game of a run SHALL create one `PentixGame` through the server's id and piece-selection seams. The game SHALL create one demo session for every engine registered in the shared demo engine registry, in registration order. All sessions of one game SHALL belong to that one game. In this way the engines at the same `nextPieceIndex` hold the same pieces. A playback that extends the sequence SHALL extend it for the engines that follow. Each session SHALL be created through the shared demo-session factory, seeded with one settled mino and opened at the run's demo starting level. The run's engine set SHALL be fixed when the run starts and reported in the snapshot. In this way a registry change during a batch does not add or remove a competitor mid-run.
+Each game of a run SHALL create one `PentixGame` through the server's id and piece-selection seams. The service SHALL store that game through the game repository. The game SHALL create one demo session for every engine registered in the shared demo engine registry, in registration order. All sessions of one game SHALL belong to that one game. In this way the engines at the same `nextPieceIndex` hold the same pieces. A playback that extends the sequence SHALL extend it for the engines that follow. Each session SHALL be created through the shared demo-session factory, seeded with one settled mino and opened at the run's demo starting level. Each session SHALL use the AI user of its engine as `userId`. The run's engine set SHALL be fixed when the run starts and reported in the snapshot. In this way a registry change during a batch does not add or remove a competitor mid-run. When a session reaches `game-over`, the service SHALL store its action log through the session repository.
 
 #### Scenario: Every registered engine competes
 
@@ -47,6 +47,7 @@ Each game of a run SHALL create one `PentixGame` through the server's id and pie
 - **WHEN** a run starts
 - **THEN** the snapshot lists those nine engine ids in registration order
 - **AND** every one of them receives a session in every game
+- **AND** every session names its engine's AI user
 
 #### Scenario: One game, one piece sequence
 
@@ -61,7 +62,7 @@ Each game of a run SHALL create one `PentixGame` through the server's id and pie
 - **WHEN** the game is played out
 - **THEN** each session has a different session id
 - **AND** each keeps its own board, statistics, and piece index
-- **AND** it is not persisted as a retained game or session
+- **AND** each session is stored under its own id when it ends
 
 #### Scenario: A new engine joins the field without server code changes
 
@@ -184,22 +185,23 @@ The shared demo playback in `pentix-core` SHALL play every session of a run. In 
 - **THEN** every movement, rotation, drop, tick, lock, clear, and game-over detection goes through the shared engine
 - **AND** the session replay comes from the shared demo playback
 
-### Requirement: Runs live in memory only
+### Requirement: A run record lives in memory and its demo sessions are durable
 
-A demo run SHALL NOT use the user, game, or session repositories. It SHALL NOT create, update, or remove any retained user, game, or session, whatever storage the server was started with. Finished runs SHALL be retained in server memory, bounded to the `32` most recent completions, and a run SHALL be forgotten when the server process restarts. A run id that was evicted or forgotten SHALL answer `404`.
+A run's own record SHALL stay in server memory. That record holds `status`, `gameCount`, `completedGameCount`, `engines`, and `standings`. Finished runs SHALL remain bounded to the `32` most recent completions. A restart SHALL forget every run id, so a forgotten or evicted id SHALL answer `404`. The run's `PentixGame` rows and its per-engine `SessionActionLog` rows SHALL be durable in the storage that the server was started with. The run SHALL NOT create, update, or remove a human user, a retained human game, or a retained human session.
 
-#### Scenario: Retained state is untouched
+#### Scenario: A restart forgets the run but keeps its sessions
 
-- **GIVEN** a server with SQLite storage holding users, games, and sessions
+- **GIVEN** a completed run on a server with durable storage
+- **WHEN** the server restarts
+- **THEN** the run id answers `404`
+- **AND** the run's game row and session logs are still in the store
+
+#### Scenario: Human state is untouched
+
+- **GIVEN** a server with durable storage holding a human user, game, and session
 - **WHEN** a demo run completes
-- **THEN** the stored users, games, and session logs are unchanged
-- **AND** no new row was written
-
-#### Scenario: A restart forgets runs
-
-- **GIVEN** a completed run on a running server
-- **WHEN** the server restarts and the run id is fetched
-- **THEN** the response status is `404`
+- **THEN** the human user, game, and session rows are unchanged
+- **AND** the only new rows are the run's games, its session logs, and the seeded AI users
 
 #### Scenario: Retention is bounded
 

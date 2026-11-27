@@ -1,5 +1,6 @@
 /** Compact, replayable session action log plus the function that replays it. */
 import type { PentixGame } from './game.js'
+import { withSeededDemoMino } from './demo-seed.js'
 import { createPentixGameSession, type PentixGameSession } from './session.js'
 import { gameSessionEngine } from './session-engine.js'
 
@@ -46,13 +47,40 @@ export interface PieceActionLog {
 
 /**
  * The durable, replayable representation of a session: the ordered actions
- * taken per piece, rather than the full board state after every action.
+ * taken per piece, rather than the full board state after every action. A demo
+ * log also carries its opening level and seed column, so replay reproduces the
+ * seeded mino and the starting level. A human log carries neither field.
  */
 export interface SessionActionLog {
   readonly sessionId: string
   readonly userId: string
   readonly gameId: string
+  /** The opening level. Absent means the factory's default level. */
+  readonly level?: number
+  /** The column of the demo seed mino. Absent means no seed mino. */
+  readonly seedColumn?: number
   readonly pieces: readonly PieceActionLog[]
+}
+
+/** Applies the opening level and the demo seed before the actions run. */
+function applyOpeningState(
+  log: SessionActionLog,
+  session: PentixGameSession,
+): PentixGameSession {
+  const leveled =
+    log.level === undefined
+      ? session
+      : Object.freeze({
+          ...session,
+          statistics: Object.freeze({
+            ...session.statistics,
+            level: log.level,
+          }),
+        })
+
+  return log.seedColumn === undefined
+    ? leveled
+    : withSeededDemoMino(leveled, log.seedColumn)
 }
 
 /**
@@ -64,11 +92,14 @@ export function replayPentixGameSession(
   log: SessionActionLog,
   game: PentixGame,
 ): PentixGameSession {
-  let session = createPentixGameSession({
-    id: log.sessionId,
-    userId: log.userId,
-    game,
-  })
+  let session = applyOpeningState(
+    log,
+    createPentixGameSession({
+      id: log.sessionId,
+      userId: log.userId,
+      game,
+    }),
+  )
   let currentGame = game
 
   for (const pieceLog of log.pieces) {

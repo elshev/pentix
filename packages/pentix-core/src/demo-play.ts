@@ -20,87 +20,28 @@ import {
 } from './demo-actions.js'
 import type { DemoActionLog } from './demo-actions.js'
 import type { DemoEngine } from './demo-engine.js'
-import type { PieceKey } from './catalog.js'
+import { getPieceDefinition } from './catalog.js'
+import {
+  DEMO_SEED_PIECE_KEY,
+  demoSeedColumnOf,
+  withSeededDemoMino,
+} from './demo-seed.js'
 import type { PentixGame, PieceIdSelector } from './game.js'
 import { gameSessionEngine } from './session-engine.js'
 import {
   createPentixGameSession,
   type PentixGameSession,
 } from './session.js'
+import type {
+  PieceActionLog,
+  SessionAction,
+  SessionActionLog,
+} from './session-log.js'
 
-/** The piece key of the mino every demo session starts with. */
-export const DEMO_SEED_PIECE_KEY: PieceKey = '1Line'
+export { DEMO_SEED_PIECE_KEY, withSeededDemoMino }
 
 /** The level a demo session opens at — the browser client's default start. */
 export const DEFAULT_DEMO_STARTING_LEVEL = 9
-
-/** The demo seed sits on the row before last, so the demo plans around it. */
-function demoSeedRow(height: number): number {
-  return height - 2
-}
-
-function checkSeedColumn(seedColumn: number, width: number): number {
-  if (
-    !Number.isInteger(seedColumn) ||
-    seedColumn < 0 ||
-    seedColumn >= width
-  ) {
-    throw new RangeError(
-      `Demo seed column ${seedColumn} must be an integer from 0 to ${width - 1}.`,
-    )
-  }
-
-  return seedColumn
-}
-
-/**
- * Adds the demo's starting mino: one settled cell in `seedColumn` (or a random
- * column) of the row before last. It is an ordinary settled cell that carries a
- * piece key, so it survives line-clear rebuilds, stays until its row is cleared,
- * and adds no score, cleared line, or locked piece. A board without rows or
- * columns is returned unchanged.
- */
-export function withSeededDemoMino(
-  session: PentixGameSession,
-  seedColumn?: number,
-): PentixGameSession {
-  const { width, height } = session.board
-  const seedRow = demoSeedRow(height)
-  if (seedRow < 0 || width === 0) {
-    return session
-  }
-
-  const column =
-    seedColumn === undefined
-      ? Math.floor(Math.random() * width)
-      : checkSeedColumn(seedColumn, width)
-
-  return Object.freeze({
-    ...session,
-    board: Object.freeze({
-      width,
-      height,
-      rows: Object.freeze(
-        session.board.rows.map((cells, row) =>
-          row === seedRow
-            ? Object.freeze(
-                cells.map((cell) =>
-                  cell.column === column
-                    ? Object.freeze({
-                        row: cell.row,
-                        column: cell.column,
-                        isOccupied: true,
-                        pieceKey: DEMO_SEED_PIECE_KEY,
-                      })
-                    : cell,
-                ),
-              )
-            : cells,
-        ),
-      ),
-    }),
-  })
-}
 
 /** What a demo session is created from. */
 export interface DemoSessionOptions {
@@ -157,6 +98,7 @@ export interface DemoPlaybackOptions {
 /**
  * One session's demo playback. `slot` names the operation that comes next, and
  * the cached log belongs to `plannedPieceIndex`. A spawned piece replaces it.
+ * `log` is the recorded `SessionActionLog` of every operation applied so far.
  */
 export interface DemoPlayback {
   readonly engine: DemoEngine
@@ -171,6 +113,7 @@ export interface DemoPlayback {
   readonly plans: number
   readonly planTimeMs: number
   readonly done: boolean
+  readonly log: SessionActionLog
   readonly selectPieceId?: PieceIdSelector
   readonly clock: () => number
 }
@@ -179,6 +122,7 @@ export interface DemoPlayback {
 export interface DemoPlayResult {
   readonly game: PentixGame
   readonly session: PentixGameSession
+  readonly log: SessionActionLog
   readonly plans: number
   readonly planTimeMs: number
 }
@@ -198,6 +142,47 @@ function mergeGame(shared: PentixGame, next: PentixGame): PentixGame {
   return next.pieceIds.length > shared.pieceIds.length ? next : shared
 }
 
+/** Appends one applied code under the piece that was active at the time. */
+function appendPieceCode(
+  pieces: readonly PieceActionLog[],
+  session: PentixGameSession,
+  code: SessionAction,
+): readonly PieceActionLog[] {
+  const pieceId = getPieceDefinition(session.activePiece.key).id
+  const next = pieces.map((piece) => ({
+    pieceId: piece.pieceId,
+    actions: piece.actions,
+  }))
+  const lastPiece = next[next.length - 1]
+
+  if (lastPiece === undefined || lastPiece.pieceId !== pieceId) {
+    next.push({ pieceId, actions: code })
+  } else {
+    lastPiece.actions += code
+  }
+
+  return Object.freeze(
+    next.map((piece) =>
+      Object.freeze({ pieceId: piece.pieceId, actions: piece.actions }),
+    ),
+  )
+}
+
+/** Records one applied code in the playback log. */
+function recordCode(
+  playback: DemoPlayback,
+  session: PentixGameSession,
+  code: SessionAction,
+): DemoPlayback {
+  return Object.freeze({
+    ...playback,
+    log: Object.freeze({
+      ...playback.log,
+      pieces: appendPieceCode(playback.log.pieces, session, code),
+    }),
+  })
+}
+
 /**
  * Starts a playback. The opening operation is a steering step, so the piece that
  * already exists waits one step before it is steered, exactly like the browser
@@ -206,6 +191,8 @@ function mergeGame(shared: PentixGame, next: PentixGame): PentixGame {
 export function createDemoPlayback(
   options: DemoPlaybackOptions,
 ): DemoPlayback {
+  const seedColumn = demoSeedColumnOf(options.session)
+
   return Object.freeze({
     engine: options.engine,
     game: options.game,
@@ -217,6 +204,14 @@ export function createDemoPlayback(
     plans: 0,
     planTimeMs: 0,
     done: options.session.status !== 'active',
+    log: Object.freeze({
+      sessionId: options.session.id,
+      userId: options.session.userId,
+      gameId: options.session.gameId,
+      level: options.session.statistics.level,
+      ...(seedColumn === undefined ? {} : { seedColumn }),
+      pieces: Object.freeze([] as PieceActionLog[]),
+    }),
     selectPieceId: options.selectPieceId,
     clock: options.clock ?? defaultClock,
   })
@@ -300,13 +295,14 @@ export function advanceDemoPlayback(playback: DemoPlayback): DemoPlayback {
   }
 
   if (playback.slot === 'tick') {
+    const recorded = recordCode(playback, playback.session, 'T')
     const result = gameSessionEngine.tick(
       playback.session,
       playback.game,
       playback.selectPieceId,
     )
     return Object.freeze({
-      ...playback,
+      ...recorded,
       game: mergeGame(playback.game, result.game),
       session: result.session,
       slot: 'action',
@@ -326,8 +322,9 @@ export function advanceDemoPlayback(playback: DemoPlayback): DemoPlayback {
   }
 
   const applied = applyDemoAction(planned, code)
+  const recorded = recordCode(planned, planned.session, code)
   return Object.freeze({
-    ...planned,
+    ...recorded,
     game: mergeGame(planned.game, applied.game),
     session: applied.session,
     actionIndex: planned.actionIndex + 1,
@@ -349,6 +346,7 @@ export function playDemoSession(
   return {
     game: playback.game,
     session: playback.session,
+    log: playback.log,
     plans: playback.plans,
     planTimeMs: playback.planTimeMs,
   }
