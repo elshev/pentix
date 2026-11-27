@@ -1,6 +1,6 @@
 ﻿# Pentix Architecture
 
-The repository uses an `apps/` and `packages/` layout so the browser client and `PentixServer` share common game-domain code instead of duplicating it.
+The repository uses an `apps/` and `packages/` layout so the browser client and `PentixServer` share common game-domain code instead of duplicating it. The [GLOSSARY.md](../GLOSSARY.md) file defines the vocabulary that this note uses.
 
 ## What Exists Today
 
