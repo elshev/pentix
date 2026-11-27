@@ -3,8 +3,12 @@ import { HTTPException } from 'hono/http-exception'
 import { OpenAPIHono, type OpenAPIHonoOptions } from '@hono/zod-openapi'
 import type { ZodError } from 'zod'
 
-import { buildPentixRoutes } from './api/routes.js'
-import { registerApiReference } from './api/docs.js'
+import { buildPentixRoutes, listPentixRouteKeys } from './api/routes.js'
+import {
+  API_DOCUMENT_PATH,
+  API_REFERENCE_PATH,
+  registerApiReference,
+} from './api/docs.js'
 import { writeJson } from './api/responses.js'
 import { HttpError, HttpStatus } from './http.js'
 import type { DemoRunService } from './demo-runs.js'
@@ -12,8 +16,7 @@ import type { PentixGameLifecycle } from './server.js'
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024
 
-const NOT_FOUND_MESSAGE =
-  'PentixServer is running. Supported endpoints are POST /games, POST /game-sessions, POST /game-sessions/{id}/next-piece, POST /game-sessions/{id}/move, POST /game-sessions/{id}/rotate, POST /game-sessions/{id}/tick, POST /game-sessions/{id}/drop, POST /demo-runs, GET /demo-runs/{id}, POST /users, GET /users, and GET /users/{id}. The API reference is at GET /docs and its OpenAPI document at GET /openapi.json.'
+const NOT_FOUND_MESSAGE = `PentixServer is running. Supported endpoints are ${listPentixRouteKeys().join(', ')}. The API reference is at GET ${API_REFERENCE_PATH} and its OpenAPI document at GET ${API_DOCUMENT_PATH}.`
 
 type ValidationHook = NonNullable<OpenAPIHonoOptions<Env>['defaultHook']>
 

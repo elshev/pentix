@@ -13,17 +13,24 @@ export const name = 'Claude Opus 5.5 Extra'
 export const description =
   'Claude Opus 5.5 in Extra mode (40 min of thinking): a breadth-first search over every reachable placement, scored by a board heuristic plus earned points, then re-ranked by a 29-block one-piece lookahead.'
 
+// Pentix demo planner.
+// 1. Breadth-first search over (orientation, column, row): every action costs
+//    one tick, so the row is set by the number of actions spent. Rotations
+//    that would need a wall kick are never used; blocked moves serve as waits.
+//    From each state a hard drop is tried, plus one side-step after the drop.
+// 2. Each reachable placement is scored: drop and cleared-row points plus a
+//    board heuristic (holes, transitions, wells, landing height, ...).
+// 3. The best few are re-ranked by the expected best placement of the next
+//    piece, averaged over the whole 29-block set.
+// 4. The log ends at H whenever the chosen placement is reachable by a
+//    straight drop down its landing column; one trailing L or R is emitted
+//    only for a pocket under an overhang, reached by dropping one column
+//    beside it and side-stepping on the last tick.
 function authoredPlan(
   board: number[][],
   piece: { row: number; column: number }[][],
   position: { row: number; column: number },
 ): string {
-  // Strategy: enumerate every placement the action string can reach (a
-  // breadth-first search where each action also costs one row of fall,
-  // including tucks and the single side-step after the hard drop), score each
-  // one with a board heuristic plus the points it earns, then re-rank the best
-  // few by the expected best follow-up over the whole 29-block set.
-  //
   // Weights: landing height, eroded cells, row transitions, column
   // transitions, holes, wells, hole depth, rows with holes, cleared-row
   // points, danger, danger line (rows from the top), bumpiness, lookahead
@@ -135,6 +142,13 @@ function authoredPlan(
   const cD: number[] = []
   const cK: number[] = []
   const cSide: number[] = []
+  // for the same placement: the best log ending at H without a side-step and
+  // the best log in which the piece lands while it is steered ('' = none)
+  const cPS: string[] = []
+  const cPD: number[] = []
+  const cPK: number[] = []
+  const cTS: string[] = []
+  const cTK: number[] = []
 
   function addCand(o: number, r: number, c: number, s: string, d: number, risk: number, side: number): void {
     const ci = c + PAD
@@ -143,9 +157,10 @@ function authoredPlan(
       return
     }
     const key = (o * span + ci) * rowSpan + ri
-    const j = candIndex[key]
+    let j = candIndex[key]
     if (j < 0) {
-      candIndex[key] = cO.length
+      j = cO.length
+      candIndex[key] = j
       cO.push(o)
       cR.push(r)
       cC.push(c)
@@ -153,7 +168,37 @@ function authoredPlan(
       cD.push(d)
       cK.push(risk)
       cSide.push(side)
+      const drop = side === 0 && s.charAt(s.length - 1) === 'H'
+      cPS.push(drop ? s : '')
+      cPD.push(d)
+      cPK.push(risk)
+      cTS.push(side === 0 && !drop ? s : '')
+      cTK.push(risk)
       return
+    }
+    if (side === 0 && s.charAt(s.length - 1) !== 'H') {
+      if (cTS[j] === '' || risk < cTK[j] || (risk === cTK[j] && s.length < cTS[j].length)) {
+        cTS[j] = s
+        cTK[j] = risk
+      }
+    } else if (side === 0) {
+      let plainBetter = false
+      if (cPS[j] === '') {
+        plainBetter = true
+      } else if (d > cPD[j] + 1e-9) {
+        plainBetter = true
+      } else if (d > cPD[j] - 1e-9) {
+        if (risk !== cPK[j]) {
+          plainBetter = risk < cPK[j]
+        } else {
+          plainBetter = s.length < cPS[j].length
+        }
+      }
+      if (plainBetter) {
+        cPS[j] = s
+        cPD[j] = d
+        cPK[j] = risk
+      }
     }
     let better = false
     if (d > cD[j] + 1e-9) {
@@ -201,7 +246,7 @@ function authoredPlan(
       const lr = land(o, r, c)
       const dv = lr > r ? (minos * (height - r)) / 10 : 0
       addCand(o, lr, c, p + 'H', dv, k, 0)
-      // one side-step after the drop. It may uncover at most one more row
+      // one side-step after the drop; it may uncover at most one more row
       if (fits(o, lr, c - 1)) {
         const sl = land(o, lr, c - 1)
         if (sl <= lr + 1) {
@@ -590,7 +635,7 @@ function authoredPlan(
   let stamp = 0
 
   // Value of the prepared board after adding cells that clear no row and lie
-  // inside the board. g is the prepared board. It is restored on return.
+  // inside the board. g is the prepared board; it is restored on return.
   function incrementalValue(g: number[], rs: number[], cs: number[], r: number, c: number): number {
     stamp += 1
     const count = rs.length
@@ -746,7 +791,7 @@ function authoredPlan(
   const scratch: number[] = grid.slice()
 
   // Value of locking a piece with cells (rs, cs) at (r, c) on board g: the
-  // move itself plus the board it leaves. g is left unchanged. The resulting
+  // move itself plus the board it leaves. g is left unchanged; the resulting
   // board is written to `out` when one is given.
   function evalPlacement(g: number[], rs: number[], cs: number[], r: number, c: number, drop: number, out: number[] | null): number {
     const count = rs.length
@@ -888,12 +933,45 @@ function authoredPlan(
     return cS[a].length - cS[b].length
   })
 
-  let K = Math.floor(WT[12])
-  if (K > total) {
-    K = total
+  // True when a straight drop down the landing column from the entry row
+  // reaches the placement, so it needs no side-step.
+  function straight(j: number): boolean {
+    const o = cO[j]
+    if (!fits(o, r0, cC[j])) {
+      return false
+    }
+    return land(o, r0, cC[j]) === cR[j]
   }
-  if (K <= 1 || v1[order[0]] < -1e6) {
-    return cS[order[0]]
+
+  // The log a placement is emitted with. A straight-drop placement ends at H
+  // and never side-steps; a pocket under an overhang keeps the searched log,
+  // which may be a drop one column beside it followed by one L or R.
+  function emit(j: number): string {
+    if (straight(j)) {
+      return cPS[j] !== '' ? cPS[j] : cTS[j] + 'H'
+    }
+    return cS[j]
+  }
+
+  const allowed: number[] = []
+  for (let q = 0; q < total; q += 1) {
+    const j = order[q]
+    if (!straight(j) || cPS[j] !== '' || cTS[j] !== '') {
+      allowed.push(j)
+    }
+  }
+  if (allowed.length === 0) {
+    const s0 = cS[order[0]]
+    const h = s0.indexOf('H')
+    return h >= 0 ? s0.substring(0, h + 1) : s0
+  }
+
+  let K = Math.floor(WT[12])
+  if (K > allowed.length) {
+    K = allowed.length
+  }
+  if (K <= 1 || v1[allowed[0]] < -1e6) {
+    return emit(allowed[0])
   }
 
   // ---- one piece of lookahead over the whole block set ---------------------
@@ -1032,10 +1110,10 @@ function authoredPlan(
   }
 
   const after: number[] = grid.slice()
-  let bestJ = order[0]
+  let bestJ = allowed[0]
   let bestV = Number.NEGATIVE_INFINITY
   for (let q = 0; q < K; q += 1) {
-    const j = order[q]
+    const j = allowed[q]
     if (v1[j] < -1e6) {
       continue
     }
@@ -1052,7 +1130,7 @@ function authoredPlan(
       bestJ = j
     }
   }
-  return cS[bestJ]
+  return emit(bestJ)
 }
 
 export const plan = adaptAuthoredPlan(authoredPlan)

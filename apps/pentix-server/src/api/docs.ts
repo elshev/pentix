@@ -6,6 +6,8 @@ import { swaggerUI } from '@hono/swagger-ui'
 import type { OpenAPIHono } from '@hono/zod-openapi'
 import type { Env } from 'hono'
 
+import { API_BASE_PATH, API_DOCUMENT_VERSION } from './version.js'
+
 const require = createRequire(import.meta.url)
 
 /** Where the generated OpenAPI 3.1 document is served. */
@@ -50,9 +52,8 @@ export function registerApiReference<E extends Env>(
     openapi: '3.1.0',
     info: {
       title: 'PentixServer API',
-      version: '0.1.0',
-      description:
-        'Users, Pentix games, game sessions, gameplay actions, and background demo runs.',
+      version: API_DOCUMENT_VERSION,
+      description: `Users, Pentix games, game sessions, gameplay actions, and background demo runs. Every API endpoint carries the ${API_BASE_PATH} major-version prefix.`,
     },
     servers: [
       {
