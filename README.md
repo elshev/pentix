@@ -41,7 +41,7 @@ The decision records are indexed in [docs/decisions/README.md](./docs/decisions/
 
 The codebase currently includes:
 
-- a `PentixServer` implemented with Node.js and TypeScript. It has user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints. It persists users, games, and sessions through engine-agnostic repositories. It also has on-demand demo batches (`POST /demo-runs`, `GET /demo-runs/{id}`). A batch plays every registered demo engine in the background and ranks them by points, lines, pieces, and planning time
+- a `PentixServer` implemented with Node.js and TypeScript. It has user management, game creation, session start, next-piece, and gameplay (move/rotate/tick/drop) endpoints. It persists users, games, and sessions through engine-agnostic repositories. It also has on-demand demo batches (`POST /v1/demo-runs`, `GET /v1/demo-runs/{id}`). A batch plays every registered demo engine in the background and ranks them by points, lines, pieces, and planning time
 - a shared `pentix-core` package with:
   - `Piece`
   - `Offset`
@@ -65,18 +65,20 @@ The following are intentionally not implemented yet:
 
 With the server running, the API reference is at `/docs` (Swagger UI with **Try it out**) and its OpenAPI 3.1 document at `/openapi.json`. The default origin is `http://127.0.0.1:3100`, and `PENTIX_SERVER_HOST`/`PENTIX_SERVER_PORT` change it. The console loads its stylesheet and bundle from this server under `/docs/swagger-ui-dist/*`, so it needs no CDN or internet access. A request that sends a body without a JSON content type is answered with `415 Unsupported Media Type` and a `{ message }` body.
 
-- `POST /users` creates a `User` with a UUIDv7 `id` and a required non-empty `name`. The server rejects a duplicate name (compared case-insensitively after trimming) with `409 Conflict`.
-- `GET /users` lists retained users as `{ "users": [...] }`.
-- `GET /users/{id}` returns a single retained user.
-- `POST /games` initializes a `PentixGame` with a UUIDv7 ID, an optional name, an empty default board, and at least two catalog piece IDs.
-- `POST /game-sessions` starts a `PentixGameSession` for a required `userId` that references a retained user. An omitted, null, or empty `gameId` creates a game. A supplied UUIDv7 reuses an existing game. Sessions use `id`, `gameId`, `userId`, and a zero-based `nextPieceIndex`.
-- `POST /game-sessions/{id}/next-piece` promotes the preview to the active piece, advances the cursor, extends the parent game's piece sequence when needed, and returns the updated session.
-- `POST /game-sessions/{id}/move` shifts the active piece left or right (`{ "direction": "left" | "right" }`).
-- `POST /game-sessions/{id}/rotate` rotates the active piece with Delphi near-wall kicks (`{ "direction": "clockwise" | "counterclockwise" }`).
-- `POST /game-sessions/{id}/tick` steps gravity. When the piece cannot move down, it locks, clears lines, scores, levels, and spawns the next piece.
-- `POST /game-sessions/{id}/drop` scores by fall distance and moves the piece to its lowest position without locking. The following tick locks it.
-- `POST /demo-runs` starts a demo batch in the background and answers `202 Accepted` with the run's snapshot. The optional body carries `{ "gameCount": <integer> }`, the number of games to play. That value is `1` by default and `256` at most. The server rejects any other value with `400 Bad Request`. Every engine registered in the shared demo-engine registry competes in every game. Each engine plays its own demo session, created from one shared `PentixGame`. So all engines face the same piece sequence.
-- `GET /demo-runs/{id}` reports the run: `status` (`queued`, `running`, `completed`, `failed`), `gameCount`, `completedGameCount`, the competing `engines`, and — once completed — `standings` ordered winner to loser. Each standing line carries the engine's `name`, its `points`, `lines`, `pieces`, and `playingTimeMs` (the summed time spent inside that engine's `plan` calls). Ties break on lines, then pieces, then the shorter playing time, then engine id. There is no UI for runs: they live in server memory only, the `32` most recent completions stay readable, and a restart forgets them.
+Every API endpoint carries the `/v1` major-version prefix. A path without the prefix, or with an unknown version such as `/v2`, answers `404 Not Found` with the not-found envelope. The two documentation endpoints stay outside the prefix at `/docs` and `/openapi.json`. The document reports the API version `1.0.0` in its `info.version` field.
+
+- `POST /v1/users` creates a `User` with a UUIDv7 `id` and a required non-empty `name`. The server rejects a duplicate name (compared case-insensitively after trimming) with `409 Conflict`.
+- `GET /v1/users` lists retained users as `{ "users": [...] }`.
+- `GET /v1/users/{id}` returns a single retained user.
+- `POST /v1/games` initializes a `PentixGame` with a UUIDv7 ID, an optional name, an empty default board, and at least two catalog piece IDs.
+- `POST /v1/game-sessions` starts a `PentixGameSession` for a required `userId` that references a retained user. An omitted, null, or empty `gameId` creates a game. A supplied UUIDv7 reuses an existing game. Sessions use `id`, `gameId`, `userId`, and a zero-based `nextPieceIndex`.
+- `POST /v1/game-sessions/{id}/next-piece` promotes the preview to the active piece, advances the cursor, extends the parent game's piece sequence when needed, and returns the updated session.
+- `POST /v1/game-sessions/{id}/move` shifts the active piece left or right (`{ "direction": "left" | "right" }`).
+- `POST /v1/game-sessions/{id}/rotate` rotates the active piece with Delphi near-wall kicks (`{ "direction": "clockwise" | "counterclockwise" }`).
+- `POST /v1/game-sessions/{id}/tick` steps gravity. When the piece cannot move down, it locks, clears lines, scores, levels, and spawns the next piece.
+- `POST /v1/game-sessions/{id}/drop` scores by fall distance and moves the piece to its lowest position without locking. The following tick locks it.
+- `POST /v1/demo-runs` starts a demo batch in the background and answers `202 Accepted` with the run's snapshot. The optional body carries `{ "gameCount": <integer> }`, the number of games to play. That value is `1` by default and `256` at most. The server rejects any other value with `400 Bad Request`. Every engine registered in the shared demo-engine registry competes in every game. Each engine plays its own demo session, created from one shared `PentixGame`. So all engines face the same piece sequence.
+- `GET /v1/demo-runs/{id}` reports the run: `status` (`queued`, `running`, `completed`, `failed`), `gameCount`, `completedGameCount`, the competing `engines`, and — once completed — `standings` ordered winner to loser. Each standing line carries the engine's `name`, its `points`, `lines`, `pieces`, and `playingTimeMs` (the summed time spent inside that engine's `plan` calls). Ties break on lines, then pieces, then the shorter playing time, then engine id. There is no UI for runs: they live in server memory only, the `32` most recent completions stay readable, and a restart forgets them.
 
 Scoring follows [Demo/Pentix/Main.pas](./delphi/Demo/Pentix/Main.pas): a lock scores `points × level`, a drop scores `points × (height − row) × level ÷ 10`, a cleared line scores `lineIndex × (10 + (height − row)) × level`, and emptying the field awards a `1000`-point bonus. Level increases every 30 locked pieces up to level 9.
 

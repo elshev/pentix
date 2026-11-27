@@ -21,10 +21,11 @@ import {
   UserSchema,
   idParams,
 } from './schemas.js'
+import { versionedPath } from './version.js'
 
 const createGameRoute = createRoute({
   method: 'post',
-  path: '/games',
+  path: versionedPath('/games'),
   tags: ['Games'],
   summary: 'Create a Pentix game',
   request: {
@@ -51,7 +52,7 @@ const createGameRoute = createRoute({
 
 const createGameSessionRoute = createRoute({
   method: 'post',
-  path: '/game-sessions',
+  path: versionedPath('/game-sessions'),
   tags: ['Sessions'],
   summary: 'Start a game session for a retained user',
   request: {
@@ -81,7 +82,7 @@ const createGameSessionRoute = createRoute({
 
 const createUserRoute = createRoute({
   method: 'post',
-  path: '/users',
+  path: versionedPath('/users'),
   tags: ['Users'],
   summary: 'Create a user',
   request: {
@@ -111,7 +112,7 @@ const createUserRoute = createRoute({
 
 const listUsersRoute = createRoute({
   method: 'get',
-  path: '/users',
+  path: versionedPath('/users'),
   tags: ['Users'],
   summary: 'List retained users',
   responses: {
@@ -124,7 +125,7 @@ const listUsersRoute = createRoute({
 
 const getUserRoute = createRoute({
   method: 'get',
-  path: '/users/{id}',
+  path: versionedPath('/users/{id}'),
   tags: ['Users'],
   summary: 'Fetch one retained user',
   request: { params: idParams('User id') },
@@ -146,7 +147,7 @@ const getUserRoute = createRoute({
 
 const nextPieceRoute = createRoute({
   method: 'post',
-  path: '/game-sessions/{id}/next-piece',
+  path: versionedPath('/game-sessions/{id}/next-piece'),
   tags: ['Gameplay'],
   summary: 'Promote the preview to the active piece',
   request: { params: idParams('Game session id') },
@@ -168,7 +169,7 @@ const nextPieceRoute = createRoute({
 
 const moveRoute = createRoute({
   method: 'post',
-  path: '/game-sessions/{id}/move',
+  path: versionedPath('/game-sessions/{id}/move'),
   tags: ['Gameplay'],
   summary: 'Shift the active piece one column',
   request: {
@@ -199,7 +200,7 @@ const moveRoute = createRoute({
 
 const rotateRoute = createRoute({
   method: 'post',
-  path: '/game-sessions/{id}/rotate',
+  path: versionedPath('/game-sessions/{id}/rotate'),
   tags: ['Gameplay'],
   summary: 'Rotate the active piece',
   request: {
@@ -230,7 +231,7 @@ const rotateRoute = createRoute({
 
 const tickRoute = createRoute({
   method: 'post',
-  path: '/game-sessions/{id}/tick',
+  path: versionedPath('/game-sessions/{id}/tick'),
   tags: ['Gameplay'],
   summary: 'Step gravity once',
   request: { params: idParams('Game session id') },
@@ -252,7 +253,7 @@ const tickRoute = createRoute({
 
 const dropRoute = createRoute({
   method: 'post',
-  path: '/game-sessions/{id}/drop',
+  path: versionedPath('/game-sessions/{id}/drop'),
   tags: ['Gameplay'],
   summary: 'Hard-drop the active piece',
   request: { params: idParams('Game session id') },
@@ -274,7 +275,7 @@ const dropRoute = createRoute({
 
 const startDemoRunRoute = createRoute({
   method: 'post',
-  path: '/demo-runs',
+  path: versionedPath('/demo-runs'),
   tags: ['Demo runs'],
   summary: 'Start a background demo batch',
   request: {
@@ -301,7 +302,7 @@ const startDemoRunRoute = createRoute({
 
 const getDemoRunRoute = createRoute({
   method: 'get',
-  path: '/demo-runs/{id}',
+  path: versionedPath('/demo-runs/{id}'),
   tags: ['Demo runs'],
   summary: 'Read a demo run',
   request: { params: idParams('Demo run id') },

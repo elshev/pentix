@@ -138,7 +138,7 @@ Avoid: sidebar, engine list, panel.
 **Demo board** (`demo-slot-N`) — One board on the rail that one registered engine owns. Each board keeps its own session, statistics, and piece index.
 Avoid: rail panel, mini game.
 
-**Demo run** — One server demo batch that `POST /demo-runs` starts. Every registered engine plays every game of the run.
+**Demo run** — One server demo batch that `POST /v1/demo-runs` starts. Every registered engine plays every game of the run.
 Avoid: batch job, tournament, demo game.
 
 **Standing** — One result line of a finished demo run. It carries `name`, `points`, `lines`, `pieces`, and `playingTimeMs`. Ties break on lines, then pieces, then the shorter playing time, then the engine ID.
@@ -151,6 +151,9 @@ Avoid: games, count, rounds.
 
 **PentixServer** (`apps/pentix-server`) — The backend application. It owns users, games, sessions, and demo runs.
 Avoid: API, backend, server app.
+
+**API version** (`API_VERSION`) — The major version in every API path. The current value is `1`, so every endpoint starts with `/v1`, and the OpenAPI document reports `1.0.0`. The value lives in `apps/pentix-server/src/api/version.ts`.
+Avoid: API revision, schema version, version number.
 
 **Repository** (`UserRepository`, `GameRepository`, `GameSessionRepository`) — An engine-agnostic storage interface. The HTTP layer never names a storage engine.
 Avoid: store, DAO, data access layer.

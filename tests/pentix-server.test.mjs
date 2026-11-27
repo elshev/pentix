@@ -34,6 +34,17 @@ import {
 
 const UNKNOWN_UUID_V7 = '018cc251-f400-7000-8000-000000000000'
 
+/** The version prefix the tests expect. Kept local so a server change fails. */
+const API_BASE_PATH = '/v1'
+
+function apiPath(path) {
+  return `${API_BASE_PATH}${path}`
+}
+
+function apiUrl(url, path) {
+  return `${url}${apiPath(path)}`
+}
+
 function assertUuidV7(value) {
   assert.equal(typeof value, 'string')
   assert.match(
@@ -60,7 +71,7 @@ async function post(url, path, body) {
 }
 
 async function createTestUser(handle, name = 'Ada') {
-  const response = await post(handle.url, '/users', { name })
+  const response = await post(handle.url, apiPath('/users'), { name })
   assert.equal(response.status, 201)
   return response.json()
 }
@@ -120,9 +131,9 @@ test('POST /games initializes independent games', async () => {
   const handle = await startTestServer()
 
   try {
-    const firstResponse = await post(handle.url, '/games')
+    const firstResponse = await post(handle.url, apiPath('/games'))
     const firstGame = await firstResponse.json()
-    const secondResponse = await post(handle.url, '/games', {
+    const secondResponse = await post(handle.url, apiPath('/games'), {
       name: 'Evening game',
     })
     const secondGame = await secondResponse.json()
@@ -160,7 +171,7 @@ test('POST /games validates its optional JSON body', async () => {
       JSON.stringify([]),
       JSON.stringify({ name: 42 }),
     ]) {
-      const response = await post(handle.url, '/games', body)
+      const response = await post(handle.url, apiPath('/games'), body)
       const payload = await response.json()
 
       assert.equal(response.status, 400)
@@ -175,11 +186,11 @@ test('POST /games trims supplied names', async () => {
   const handle = await startTestServer()
 
   try {
-    const trimmedResponse = await post(handle.url, '/games', {
+    const trimmedResponse = await post(handle.url, apiPath('/games'), {
       name: '  Evening game  ',
     })
     const trimmedGame = await trimmedResponse.json()
-    const blankResponse = await post(handle.url, '/games', { name: '   ' })
+    const blankResponse = await post(handle.url, apiPath('/games'), { name: '   ' })
     const blankGame = await blankResponse.json()
 
     assert.equal(trimmedResponse.status, 201)
@@ -198,12 +209,12 @@ test('POST /games rejects oversized JSON bodies and keeps serving', async () => 
     const oversizedBody = JSON.stringify({
       name: 'x'.repeat(1024 * 1024 + 16),
     })
-    const oversizedResponse = await post(handle.url, '/games', oversizedBody)
+    const oversizedResponse = await post(handle.url, apiPath('/games'), oversizedBody)
 
     assert.equal(oversizedResponse.status, 400)
     assert.equal(typeof (await oversizedResponse.json()).message, 'string')
 
-    const followUpResponse = await post(handle.url, '/games')
+    const followUpResponse = await post(handle.url, apiPath('/games'))
     assert.equal(followUpResponse.status, 201)
   } finally {
     await handle.close()
@@ -215,7 +226,7 @@ test('POST /game-sessions creates a session with a new game by default', async (
 
   try {
     const user = await createTestUser(handle)
-    const response = await post(handle.url, '/game-sessions', {
+    const response = await post(handle.url, apiPath('/game-sessions'), {
       userId: user.id,
     })
     const session = await response.json()
@@ -237,9 +248,9 @@ test('POST /game-sessions reuses an existing game', async () => {
 
   try {
     const user = await createTestUser(handle)
-    const gameResponse = await post(handle.url, '/games')
+    const gameResponse = await post(handle.url, apiPath('/games'))
     const game = await gameResponse.json()
-    const sessionResponse = await post(handle.url, '/game-sessions', {
+    const sessionResponse = await post(handle.url, apiPath('/game-sessions'), {
       userId: user.id,
       gameId: game.id,
     })
@@ -269,7 +280,7 @@ test('POST /game-sessions treats null and empty game IDs as absent', async () =>
       { userId: user.id, gameId: null },
       { userId: user.id, gameId: '   ' },
     ]) {
-      const response = await post(handle.url, '/game-sessions', body)
+      const response = await post(handle.url, apiPath('/game-sessions'), body)
       const session = await response.json()
 
       assert.equal(response.status, 201)
@@ -286,10 +297,10 @@ test('POST /game-sessions creates distinct independent sessions', async () => {
 
   try {
     const user = await createTestUser(handle)
-    const firstResponse = await post(handle.url, '/game-sessions', {
+    const firstResponse = await post(handle.url, apiPath('/game-sessions'), {
       userId: user.id,
     })
-    const secondResponse = await post(handle.url, '/game-sessions', {
+    const secondResponse = await post(handle.url, apiPath('/game-sessions'), {
       userId: user.id,
     })
     const firstSession = await firstResponse.json()
@@ -327,18 +338,18 @@ test('POST /game-sessions validates body, user, and game identity', async () => 
     ]
 
     for (const body of invalidBodies) {
-      const response = await post(handle.url, '/game-sessions', body)
+      const response = await post(handle.url, apiPath('/game-sessions'), body)
       assert.equal(response.status, 400)
     }
 
     const user = await createTestUser(handle)
 
-    const unknownUserResponse = await post(handle.url, '/game-sessions', {
+    const unknownUserResponse = await post(handle.url, apiPath('/game-sessions'), {
       userId: UNKNOWN_UUID_V7,
     })
     assert.equal(unknownUserResponse.status, 404)
 
-    const unknownGameResponse = await post(handle.url, '/game-sessions', {
+    const unknownGameResponse = await post(handle.url, apiPath('/game-sessions'), {
       userId: user.id,
       gameId: UNKNOWN_UUID_V7,
     })
@@ -353,14 +364,14 @@ test('POST next-piece promotes the preview and advances retained state', async (
 
   try {
     const user = await createTestUser(handle)
-    const sessionResponse = await post(handle.url, '/game-sessions', {
+    const sessionResponse = await post(handle.url, apiPath('/game-sessions'), {
       userId: user.id,
     })
     const session = await sessionResponse.json()
 
     const firstResponse = await post(
       handle.url,
-      `/game-sessions/${session.id}/next-piece`,
+      apiPath(`/game-sessions/${session.id}/next-piece`),
     )
     const firstAdvance = await firstResponse.json()
 
@@ -385,7 +396,7 @@ test('POST next-piece promotes the preview and advances retained state', async (
 
     const secondResponse = await post(
       handle.url,
-      `/game-sessions/${session.id}/next-piece`,
+      apiPath(`/game-sessions/${session.id}/next-piece`),
     )
     const secondAdvance = await secondResponse.json()
 
@@ -403,11 +414,11 @@ test('POST next-piece rejects malformed and unknown session IDs', async () => {
   try {
     const malformedResponse = await post(
       handle.url,
-      '/game-sessions/not-a-uuid/next-piece',
+      apiPath('/game-sessions/not-a-uuid/next-piece'),
     )
     const unknownResponse = await post(
       handle.url,
-      `/game-sessions/${UNKNOWN_UUID_V7}/next-piece`,
+      apiPath(`/game-sessions/${UNKNOWN_UUID_V7}/next-piece`),
     )
 
     assert.equal(malformedResponse.status, 400)
@@ -422,15 +433,15 @@ test('sessions sharing one game advance independently', async () => {
 
   try {
     const user = await createTestUser(handle)
-    const game = await (await post(handle.url, '/games')).json()
+    const game = await (await post(handle.url, apiPath('/games'))).json()
     const firstSession = await (
-      await post(handle.url, '/game-sessions', {
+      await post(handle.url, apiPath('/game-sessions'), {
         userId: user.id,
         gameId: game.id,
       })
     ).json()
     const secondSession = await (
-      await post(handle.url, '/game-sessions', {
+      await post(handle.url, apiPath('/game-sessions'), {
         userId: user.id,
         gameId: game.id,
       })
@@ -442,10 +453,10 @@ test('sessions sharing one game advance independently', async () => {
     assert.equal(firstSession.nextPieceKey, secondSession.nextPieceKey)
 
     const firstAdvance = await (
-      await post(handle.url, `/game-sessions/${firstSession.id}/next-piece`)
+      await post(handle.url, apiPath(`/game-sessions/${firstSession.id}/next-piece`))
     ).json()
     const secondAdvance = await (
-      await post(handle.url, `/game-sessions/${secondSession.id}/next-piece`)
+      await post(handle.url, apiPath(`/game-sessions/${secondSession.id}/next-piece`))
     ).json()
 
     assert.equal(firstAdvance.nextPieceIndex, 2)
@@ -476,13 +487,13 @@ test('server context makes identities and piece selection deterministic', async 
   })
 
   try {
-    const user = await (await post(handle.url, '/users', { name: 'Ada' })).json()
-    const game = await (await post(handle.url, '/games')).json()
+    const user = await (await post(handle.url, apiPath('/users'), { name: 'Ada' })).json()
+    const game = await (await post(handle.url, apiPath('/games'))).json()
     const newGameSession = await (
-      await post(handle.url, '/game-sessions', { userId: user.id })
+      await post(handle.url, apiPath('/game-sessions'), { userId: user.id })
     ).json()
     const reusedGameSession = await (
-      await post(handle.url, '/game-sessions', {
+      await post(handle.url, apiPath('/game-sessions'), {
         userId: user.id,
         gameId: game.id,
       })
@@ -501,7 +512,7 @@ test('server context makes identities and piece selection deterministic', async 
     assert.equal(reusedGameSession.nextPieceKey, '3Corner')
 
     const advanced = await (
-      await post(handle.url, `/game-sessions/${reusedGameSession.id}/next-piece`)
+      await post(handle.url, apiPath(`/game-sessions/${reusedGameSession.id}/next-piece`))
     ).json()
 
     assert.equal(advanced.activePiece.key, '3Corner')
@@ -517,10 +528,10 @@ test('games and sessions are scoped to their server instance', async () => {
   const secondHandle = await startTestServer()
 
   try {
-    const gameResponse = await post(firstHandle.url, '/games')
+    const gameResponse = await post(firstHandle.url, apiPath('/games'))
     const game = await gameResponse.json()
     const user = await createTestUser(secondHandle)
-    const sessionResponse = await post(secondHandle.url, '/game-sessions', {
+    const sessionResponse = await post(secondHandle.url, apiPath('/game-sessions'), {
       userId: user.id,
       gameId: game.id,
     })
@@ -536,7 +547,7 @@ test('POST /users creates and retains a user', async () => {
   const handle = await startTestServer()
 
   try {
-    const response = await post(handle.url, '/users', { name: '  Ada  ' })
+    const response = await post(handle.url, apiPath('/users'), { name: '  Ada  ' })
     const user = await response.json()
 
     assert.equal(response.status, 201)
@@ -563,7 +574,7 @@ test('POST /users validates its name', async () => {
       JSON.stringify({ name: '' }),
       JSON.stringify({ name: '   ' }),
     ]) {
-      const response = await post(handle.url, '/users', body)
+      const response = await post(handle.url, apiPath('/users'), body)
       assert.equal(response.status, 400)
     }
   } finally {
@@ -576,13 +587,13 @@ test('POST /users rejects duplicate names case-insensitively', async () => {
 
   try {
     await createTestUser(handle, 'Ada')
-    const duplicateResponse = await post(handle.url, '/users', {
+    const duplicateResponse = await post(handle.url, apiPath('/users'), {
       name: '  ada  ',
     })
 
     assert.equal(duplicateResponse.status, 409)
 
-    const listResponse = await fetch(`${handle.url}/users`)
+    const listResponse = await fetch(apiUrl(handle.url, '/users'))
     const payload = await listResponse.json()
     assert.equal(payload.users.length, 1)
   } finally {
@@ -594,7 +605,7 @@ test('GET /users lists retained users', async () => {
   const handle = await startTestServer()
 
   try {
-    const emptyResponse = await fetch(`${handle.url}/users`)
+    const emptyResponse = await fetch(apiUrl(handle.url, '/users'))
     const emptyPayload = await emptyResponse.json()
     assert.equal(emptyResponse.status, 200)
     assert.deepEqual(emptyPayload, { users: [] })
@@ -602,7 +613,7 @@ test('GET /users lists retained users', async () => {
     await createTestUser(handle, 'Ada')
     await createTestUser(handle, 'Grace')
 
-    const listResponse = await fetch(`${handle.url}/users`)
+    const listResponse = await fetch(apiUrl(handle.url, '/users'))
     const payload = await listResponse.json()
     assert.equal(listResponse.status, 200)
     assert.equal(payload.users.length, 2)
@@ -621,14 +632,14 @@ test('GET /users/{id} returns a user or rejects invalid ids', async () => {
   try {
     const user = await createTestUser(handle, 'Ada')
 
-    const foundResponse = await fetch(`${handle.url}/users/${user.id}`)
+    const foundResponse = await fetch(apiUrl(handle.url, `/users/${user.id}`))
     assert.equal(foundResponse.status, 200)
     assert.deepEqual(await foundResponse.json(), user)
 
-    const malformedResponse = await fetch(`${handle.url}/users/not-a-uuid`)
+    const malformedResponse = await fetch(apiUrl(handle.url, '/users/not-a-uuid'))
     assert.equal(malformedResponse.status, 400)
 
-    const unknownResponse = await fetch(`${handle.url}/users/${UNKNOWN_UUID_V7}`)
+    const unknownResponse = await fetch(apiUrl(handle.url, `/users/${UNKNOWN_UUID_V7}`))
     assert.equal(unknownResponse.status, 404)
   } finally {
     await handle.close()
@@ -672,10 +683,10 @@ test('POST /game-sessions/{id}/move shifts the active piece', async () => {
   try {
     const user = await createTestUser(handle)
     const session = await (
-      await post(handle.url, '/game-sessions', { userId: user.id })
+      await post(handle.url, apiPath('/game-sessions'), { userId: user.id })
     ).json()
 
-    const response = await post(handle.url, `/game-sessions/${session.id}/move`, {
+    const response = await post(handle.url, apiPath(`/game-sessions/${session.id}/move`), {
       direction: 'right',
     })
     const moved = await response.json()
@@ -702,13 +713,13 @@ test('POST /game-sessions/{id}/rotate rotates a full-rotation piece', async () =
   try {
     const user = await createTestUser(handle)
     const session = await (
-      await post(handle.url, '/game-sessions', { userId: user.id })
+      await post(handle.url, apiPath('/game-sessions'), { userId: user.id })
     ).json()
     assert.equal(session.activePiece.key, '3Corner')
 
     const response = await post(
       handle.url,
-      `/game-sessions/${session.id}/rotate`,
+      apiPath(`/game-sessions/${session.id}/rotate`),
       { direction: 'clockwise' },
     )
     const rotated = await response.json()
@@ -727,10 +738,10 @@ test('POST /game-sessions/{id}/tick moves the piece down', async () => {
   try {
     const user = await createTestUser(handle)
     const session = await (
-      await post(handle.url, '/game-sessions', { userId: user.id })
+      await post(handle.url, apiPath('/game-sessions'), { userId: user.id })
     ).json()
 
-    const response = await post(handle.url, `/game-sessions/${session.id}/tick`)
+    const response = await post(handle.url, apiPath(`/game-sessions/${session.id}/tick`))
     const ticked = await response.json()
 
     assert.equal(response.status, 200)
@@ -751,10 +762,10 @@ test('POST /game-sessions/{id}/drop defers locking until the next tick', async (
   try {
     const user = await createTestUser(handle)
     const session = await (
-      await post(handle.url, '/game-sessions', { userId: user.id })
+      await post(handle.url, apiPath('/game-sessions'), { userId: user.id })
     ).json()
 
-    const dropResponse = await post(handle.url, `/game-sessions/${session.id}/drop`)
+    const dropResponse = await post(handle.url, apiPath(`/game-sessions/${session.id}/drop`))
     const dropped = await dropResponse.json()
 
     assert.equal(dropResponse.status, 200)
@@ -767,7 +778,7 @@ test('POST /game-sessions/{id}/drop defers locking until the next tick', async (
     assert.ok(dropped.statistics.score > 0)
     assert.equal(dropped.statistics.actions.drops, 1)
 
-    const tickResponse = await post(handle.url, `/game-sessions/${session.id}/tick`)
+    const tickResponse = await post(handle.url, apiPath(`/game-sessions/${session.id}/tick`))
     const settled = await tickResponse.json()
 
     assert.equal(tickResponse.status, 200)
@@ -789,24 +800,24 @@ test('gameplay endpoints validate direction and unknown sessions', async () => {
   try {
     const user = await createTestUser(handle)
     const session = await (
-      await post(handle.url, '/game-sessions', { userId: user.id })
+      await post(handle.url, apiPath('/game-sessions'), { userId: user.id })
     ).json()
 
-    const badMove = await post(handle.url, `/game-sessions/${session.id}/move`, {
+    const badMove = await post(handle.url, apiPath(`/game-sessions/${session.id}/move`), {
       direction: 'up',
     })
     assert.equal(badMove.status, 400)
 
     const missingDirection = await post(
       handle.url,
-      `/game-sessions/${session.id}/rotate`,
+      apiPath(`/game-sessions/${session.id}/rotate`),
       {},
     )
     assert.equal(missingDirection.status, 400)
 
     const unknownTick = await post(
       handle.url,
-      `/game-sessions/${UNKNOWN_UUID_V7}/tick`,
+      apiPath(`/game-sessions/${UNKNOWN_UUID_V7}/tick`),
     )
     assert.equal(unknownTick.status, 404)
   } finally {
@@ -906,11 +917,11 @@ test('a created user, game, and session survive a server restart with SQLite sto
   try {
     user = await createTestUser(first, 'Grace')
     session = await (
-      await post(first.url, '/game-sessions', { userId: user.id })
+      await post(first.url, apiPath('/game-sessions'), { userId: user.id })
     ).json()
 
     moved = await (
-      await post(first.url, `/game-sessions/${session.id}/move`, {
+      await post(first.url, apiPath(`/game-sessions/${session.id}/move`), {
         direction: 'right',
       })
     ).json()
@@ -928,16 +939,16 @@ test('a created user, game, and session survive a server restart with SQLite sto
   })
 
   try {
-    const usersResponse = await fetch(`${second.url}/users`)
+    const usersResponse = await fetch(apiUrl(second.url, '/users'))
     assert.equal(usersResponse.status, 200)
     assert.deepEqual(await usersResponse.json(), { users: [user] })
 
-    const userResponse = await fetch(`${second.url}/users/${user.id}`)
+    const userResponse = await fetch(apiUrl(second.url, `/users/${user.id}`))
     assert.deepEqual(await userResponse.json(), user)
 
     // The recorded move is recovered by replaying the action log after restart.
     const movedAgain = await (
-      await post(second.url, `/game-sessions/${session.id}/move`, {
+      await post(second.url, apiPath(`/game-sessions/${session.id}/move`), {
         direction: 'right',
       })
     ).json()
@@ -963,7 +974,7 @@ test('a missing database file starts empty', async () => {
   })
 
   try {
-    const response = await fetch(`${handle.url}/users`)
+    const response = await fetch(apiUrl(handle.url, '/users'))
     assert.equal(response.status, 200)
     assert.deepEqual(await response.json(), { users: [] })
   } finally {
@@ -1045,7 +1056,7 @@ async function getJson(url, path) {
 
 async function waitForDemoRun(url, runId, status = 'completed') {
   for (let attempt = 0; attempt < 400; attempt += 1) {
-    const { status: code, body } = await getJson(url, `/demo-runs/${runId}`)
+    const { status: code, body } = await getJson(url, apiPath(`/demo-runs/${runId}`))
     assert.equal(code, 200)
     if (body.status === status) {
       return body
@@ -1188,7 +1199,7 @@ test('POST /demo-runs starts a background run and reports its standings', async 
   const handle = await startDemoServer()
 
   try {
-    const response = await post(handle.url, '/demo-runs')
+    const response = await post(handle.url, apiPath('/demo-runs'))
     assert.equal(response.status, 202)
 
     const run = await response.json()
@@ -1221,7 +1232,7 @@ test('POST /demo-runs accepts the maximum batch', async () => {
   const handle = await startDemoServer({ demoEngines: [] })
 
   try {
-    const response = await post(handle.url, '/demo-runs', { gameCount: 256 })
+    const response = await post(handle.url, apiPath('/demo-runs'), { gameCount: 256 })
     assert.equal(response.status, 202)
 
     const run = await response.json()
@@ -1241,7 +1252,7 @@ test('POST /demo-runs rejects game counts outside its bounds', async () => {
 
   try {
     for (const gameCount of [0, 257, 1.5, '3', null]) {
-      const response = await post(handle.url, '/demo-runs', { gameCount })
+      const response = await post(handle.url, apiPath('/demo-runs'), { gameCount })
       assert.equal(response.status, 400)
       const body = await response.json()
       assert.match(body.message, /1 to 256/)
@@ -1255,11 +1266,11 @@ test('GET /demo-runs/{id} rejects unknown and malformed ids', async () => {
   const handle = await startDemoServer()
 
   try {
-    const unknown = await getJson(handle.url, `/demo-runs/${UNKNOWN_UUID_V7}`)
+    const unknown = await getJson(handle.url, apiPath(`/demo-runs/${UNKNOWN_UUID_V7}`))
     assert.equal(unknown.status, 404)
     assert.match(unknown.body.message, /was not found/)
 
-    const malformed = await getJson(handle.url, '/demo-runs/not-a-uuid')
+    const malformed = await getJson(handle.url, apiPath('/demo-runs/not-a-uuid'))
     assert.equal(malformed.status, 400)
     assert.match(malformed.body.message, /UUIDv7/)
   } finally {
@@ -1273,8 +1284,8 @@ test('a demo run leaves retained state and storage untouched', async () => {
 
   try {
     const user = await createTestUser(handle)
-    const game = await (await post(handle.url, '/games', {})).json()
-    const sessionResponse = await post(handle.url, '/game-sessions', {
+    const game = await (await post(handle.url, apiPath('/games'), {})).json()
+    const sessionResponse = await post(handle.url, apiPath('/game-sessions'), {
       userId: user.id,
       gameId: game.id,
     })
@@ -1287,7 +1298,7 @@ test('a demo run leaves retained state and storage untouched', async () => {
     }
 
     const run = await (
-      await post(handle.url, '/demo-runs', { gameCount: 1 })
+      await post(handle.url, apiPath('/demo-runs'), { gameCount: 1 })
     ).json()
     await waitForDemoRun(handle.url, run.id)
 
@@ -1305,7 +1316,7 @@ test('a demo run is forgotten after a restart', async () => {
 
   try {
     const run = await (
-      await post(first.url, '/demo-runs', { gameCount: 1 })
+      await post(first.url, apiPath('/demo-runs'), { gameCount: 1 })
     ).json()
     runId = run.id
     await waitForDemoRun(first.url, runId)
@@ -1315,7 +1326,7 @@ test('a demo run is forgotten after a restart', async () => {
 
   const second = await startTestServer()
   try {
-    const { status } = await getJson(second.url, `/demo-runs/${runId}`)
+    const { status } = await getJson(second.url, apiPath(`/demo-runs/${runId}`))
     assert.equal(status, 404)
   } finally {
     await second.close()
@@ -1373,10 +1384,18 @@ test('GET /openapi.json serves the documented API', async () => {
 
     assert.equal(apiDocument.openapi, '3.1.0')
     assert.equal(apiDocument.info.title, 'PentixServer API')
+    assert.equal(apiDocument.info.version, '1.0.0')
     assert.deepEqual(apiDocument.servers, [
       { url: handle.url, description: 'This server' },
     ])
     assert.equal(Object.keys(apiDocument.paths).length, 11)
+
+    for (const path of Object.keys(apiDocument.paths)) {
+      assert.ok(
+        path.startsWith(`${API_BASE_PATH}/`),
+        `documented path ${path} lacks /v1`,
+      )
+    }
   } finally {
     await handle.close()
   }
@@ -1405,6 +1424,35 @@ test('the document matches the registered routes', async () => {
   }
 })
 
+test('unprefixed and unknown-version paths answer the not-found fallback', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const unprefixed = await post(handle.url, '/users', { name: 'Ada' })
+    const unprefixedBody = await unprefixed.json()
+
+    assert.equal(unprefixed.status, 404)
+    assert.equal(unprefixedBody.path, '/users')
+    assert.match(
+      unprefixedBody.message,
+      new RegExp(`POST ${API_BASE_PATH}/users`),
+    )
+    assert.match(unprefixedBody.message, /GET \/docs/)
+    assert.match(unprefixedBody.message, /GET \/openapi\.json/)
+
+    const unknownVersion = await fetch(`${handle.url}/v2/users`)
+    const unknownVersionBody = await unknownVersion.json()
+
+    assert.equal(unknownVersion.status, 404)
+    assert.equal(unknownVersionBody.path, '/v2/users')
+
+    const usersResponse = await fetch(apiUrl(handle.url, '/users'))
+    assert.deepEqual(await usersResponse.json(), { users: [] })
+  } finally {
+    await handle.close()
+  }
+})
+
 test('every route config has exactly one handler', () => {
   const lifecycle = new PentixGameLifecycle(() => UNKNOWN_UUID_V7)
   const demoRuns = new DemoRunService(() => UNKNOWN_UUID_V7, { engines: [] })
@@ -1416,6 +1464,23 @@ test('every route config has exactly one handler', () => {
   assert.deepEqual(tableKeys, listPentixRouteKeys())
 })
 
+test('every route key carries the /v1 prefix', () => {
+  const keys = listPentixRouteKeys()
+  assert.equal(keys.length, 12)
+
+  for (const key of keys) {
+    const path = key.split(' ')[1]
+    assert.ok(
+      path.startsWith(`${API_BASE_PATH}/`),
+      `${key} lacks the /v1 prefix`,
+    )
+    assert.equal(
+      path.slice(API_BASE_PATH.length).startsWith(API_BASE_PATH),
+      false,
+    )
+  }
+})
+
 test('the document derives its constraints from the route schemas', async () => {
   const handle = await startTestServer()
 
@@ -1424,7 +1489,7 @@ test('the document derives its constraints from the route schemas', async () => 
 
     const demoRunBody = resolveSchema(
       apiDocument,
-      apiDocument.paths['/demo-runs'].post.requestBody.content[
+      apiDocument.paths[apiPath('/demo-runs')].post.requestBody.content[
         'application/json'
       ].schema,
     )
@@ -1432,7 +1497,7 @@ test('the document derives its constraints from the route schemas', async () => 
     assert.equal(demoRunBody.properties.gameCount.minimum, 1)
     assert.equal(demoRunBody.properties.gameCount.maximum, 256)
 
-    const userIdParameter = apiDocument.paths['/users/{id}'].get.parameters.find(
+    const userIdParameter = apiDocument.paths[apiPath('/users/{id}')].get.parameters.find(
       (parameter) => parameter.name === 'id',
     )
     assert.equal(userIdParameter.in, 'path')
@@ -1456,6 +1521,19 @@ test('GET /docs serves a self-contained Swagger UI', async () => {
     assert.ok(html.includes('/openapi.json'))
     assert.ok(html.includes('/docs/swagger-ui-dist/swagger-ui.css'))
     assert.deepEqual(html.match(/https?:\/\/[^"'\s]+/g), null)
+  } finally {
+    await handle.close()
+  }
+})
+
+test('documentation endpoints keep their unversioned paths', async () => {
+  const handle = await startTestServer()
+
+  try {
+    for (const path of ['/docs', '/openapi.json']) {
+      const response = await fetch(`${handle.url}${path}`)
+      assert.equal(response.status, 200, `${path} did not answer 200`)
+    }
   } finally {
     await handle.close()
   }
@@ -1491,26 +1569,26 @@ test('live responses satisfy the documented schemas', async () => {
   const handle = await startDemoServer()
 
   try {
-    const userResponse = await post(handle.url, '/users', { name: 'Ada' })
+    const userResponse = await post(handle.url, apiPath('/users'), { name: 'Ada' })
     assert.equal(userResponse.status, 201)
     const user = UserSchema.parse(await userResponse.json())
 
-    const usersResponse = await fetch(`${handle.url}/users`)
+    const usersResponse = await fetch(apiUrl(handle.url, '/users'))
     const users = UserListSchema.parse(await usersResponse.json())
     assert.deepEqual(users.users, [user])
 
-    const gameResponse = await post(handle.url, '/games', { name: 'Ranked' })
+    const gameResponse = await post(handle.url, apiPath('/games'), { name: 'Ranked' })
     assert.equal(gameResponse.status, 201)
     const game = PentixGameSchema.parse(await gameResponse.json())
 
-    const sessionResponse = await post(handle.url, '/game-sessions', {
+    const sessionResponse = await post(handle.url, apiPath('/game-sessions'), {
       userId: user.id,
       gameId: game.id,
     })
     assert.equal(sessionResponse.status, 201)
     PentixGameSessionSchema.parse(await sessionResponse.json())
 
-    const runResponse = await post(handle.url, '/demo-runs', { gameCount: 1 })
+    const runResponse = await post(handle.url, apiPath('/demo-runs'), { gameCount: 1 })
     assert.equal(runResponse.status, 202)
     const queuedRun = DemoRunSnapshotSchema.parse(await runResponse.json())
     assert.equal(queuedRun.status, 'queued')
@@ -1520,7 +1598,7 @@ test('live responses satisfy the documented schemas', async () => {
     )
     assert.equal(finishedRun.standings.length, 2)
 
-    const missing = await getJson(handle.url, `/users/${UNKNOWN_UUID_V7}`)
+    const missing = await getJson(handle.url, apiPath(`/users/${UNKNOWN_UUID_V7}`))
     assert.equal(missing.status, 404)
     ErrorResponseSchema.parse(missing.body)
   } finally {
@@ -1532,7 +1610,7 @@ test('a body without a JSON content type is refused', async () => {
   const handle = await startTestServer()
 
   try {
-    const response = await fetch(`${handle.url}/games`, {
+    const response = await fetch(apiUrl(handle.url, '/games'), {
       method: 'POST',
       headers: { 'content-type': 'text/plain' },
       body: JSON.stringify({ name: 'Plain' }),
@@ -1542,7 +1620,7 @@ test('a body without a JSON content type is refused', async () => {
     assert.equal(response.status, 415)
     ErrorResponseSchema.parse(body)
 
-    const afterResponse = await post(handle.url, '/games')
+    const afterResponse = await post(handle.url, apiPath('/games'))
     assert.equal(afterResponse.status, 201)
     assert.equal((await afterResponse.json()).name, '')
   } finally {
@@ -1554,7 +1632,7 @@ test('malformed JSON keeps its 400 answer', async () => {
   const handle = await startTestServer()
 
   try {
-    const response = await post(handle.url, '/games', '{invalid-json')
+    const response = await post(handle.url, apiPath('/games'), '{invalid-json')
     const body = await response.json()
 
     assert.equal(response.status, 400)
