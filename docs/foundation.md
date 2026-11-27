@@ -55,6 +55,8 @@ The lifecycle depends on engine-agnostic repository interfaces in `apps/pentix-s
 
 Users, games, and sessions are stored in separate tables (`users`, `games`, `game_sessions`). A game's piece sequence is stored as one ordered JSON field, and game/session boards are stored as JSON snapshots. The `users` table also holds the user `type` and the optional `engine_id` of an AI user. The `game_sessions` table also holds the optional opening `level` and the optional demo `seed_column`. An older database file gains those four columns in place. The server reads `PRAGMA table_info` and adds one `ALTER TABLE ... ADD COLUMN` per missing column. `PentixGameLifecycle` keeps its in-memory maps as the request-time working set. It hydrates them via `load()` once at startup and seeds a missing AI user for each configured demo engine. It saves each successful mutation through the matching repository.
 
+The SQLite store sets `PRAGMA journal_mode = WAL` and `PRAGMA synchronous = NORMAL` after `assertDatabaseIsReadable`. It reads both values back and fails startup with a `StorageError` when the file cannot host the mode. Write-ahead logging can create `pentix.db-wal` and `pentix.db-shm` beside the data file. A crash or power loss can lose the most recent commits, and the file stays consistent.
+
 `startPentixServer` defaults to in-memory repositories so tests are deterministic. `apps/pentix-server/src/main.ts` builds SQLite repositories for `PENTIX_DATA_FILE` (default `data/pentix.db`) and passes them through `PentixServerContext.storage`. A missing database file starts with empty collections. An unreadable or corrupt file fails startup with a `StorageError` naming the file.
 
 ## Gameplay

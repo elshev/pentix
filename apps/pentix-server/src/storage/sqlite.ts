@@ -31,6 +31,21 @@ export interface SqliteStorageOptions {
   readonly dataFile: string
 }
 
+/** The live settings of the store connection. */
+export interface SqliteStoragePragmas {
+  readonly journalMode: string
+  readonly synchronous: number
+}
+
+/**
+ * Durable storage backed by one SQLite file, plus a read-only view of its
+ * connection settings.
+ */
+export interface SqliteStorage extends PentixStorage {
+  /** Reads `journal_mode` and `synchronous` from the live connection. */
+  pragmas(): SqliteStoragePragmas
+}
+
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -151,6 +166,46 @@ function migrateSchema(database: DatabaseSync): void {
 }
 
 /**
+ * Puts the file into write-ahead logging with normal synchronization, then
+ * reads both values back. A file that cannot host the mode fails the open.
+ */
+function configureWriteAheadLogging(
+  database: DatabaseSync,
+  dataFile: string,
+): void {
+  try {
+    const modeRow = database
+      .prepare('PRAGMA journal_mode = WAL')
+      .get() as unknown as { readonly journal_mode?: unknown } | undefined
+    const mode = modeRow?.journal_mode
+    if (mode !== 'wal') {
+      throw new StorageError(
+        `Pentix data file "${dataFile}" could not use write-ahead logging: journal_mode is "${String(mode)}".`,
+      )
+    }
+
+    database.exec('PRAGMA synchronous = NORMAL')
+    const levelRow = database
+      .prepare('PRAGMA synchronous')
+      .get() as unknown as { readonly synchronous?: unknown } | undefined
+    if (levelRow?.synchronous !== 1) {
+      throw new StorageError(
+        `Pentix data file "${dataFile}" could not use normal synchronization: synchronous is "${String(levelRow?.synchronous)}".`,
+      )
+    }
+  } catch (error) {
+    if (error instanceof StorageError) {
+      throw error
+    }
+
+    throw new StorageError(
+      `Pentix data file "${dataFile}" could not use write-ahead logging: ${describeError(error)}`,
+      error,
+    )
+  }
+}
+
+/**
  * Opens the SQLite file and creates the table set, failing fast with a
  * `StorageError` when the file exists but is not a readable SQLite database.
  */
@@ -178,6 +233,7 @@ function openDatabase(dataFile: string): DatabaseSync {
 
   try {
     assertDatabaseIsReadable(database, dataFile)
+    configureWriteAheadLogging(database, dataFile)
     database.exec(SCHEMA_SQL)
     migrateSchema(database)
   } catch (error) {
@@ -427,7 +483,7 @@ function readSessionLog(row: GameSessionRow): SessionActionLog {
  */
 export function createSqliteStorage(
   options: SqliteStorageOptions,
-): PentixStorage {
+): SqliteStorage {
   const dataFile = path.resolve(options.dataFile)
   const database = openDatabase(dataFile)
 
@@ -471,7 +527,7 @@ function writeSessionLog(statement: StatementSync, log: SessionActionLog): void 
   )
 }
 
-function createRepositories(database: DatabaseSync): PentixStorage {
+function createRepositories(database: DatabaseSync): SqliteStorage {
   const selectUsers = database.prepare(
     'SELECT id, name, type, engine_id FROM users ORDER BY rowid',
   )
@@ -576,6 +632,19 @@ function createRepositories(database: DatabaseSync): PentixStorage {
     users,
     games,
     sessions,
+    pragmas(): SqliteStoragePragmas {
+      const modeRow = database
+        .prepare('PRAGMA journal_mode')
+        .get() as unknown as { readonly journal_mode?: unknown } | undefined
+      const levelRow = database
+        .prepare('PRAGMA synchronous')
+        .get() as unknown as { readonly synchronous?: unknown } | undefined
+
+      return Object.freeze({
+        journalMode: String(modeRow?.journal_mode),
+        synchronous: Number(levelRow?.synchronous),
+      })
+    },
     close(): void {
       database.close()
     },
