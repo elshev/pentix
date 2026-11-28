@@ -3,6 +3,8 @@ export type {
   GameSessionCollection,
   UserCollection,
 } from './entities.js'
+export { createStorageBackup, formatBackupStamp } from './backup.js'
+export type { StorageBackupOptions, StorageBackupResult } from './backup.js'
 export { StorageError } from './errors.js'
 export { createInMemoryStorage } from './memory.js'
 export type {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -24,6 +24,16 @@ import {
 } from '../apps/pentix-server/dist/api/routes.js'
 import { createInMemoryStorage } from '../apps/pentix-server/dist/storage/memory.js'
 import { createSqliteStorage } from '../apps/pentix-server/dist/storage/sqlite.js'
+import {
+  createStorageBackup,
+  formatBackupStamp,
+} from '../apps/pentix-server/dist/storage/backup.js'
+import { StorageError } from '../apps/pentix-server/dist/storage/errors.js'
+import {
+  DEFAULT_SETTINGS_FILE,
+  loadPentixServerSettings,
+  SettingsError,
+} from '../apps/pentix-server/dist/settings.js'
 import {
   createDemoSession,
   createPentixGame,
@@ -2200,6 +2210,288 @@ test('malformed JSON keeps its 400 answer', async () => {
     ErrorResponseSchema.parse(body)
   } finally {
     await handle.close()
+  }
+})
+
+test('the shipped app settings name the data file and the backup directory', async () => {
+  const raw = JSON.parse(await readFile(DEFAULT_SETTINGS_FILE, 'utf8'))
+  const settings = loadPentixServerSettings({ env: {} })
+
+  assert.deepEqual(Object.keys(raw).sort(), ['backupDirectory', 'dataFile'])
+  assert.equal(raw.dataFile, 'C:\\db\\pentix\\pentix.db')
+  assert.equal(raw.backupDirectory, 'C:\\db\\Backups\\pentix')
+  assert.equal(settings.settingsFile, path.resolve(DEFAULT_SETTINGS_FILE))
+  assert.ok(path.isAbsolute(settings.dataFile))
+  assert.ok(path.isAbsolute(settings.backupDirectory))
+  assert.equal(path.basename(settings.dataFile), 'pentix.db')
+
+  if (process.platform === 'win32') {
+    assert.equal(settings.dataFile, 'C:\\db\\pentix\\pentix.db')
+    assert.equal(settings.backupDirectory, 'C:\\db\\Backups\\pentix')
+  }
+})
+
+test('a relative settings path resolves against the settings folder', async () => {
+  const temp = await createTempDataFile()
+
+  try {
+    const settingsFile = path.join(temp.directory, 'settings.json')
+    await writeFile(
+      settingsFile,
+      JSON.stringify({ dataFile: 'data/pentix.db', backupDirectory: 'backups' }),
+    )
+
+    const settings = loadPentixServerSettings({ settingsFile, env: {} })
+
+    assert.equal(settings.dataFile, path.join(temp.directory, 'data', 'pentix.db'))
+    assert.equal(settings.backupDirectory, path.join(temp.directory, 'backups'))
+  } finally {
+    await temp.cleanup()
+  }
+})
+
+test('the environment overrides the settings file values', async () => {
+  const temp = await createTempDataFile()
+
+  try {
+    const settingsFile = path.join(temp.directory, 'settings.json')
+    await writeFile(
+      settingsFile,
+      JSON.stringify({ dataFile: 'pentix.db', backupDirectory: 'backups' }),
+    )
+    const overrideDataFile = path.join(temp.directory, 'other', 'pentix.db')
+    const overrideBackupDirectory = path.join(temp.directory, 'other-backups')
+
+    const fromFile = loadPentixServerSettings({ settingsFile, env: {} })
+    assert.equal(fromFile.dataFile, path.join(temp.directory, 'pentix.db'))
+
+    const overridden = loadPentixServerSettings({
+      env: {
+        PENTIX_SERVER_SETTINGS_FILE: settingsFile,
+        PENTIX_DATA_FILE: overrideDataFile,
+        PENTIX_BACKUP_DIRECTORY: overrideBackupDirectory,
+      },
+    })
+
+    assert.equal(overridden.settingsFile, settingsFile)
+    assert.equal(overridden.dataFile, overrideDataFile)
+    assert.equal(overridden.backupDirectory, overrideBackupDirectory)
+  } finally {
+    await temp.cleanup()
+  }
+})
+
+test('a broken settings file throws a named SettingsError', async () => {
+  const temp = await createTempDataFile()
+
+  try {
+    const missingFile = path.join(temp.directory, 'absent.json')
+    assert.throws(
+      () => loadPentixServerSettings({ settingsFile: missingFile, env: {} }),
+      (error) =>
+        error instanceof SettingsError && error.message.includes(missingFile),
+    )
+
+    const malformed = path.join(temp.directory, 'malformed.json')
+    await writeFile(malformed, '{not json')
+    assert.throws(
+      () => loadPentixServerSettings({ settingsFile: malformed, env: {} }),
+      /is not valid JSON/,
+    )
+
+    const unknownKey = path.join(temp.directory, 'unknown.json')
+    await writeFile(
+      unknownKey,
+      JSON.stringify({ dataFile: 'a.db', backupDirectory: 'b', extra: 'x' }),
+    )
+    assert.throws(
+      () => loadPentixServerSettings({ settingsFile: unknownKey, env: {} }),
+      /extra/,
+    )
+
+    const emptyValue = path.join(temp.directory, 'empty.json')
+    await writeFile(
+      emptyValue,
+      JSON.stringify({ dataFile: 'a.db', backupDirectory: '  ' }),
+    )
+    assert.throws(
+      () => loadPentixServerSettings({ settingsFile: emptyValue, env: {} }),
+      /backupDirectory/,
+    )
+
+    const missingKey = path.join(temp.directory, 'missing-key.json')
+    await writeFile(missingKey, JSON.stringify({ dataFile: 'a.db' }))
+    assert.throws(
+      () => loadPentixServerSettings({ settingsFile: missingKey, env: {} }),
+      /backupDirectory/,
+    )
+  } finally {
+    await temp.cleanup()
+  }
+})
+
+test('the backup stamp carries the local minute', () => {
+  assert.equal(formatBackupStamp(new Date(2026, 10, 28, 15, 30)), '202611281530')
+  assert.equal(formatBackupStamp(new Date(2026, 0, 5, 4, 7)), '202601050407')
+})
+
+test('a storage backup copies the retained rows', async () => {
+  const temp = await createTempDataFile()
+  const backupDirectory = path.join(temp.directory, 'backups')
+  const game = createPentixGame({
+    id: uuidv7(),
+    name: 'Backed up',
+    selectPieceId: () => 3,
+  })
+  const user = createUser({ id: uuidv7(), name: 'Ada' })
+  const log = {
+    sessionId: uuidv7(),
+    userId: user.id,
+    gameId: game.id,
+    pieces: [{ pieceId: 3, actions: 'RC' }],
+  }
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+
+  try {
+    await storage.users.create(user)
+    await storage.games.create(game)
+    await storage.sessions.create(log)
+  } finally {
+    storage.close()
+  }
+
+  const now = new Date(2026, 10, 28, 15, 30)
+  const result = await createStorageBackup({
+    dataFile: temp.dataFile,
+    backupDirectory,
+    now,
+  })
+
+  try {
+    assert.equal(
+      result.backupFile,
+      path.join(backupDirectory, '202611281530-pentix.db'),
+    )
+    assert.ok(existsSync(result.backupFile))
+
+    const copy = createSqliteStorage({ dataFile: result.backupFile })
+
+    try {
+      assert.deepEqual(await copy.users.load(), { users: [user] })
+      assert.deepEqual(await copy.games.load(), { games: [game] })
+      assert.deepEqual(await copy.sessions.load(), { sessions: [log] })
+    } finally {
+      copy.close()
+    }
+  } finally {
+    await temp.cleanup()
+  }
+})
+
+test('a backup creates a missing backup directory', async () => {
+  const temp = await createTempDataFile()
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+  storage.close()
+
+  const backupDirectory = path.join(temp.directory, 'nested', 'backups')
+
+  try {
+    const { backupFile } = await createStorageBackup({
+      dataFile: temp.dataFile,
+      backupDirectory,
+      now: new Date(2026, 10, 28, 15, 30),
+    })
+
+    assert.equal(path.dirname(backupFile), backupDirectory)
+    assert.ok(existsSync(backupFile))
+  } finally {
+    await temp.cleanup()
+  }
+})
+
+test('a backup without a data file fails and writes nothing', async () => {
+  const temp = await createTempDataFile()
+  const backupDirectory = path.join(temp.directory, 'backups')
+  const dataFile = path.join(temp.directory, 'absent.db')
+
+  try {
+    await assert.rejects(
+      createStorageBackup({ dataFile, backupDirectory }),
+      (error) =>
+        error instanceof StorageError && error.message.includes(dataFile),
+    )
+    assert.equal(existsSync(backupDirectory), false)
+  } finally {
+    await temp.cleanup()
+  }
+})
+
+test('a second backup in the same minute is refused', async () => {
+  const temp = await createTempDataFile()
+  const backupDirectory = path.join(temp.directory, 'backups')
+  const user = createUser({ id: uuidv7(), name: 'Ada' })
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+
+  try {
+    await storage.users.create(user)
+  } finally {
+    storage.close()
+  }
+
+  const now = new Date(2026, 10, 28, 15, 30)
+  const first = await createStorageBackup({
+    dataFile: temp.dataFile,
+    backupDirectory,
+    now,
+  })
+  const bytesBefore = await readFile(first.backupFile)
+
+  try {
+    await assert.rejects(
+      createStorageBackup({ dataFile: temp.dataFile, backupDirectory, now }),
+      (error) =>
+        error instanceof StorageError &&
+        error.message.includes(first.backupFile),
+    )
+    assert.deepEqual(await readFile(first.backupFile), bytesBefore)
+
+    const copy = createSqliteStorage({ dataFile: first.backupFile })
+
+    try {
+      assert.deepEqual(await copy.users.load(), { users: [user] })
+    } finally {
+      copy.close()
+    }
+  } finally {
+    await temp.cleanup()
+  }
+})
+
+test('a backup reads a live write-ahead-logging store', async () => {
+  const temp = await createTempDataFile()
+  const backupDirectory = path.join(temp.directory, 'backups')
+  const user = createUser({ id: uuidv7(), name: 'WAL user' })
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+
+  try {
+    await storage.users.create(user)
+    assert.equal(storage.pragmas().journalMode, 'wal')
+
+    const { backupFile } = await createStorageBackup({
+      dataFile: temp.dataFile,
+      backupDirectory,
+      now: new Date(2026, 10, 28, 15, 30),
+    })
+    const copy = createSqliteStorage({ dataFile: backupFile })
+
+    try {
+      assert.deepEqual(await copy.users.load(), { users: [user] })
+    } finally {
+      copy.close()
+    }
+  } finally {
+    storage.close()
+    await temp.cleanup()
   }
 })
 

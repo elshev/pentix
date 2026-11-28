@@ -3,20 +3,23 @@ import { fileURLToPath } from 'node:url'
 
 import { API_DOCUMENT_PATH, API_REFERENCE_PATH } from './api/docs.js'
 import { startPentixServer } from './server.js'
+import { loadPentixServerSettings } from './settings.js'
 import { createSqliteStorage } from './storage/sqlite.js'
 
-const DEFAULT_DATA_FILE = path.resolve('data', 'pentix.db')
-
 async function main(): Promise<void> {
-  const dataFile = path.resolve(
-    process.env.PENTIX_DATA_FILE ?? DEFAULT_DATA_FILE,
-  )
-  const storage = createSqliteStorage({ dataFile })
+  const settings = loadPentixServerSettings()
+  const storage = createSqliteStorage({ dataFile: settings.dataFile })
   const { url } = await startPentixServer({ context: { storage } })
   console.log(`PentixServer bootstrap listening on ${url}`)
   console.log(`PentixServer API reference: ${url}${API_REFERENCE_PATH}`)
   console.log(`PentixServer OpenAPI document: ${url}${API_DOCUMENT_PATH}`)
-  console.log(`PentixServer persisting users, games, and sessions to ${dataFile}`)
+  console.log(`PentixServer app settings read from ${settings.settingsFile}`)
+  console.log(
+    `PentixServer persisting users, games, and sessions to ${settings.dataFile}`,
+  )
+  console.log(
+    `PentixServer writing backups to ${settings.backupDirectory}`,
+  )
 }
 
 const executedPath = process.argv[1]
