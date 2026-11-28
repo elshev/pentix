@@ -19,6 +19,7 @@ import {
   createPentixGame,
   demoEngineRegistry,
   type DemoEngine,
+  type GameSessionStatistics,
   type PieceIdSelector,
 } from '../../../packages/pentix-core/dist/index.js'
 import type { PentixStorage } from './storage/repositories.js'
@@ -34,15 +35,40 @@ export const MAX_RETAINED_DEMO_RUNS = 32
 
 export type DemoRunStatus = 'queued' | 'running' | 'completed' | 'failed'
 
-/** One engine's place in a finished run's standings. */
-export interface DemoRunStanding {
+/** One engine's aggregate result for a finished run. */
+export interface DemoRunEngineStanding {
   readonly engineId: string
   readonly name: string
+  /** The sum of `points` over the run's game rows. */
+  readonly totalPoints: number
+  /** The sum of `lines` over the run's game rows. */
+  readonly totalLines: number
+  /** The sum of `pieces` over the run's game rows. */
+  readonly totalPieces: number
+  /** Milliseconds spent inside this engine's plan calls. */
+  readonly playingTimeMs: number
+  /** Playing time per `1000` placed pieces, or `null` when none was placed. */
+  readonly playingTimePer1000PiecesMs: number | null
+}
+
+/** One engine's result for one game of a run. */
+export interface DemoRunGameStanding {
+  readonly engineId: string
   readonly points: number
   readonly lines: number
   readonly pieces: number
-  /** Milliseconds spent inside this engine's plan calls. */
+  /** Milliseconds spent inside this engine's plan calls during the game. */
   readonly playingTimeMs: number
+}
+
+/** One finished game of a run. */
+export interface DemoRunGameResult {
+  /** Zero-based position of the game in the run. */
+  readonly index: number
+  /** The id of the stored `PentixGame`. */
+  readonly id: string
+  /** Every engine of the run, ranked for this game. */
+  readonly standings: readonly DemoRunGameStanding[]
 }
 
 /** A run as the HTTP layer reports it. */
@@ -51,10 +77,10 @@ export interface DemoRunSnapshot {
   readonly status: DemoRunStatus
   readonly gameCount: number
   readonly completedGameCount: number
-  /** The engine ids that compete, in registry order. */
-  readonly engines: readonly string[]
-  /** Empty until the run completes. */
-  readonly standings: readonly DemoRunStanding[]
+  /** Every engine, ranked by the run totals. */
+  readonly engines: readonly DemoRunEngineStanding[]
+  /** One entry per finished game. */
+  readonly games: readonly DemoRunGameResult[]
   /** Present only when the status is `failed`. */
   readonly error?: string
 }
@@ -86,11 +112,11 @@ interface DemoRunTotals {
 interface DemoRunRecord {
   readonly id: string
   readonly engines: readonly DemoEngine[]
-  readonly engineIds: readonly string[]
   readonly status: DemoRunStatus
   readonly gameCount: number
   readonly completedGameCount: number
-  readonly standings: readonly DemoRunStanding[]
+  readonly engineStandings: readonly DemoRunEngineStanding[]
+  readonly games: readonly DemoRunGameResult[]
   readonly error?: string
 }
 
@@ -103,6 +129,21 @@ const DEMO_RUN_STATUS = Object.freeze({
 
 function roundMilliseconds(value: number): number {
   return Math.round(value * 1000) / 1000
+}
+
+/**
+ * The planning time of `1000` pieces, rounded to three decimals.
+ * A count of `0` has no rate, so it answers `null`.
+ */
+export function playingTimePer1000PiecesMs(
+  playingTimeMs: number,
+  pieceCount: number,
+): number | null {
+  if (pieceCount === 0) {
+    return null
+  }
+
+  return roundMilliseconds((playingTimeMs * 1000) / pieceCount)
 }
 
 function checkGameCount(gameCount: number): number {
@@ -125,17 +166,23 @@ function toSnapshot(record: DemoRunRecord): DemoRunSnapshot {
     status: record.status,
     gameCount: record.gameCount,
     completedGameCount: record.completedGameCount,
-    engines: record.engineIds,
-    standings: record.standings,
+    engines: record.engineStandings,
+    games: record.games,
     ...(record.error === undefined ? {} : { error: record.error }),
   })
 }
 
-/** Ranks the engines: points, lines, pieces, then the shorter planning time. */
-function compareStandings(
-  a: DemoRunStanding,
-  b: DemoRunStanding,
-): number {
+/** One row of either list, reduced to the fields that the rank reads. */
+interface DemoRunRank {
+  readonly points: number
+  readonly lines: number
+  readonly pieces: number
+  readonly playingTimeMs: number
+  readonly engineId: string
+}
+
+/** Ranks the rows: points, lines, pieces, then the shorter planning time. */
+function compareRank(a: DemoRunRank, b: DemoRunRank): number {
   return (
     b.points - a.points ||
     b.lines - a.lines ||
@@ -143,6 +190,32 @@ function compareStandings(
     a.playingTimeMs - b.playingTimeMs ||
     (a.engineId < b.engineId ? -1 : a.engineId > b.engineId ? 1 : 0)
   )
+}
+
+/** Reduces an engine line to the fields that the rank reads. */
+function engineRank(line: DemoRunEngineStanding): DemoRunRank {
+  return {
+    points: line.totalPoints,
+    lines: line.totalLines,
+    pieces: line.totalPieces,
+    playingTimeMs: line.playingTimeMs,
+    engineId: line.engineId,
+  }
+}
+
+/** Builds one game row from an engine's finished session. */
+function toGameStanding(
+  engine: DemoEngine,
+  statistics: GameSessionStatistics,
+  planTimeMs: number,
+): DemoRunGameStanding {
+  return Object.freeze({
+    engineId: engine.id,
+    points: statistics.score,
+    lines: statistics.clearedLines,
+    pieces: statistics.blocks,
+    playingTimeMs: roundMilliseconds(planTimeMs),
+  })
 }
 
 /** Plays demo batches in the background, one run at a time. */
@@ -180,12 +253,13 @@ export class DemoRunService {
       id: this.createId(),
       gameCount: checkedGameCount,
       engines: this.engines,
-      engineIds: Object.freeze(this.engines.map((engine) => engine.id)),
       status: DEMO_RUN_STATUS.queued,
       completedGameCount: 0,
-      standings: Object.freeze(
-        [],
-      ) as readonly DemoRunStanding[],
+      engineStandings: this.buildEngineStandings(
+        this.engines,
+        this.createTotals(this.engines),
+      ),
+      games: Object.freeze([]) as readonly DemoRunGameResult[],
     })
 
     this.runs.set(record.id, record)
@@ -289,46 +363,80 @@ export class DemoRunService {
     }
   }
 
+  /** A zeroed totals entry for every engine. */
+  private createTotals(engines: readonly DemoEngine[]): Map<string, DemoRunTotals> {
+    const totals = new Map<string, DemoRunTotals>()
+    for (const engine of engines) {
+      totals.set(engine.id, { points: 0, lines: 0, pieces: 0, planTimeMs: 0 })
+    }
+
+    return totals
+  }
+
+  /** Builds the ranked engine lines from the run totals. */
+  private buildEngineStandings(
+    engines: readonly DemoEngine[],
+    totals: ReadonlyMap<string, DemoRunTotals>,
+  ): readonly DemoRunEngineStanding[] {
+    const lines = engines.map((engine) => {
+      const engineTotals = totals.get(engine.id)
+      const totalPieces = engineTotals?.pieces ?? 0
+      const playingTimeMs = roundMilliseconds(engineTotals?.planTimeMs ?? 0)
+
+      return Object.freeze({
+        engineId: engine.id,
+        name: engine.name,
+        totalPoints: engineTotals?.points ?? 0,
+        totalLines: engineTotals?.lines ?? 0,
+        totalPieces,
+        playingTimeMs,
+        playingTimePer1000PiecesMs: playingTimePer1000PiecesMs(
+          playingTimeMs,
+          totalPieces,
+        ),
+      })
+    })
+
+    lines.sort((a, b) => compareRank(engineRank(a), engineRank(b)))
+    return Object.freeze(lines)
+  }
+
   private async playRun(record: DemoRunRecord): Promise<void> {
     this.update(record.id, { status: DEMO_RUN_STATUS.running })
 
-    try {
-      const totals = new Map<string, DemoRunTotals>()
-      for (const engine of record.engines) {
-        totals.set(engine.id, { points: 0, lines: 0, pieces: 0, planTimeMs: 0 })
-      }
+    const totals = this.createTotals(record.engines)
+    let games: readonly DemoRunGameResult[] = Object.freeze([])
 
+    try {
       for (let gameIndex = 0; gameIndex < record.gameCount; gameIndex += 1) {
-        await this.playGame(record, totals)
+        const game = await this.playGame(record, totals, gameIndex)
+        games = Object.freeze([...games, game])
         if (this.runs.get(record.id) === undefined) {
           return
         }
-        this.update(record.id, { completedGameCount: gameIndex + 1 })
-      }
 
-      const standings = record.engines
-        .map((engine) => {
-          const engineTotals = totals.get(engine.id)
-          return Object.freeze({
-            engineId: engine.id,
-            name: engine.name,
-            points: engineTotals?.points ?? 0,
-            lines: engineTotals?.lines ?? 0,
-            pieces: engineTotals?.pieces ?? 0,
-            playingTimeMs: roundMilliseconds(engineTotals?.planTimeMs ?? 0),
-          })
+        this.update(record.id, {
+          completedGameCount: gameIndex + 1,
+          games,
+          engineStandings: this.buildEngineStandings(record.engines, totals),
         })
-        .sort(compareStandings)
+      }
 
       this.update(record.id, {
         status: DEMO_RUN_STATUS.completed,
-        standings: Object.freeze(standings),
+        games,
+        engineStandings: this.buildEngineStandings(record.engines, totals),
       })
       this.trimRetainedRuns()
     } catch (error) {
       this.update(record.id, {
         status: DEMO_RUN_STATUS.failed,
         error: error instanceof Error ? error.message : String(error),
+        games: Object.freeze([]),
+        engineStandings: this.buildEngineStandings(
+          record.engines,
+          this.createTotals(record.engines),
+        ),
       })
     }
   }
@@ -337,12 +445,15 @@ export class DemoRunService {
   private async playGame(
     record: DemoRunRecord,
     totals: Map<string, DemoRunTotals>,
-  ): Promise<void> {
+    gameIndex: number,
+  ): Promise<DemoRunGameResult> {
     let game = createPentixGame({
       id: this.createId(),
       selectPieceId: this.selectPieceId,
     })
     await this.storage.games.create(game)
+
+    const rows: DemoRunGameStanding[] = []
 
     for (const engine of record.engines) {
       const session = createDemoSession({
@@ -381,14 +492,28 @@ export class DemoRunService {
 
       await this.storage.sessions.create(playback.log)
 
+      const row = toGameStanding(
+        engine,
+        playback.session.statistics,
+        playback.planTimeMs,
+      )
+      rows.push(row)
+
       const engineTotals = totals.get(engine.id)
       if (engineTotals !== undefined) {
-        engineTotals.points += playback.session.statistics.score
-        engineTotals.lines += playback.session.statistics.clearedLines
-        engineTotals.pieces += playback.session.statistics.blocks
-        engineTotals.planTimeMs += playback.planTimeMs
+        engineTotals.points += row.points
+        engineTotals.lines += row.lines
+        engineTotals.pieces += row.pieces
+        engineTotals.planTimeMs += row.playingTimeMs
       }
     }
+
+    rows.sort(compareRank)
+    return Object.freeze({
+      index: gameIndex,
+      id: game.id,
+      standings: Object.freeze(rows),
+    })
   }
 }
 

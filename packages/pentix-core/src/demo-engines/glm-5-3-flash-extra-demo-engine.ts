@@ -1,7 +1,10 @@
 /**
- * GLM 5.3 Flash in Extra mode (15 min of thinking). It runs an exhaustive
- * candidate search with kick-free rotation placement. It ranks each candidate
- * by immediate points minus holes, bumpiness, and stack penalties.
+ * GLM 5.3 Flash in Extra mode (15 min of thinking). It searches every
+ * orientation, landing column, rotation slot, and ending. It replays each
+ * candidate with the engine rules and ranks the candidates by the exact points
+ * minus holes, bumpiness, stack, landing, and top-row penalties. It ends at H
+ * when a straight drop reaches the chosen placement, and it appends one L or R
+ * only for a pocket under an overhang.
  *
  * Authored from docs/demo-engine-task.md and wrapped by the shared adapter.
  * The planning body is kept as authored.
@@ -11,25 +14,30 @@ import { adaptAuthoredPlan } from '../demo-engine-toolkit.js'
 export const id = 'glm-5-3-flash-extra'
 export const name = 'GLM 5.3 Flash Extra'
 export const description =
-  'GLM 5.3 Flash in Extra mode (15 min of thinking): an exhaustive candidate search with kick-free rotation placement, ranked by immediate points minus holes, bumpiness, and stack penalties.'
+  'GLM 5.3 Flash in Extra mode (15 min of thinking): an exhaustive orientation, column, rotation-slot, and ending search with exact replay, ranked by points minus holes, bumpiness, stack, landing, and top-row penalties. It adds a side-step after H only for a pocket under an overhang.'
 
-// Algorithm (short): exhaustive candidate search with exact replay.
-// For every reachable orientation, every possible landing column, every
-// rotation timing along the lateral path (so a piece spawned near a wall
-// turns only where the turn fits without a wall kick), and every ending
-// ("", "L", "R", "H", "HL", "HR" - hard drop plus at most one side-step),
-// build the candidate string [laterals][rotations][laterals]<ending> and
-// replay it on a copy of the board exactly as the caller does: one action
-// per turn then one tick, blocked actions skipped but their tick counted,
-// and one last-chance action applied before a locking tick. A candidate
-// whose rotation would need a wall kick is discarded as unpredictable. The
-// replay gives the locked cells and the rotation-point row at the moment H
-// fires, hence the exact immediate score: hard-drop points + lock points +
-// indexed clear points + 1000 for emptying the board. Candidates are ranked
-// by that score minus penalties for covered holes, bumpiness, stack height,
-// landing height and rows pushed near the top. Ties prefer fewer actions
-// before the drop, so the piece falls as early as possible and a side-step
-// is emitted only when it actually changes the outcome.
+// The function plans one piece with an exhaustive candidate search and an
+// exact replay. It builds each candidate string from lateral moves,
+// rotations, further lateral moves, and an ending, where the rotations reach
+// every reachable orientation in both turn directions, the rotation slot
+// moves along the lateral path so a piece near a wall turns only where the
+// turn fits without a wall kick, and the ending is one of "", "L", "R", "H",
+// "HL", and "HR". The function replays each candidate on a copy of the board
+// exactly as the caller does: it applies one action per turn and one tick
+// after each action, it skips a blocked action but counts its tick, and it
+// applies one last-chance action before a locking tick. The search discards
+// a candidate whose rotation would need a wall kick, because the kick
+// direction is unpredictable. The replay yields the locked cells and the
+// rotation-point row at the moment H fires, and the function scores the
+// candidate exactly from the hard-drop points, the lock points, the indexed
+// clear points, and the 1000-point bonus for emptying the board. The search
+// ranks the candidates by that score minus penalties for covered holes,
+// bumpiness, stack height, landing height, and rows near the top, and a tie
+// prefers fewer actions before the drop. The plan ends at H when a straight
+// drop in the landing column reaches the chosen placement, and it appends
+// exactly one L or R after H only when the placement lies below the
+// straight-drop landing in the landing column, because only a pocket under
+// an overhang needs the side-step.
 function authoredPlan(
   board: number[][],
   piece: { row: number; column: number }[][],
@@ -69,6 +77,24 @@ function authoredPlan(
       out += ch
     }
     return out
+  }
+
+  // The helper computes the row where a straight drop in a column and an
+  // orientation comes to rest. The descent starts above the board, so only
+  // settled cells and the floor stop it.
+  function straightDropRow(col: number, o: number): number {
+    const cells = piece[o]
+    let maxRowOff = cells[0].row
+    for (let i = 1; i < cells.length; i += 1) {
+      if (cells[i].row > maxRowOff) {
+        maxRowOff = cells[i].row
+      }
+    }
+    let row = -maxRowOff - 1
+    while (cellsFit(cells, row + 1, col)) {
+      row += 1
+    }
+    return row
   }
 
   function evaluate(
@@ -171,12 +197,15 @@ function authoredPlan(
     return immediate - 30 * holes - 3 * bump - 2 * maxH - 2 * landing - 20 * danger
   }
 
-  function simulate(actions: string): number {
+  function simulate(
+    actions: string,
+  ): { score: number; row: number; col: number; o: number; sideMoved: boolean } | null {
     let row = spawnRow
     let col = spawnCol
     let o = 0
     let idx = 0
     let dropPts = 0
+    let sideMoved = false
     const len = actions.length
     let guard = (height + 4) * (len + 4) + 8
     while (guard > 0) {
@@ -204,7 +233,7 @@ function authoredPlan(
         } else {
           const next = ch === 'C' ? (o + 1) % orientations : (o + orientations - 1) % orientations
           if (!cellsFit(piece[next], row, col)) {
-            return Number.NEGATIVE_INFINITY
+            return null
           }
           o = next
         }
@@ -219,17 +248,19 @@ function authoredPlan(
         if (ch === 'L') {
           if (cellsFit(piece[o], row, col - 1)) {
             col -= 1
+            sideMoved = true
           }
         } else if (ch === 'R') {
           if (cellsFit(piece[o], row, col + 1)) {
             col += 1
+            sideMoved = true
           }
         } else if (ch === 'H') {
-          // resting hard drop: the piece cannot fall, so no drop points
+          // The piece already rests, so the hard drop scores no drop points.
         } else {
           const next = ch === 'C' ? (o + 1) % orientations : (o + orientations - 1) % orientations
           if (!cellsFit(piece[next], row, col)) {
-            return Number.NEGATIVE_INFINITY
+            return null
           }
           o = next
         }
@@ -240,7 +271,13 @@ function authoredPlan(
       }
       break
     }
-    return evaluate(piece[o], row, col, dropPts)
+    return {
+      score: evaluate(piece[o], row, col, dropPts),
+      row: row,
+      col: col,
+      o: o,
+      sideMoved: sideMoved,
+    }
   }
 
   const endings: string[] = ['', 'L', 'R', 'H', 'HL', 'HR']
@@ -282,8 +319,23 @@ function authoredPlan(
         for (let d = 0; d <= maxD; d += 1) {
           const prefix = repeatChar(dir, d) + rot + repeatChar(dir, steps - d)
           for (let e = 0; e < endings.length; e += 1) {
-            const candidate = prefix + endings[e]
-            const score = simulate(candidate)
+            const ending = endings[e]
+            const candidate = prefix + ending
+            const outcome = simulate(candidate)
+            if (outcome === null) {
+              continue
+            }
+            // The search keeps a side-step only when the placement lies below
+            // the straight-drop landing in the landing column, because only a
+            // pocket under an overhang needs the side-step.
+            if (
+              (ending === 'HL' || ending === 'HR') &&
+              outcome.sideMoved &&
+              outcome.row === straightDropRow(outcome.col, outcome.o)
+            ) {
+              continue
+            }
+            const score = outcome.score
             if (score > bestScore || (score === bestScore && prefix.length < bestCost)) {
               bestScore = score
               bestCost = prefix.length

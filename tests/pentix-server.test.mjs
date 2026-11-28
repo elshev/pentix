@@ -8,8 +8,9 @@ import test from 'node:test'
 import { v7 as uuidv7 } from 'uuid'
 
 import { PentixGameLifecycle, startPentixServer } from '../apps/pentix-server/dist/server.js'
-import { DemoRunService } from '../apps/pentix-server/dist/demo-runs.js'
+import { DemoRunService, playingTimePer1000PiecesMs } from '../apps/pentix-server/dist/demo-runs.js'
 import {
+  DemoRunGameStandingSchema,
   DemoRunSnapshotSchema,
   ErrorResponseSchema,
   PentixGameSchema,
@@ -1234,18 +1235,28 @@ test('a demo run plays every engine and completes', async () => {
 
   const run = service.startRun(2)
   assert.equal(run.status, 'queued')
-  assert.deepEqual(run.engines, ['alpha', 'beta'])
+  assert.deepEqual(run.engines.map((line) => line.engineId), ['alpha', 'beta'])
   assert.equal(run.gameCount, 2)
   assert.equal(run.completedGameCount, 0)
-  assert.deepEqual(run.standings, [])
+  assert.deepEqual(run.games, [])
+
+  for (const line of run.engines) {
+    assert.equal(line.name, `Engine ${line.engineId}`)
+    assert.equal(line.totalPoints, 0)
+    assert.equal(line.totalLines, 0)
+    assert.equal(line.totalPieces, 0)
+    assert.equal(line.playingTimeMs, 0)
+    assert.equal(line.playingTimePer1000PiecesMs, null)
+  }
 
   await service.whenIdle()
 
   const done = service.getRun(run.id)
   assert.equal(done.status, 'completed')
   assert.equal(done.completedGameCount, 2)
+  assert.deepEqual(done.games.map((game) => game.index), [0, 1])
   assert.deepEqual(
-    done.standings.map((line) => line.engineId),
+    done.engines.map((line) => line.engineId),
     ['alpha', 'beta'],
   )
   assert.equal(service.getRun('missing-run'), undefined)
@@ -1271,20 +1282,88 @@ test('demo standings sum the games and rank equal engines by id', async () => {
 
   const done = service.getRun(run.id)
   assert.deepEqual(
-    done.standings.map((line) => line.engineId),
+    done.engines.map((line) => line.engineId),
     ['alpha', 'beta'],
   )
 
-  for (const line of done.standings) {
+  for (const line of done.engines) {
     assert.equal(line.name, `Engine ${line.engineId}`)
-    assert.equal(line.points, expected.score * 2)
-    assert.equal(line.lines, expected.clearedLines * 2)
-    assert.equal(line.pieces, expected.blocks * 2)
-    assert.equal(line.playingTimeMs, line.pieces)
+    assert.equal(line.totalPoints, expected.score * 2)
+    assert.equal(line.totalLines, expected.clearedLines * 2)
+    assert.equal(line.totalPieces, expected.blocks * 2)
+    assert.equal(line.playingTimeMs, line.totalPieces)
+    assert.equal(line.playingTimePer1000PiecesMs, 1000)
+  }
+
+  assert.equal(done.games.length, 2)
+  assert.deepEqual(done.games.map((game) => game.index), [0, 1])
+  assert.notEqual(done.games[0].id, done.games[1].id)
+
+  for (const game of done.games) {
+    assert.deepEqual(
+      game.standings.map((row) => row.engineId),
+      ['alpha', 'beta'],
+    )
+
+    for (const row of game.standings) {
+      assert.equal(row.points, expected.score)
+      assert.equal(row.lines, expected.clearedLines)
+      assert.equal(row.pieces, expected.blocks)
+      assert.equal(row.playingTimeMs, row.pieces)
+      assert.equal('name' in row, false)
+      assert.equal('playingTimePer1000PiecesMs' in row, false)
+    }
   }
 })
 
-test('a throwing planner fails the run without standings', async () => {
+test('each game ranks its own rows while the engine line follows the run totals', async () => {
+  const expected = expectedDemoGameStats(() => 'H')
+  let ids = 0
+  let read = 0
+  const service = new DemoRunService(
+    () => `demo-${ids++}`,
+    demoRunOptions({
+      engines: [
+        stubDemoEngine('beta', () => 'H'),
+        stubDemoEngine('alpha', () => 'H'),
+      ],
+      clock: () => read++,
+    }),
+  )
+
+  const run = service.startRun(2)
+  await service.whenIdle()
+
+  const done = service.getRun(run.id)
+  const rowPoints = done.games.reduce(
+    (total, game) => total + game.standings[0].points,
+    0,
+  )
+
+  for (const game of done.games) {
+    assert.deepEqual(
+      game.standings.map((row) => row.engineId),
+      ['alpha', 'beta'],
+    )
+    assert.equal(game.standings[0].points, expected.score)
+  }
+
+  assert.equal(done.engines[0].totalPoints, rowPoints)
+  assert.equal(done.engines[0].totalPoints, done.engines[1].totalPoints)
+  assert.deepEqual(
+    done.engines.map((line) => line.engineId),
+    ['alpha', 'beta'],
+  )
+})
+
+test('the time per 1000 pieces is null without pieces', () => {
+  assert.equal(playingTimePer1000PiecesMs(4.5, 300), 15)
+  assert.equal(playingTimePer1000PiecesMs(1, 3), 333.333)
+  assert.equal(playingTimePer1000PiecesMs(0, 0), null)
+  assert.equal(playingTimePer1000PiecesMs(12, 0), null)
+})
+
+test('a throwing planner fails the run without game results', async () => {
   const service = new DemoRunService(
     () => 'demo-1',
     demoRunOptions({
@@ -1302,7 +1381,15 @@ test('a throwing planner fails the run without standings', async () => {
   const done = service.getRun(run.id)
   assert.equal(done.status, 'failed')
   assert.match(done.error, /planner exploded/)
-  assert.deepEqual(done.standings, [])
+  assert.deepEqual(done.games, [])
+
+  for (const line of done.engines) {
+    assert.equal(line.totalPoints, 0)
+    assert.equal(line.totalLines, 0)
+    assert.equal(line.totalPieces, 0)
+    assert.equal(line.playingTimeMs, 0)
+    assert.equal(line.playingTimePer1000PiecesMs, null)
+  }
 })
 
 test('a demo run rejects a game count outside its bounds', async () => {
@@ -1350,23 +1437,45 @@ test('POST /demo-runs starts a background run and reports its standings', async 
     const run = await response.json()
     assertUuidV7(run.id)
     assert.equal(run.gameCount, 1)
-    assert.deepEqual(run.engines, ['alpha', 'beta'])
-    assert.deepEqual(run.standings, [])
+    assert.deepEqual(
+      run.engines.map((line) => line.engineId),
+      ['alpha', 'beta'],
+    )
+    assert.deepEqual(run.games, [])
     assert.ok(run.status === 'queued' || run.status === 'running')
 
     const done = await waitForDemoRun(handle.url, run.id)
     assert.equal(done.status, 'completed')
     assert.equal(done.completedGameCount, 1)
-    assert.equal(done.standings.length, 2)
+    assert.equal(done.games.length, 1)
+    assert.equal(done.games[0].index, 0)
+    assertUuidV7(done.games[0].id)
+    assert.equal(done.games[0].standings.length, 2)
 
-    for (const line of done.standings) {
+    for (const line of done.engines) {
       assert.equal(typeof line.engineId, 'string')
       assert.equal(typeof line.name, 'string')
-      assert.ok(Number.isInteger(line.points) && line.points >= 0)
-      assert.ok(Number.isInteger(line.lines) && line.lines >= 0)
-      assert.ok(Number.isInteger(line.pieces) && line.pieces >= 0)
+      assert.equal('description' in line, false)
+      assert.ok(Number.isInteger(line.totalPoints) && line.totalPoints >= 0)
+      assert.ok(Number.isInteger(line.totalLines) && line.totalLines >= 0)
+      assert.ok(Number.isInteger(line.totalPieces) && line.totalPieces >= 0)
       assert.ok(typeof line.playingTimeMs === 'number')
       assert.ok(line.playingTimeMs >= 0)
+      assert.ok(
+        line.playingTimePer1000PiecesMs === null ||
+          (typeof line.playingTimePer1000PiecesMs === 'number' &&
+            line.playingTimePer1000PiecesMs >= 0),
+      )
+    }
+
+    for (const row of done.games[0].standings) {
+      assert.equal(typeof row.engineId, 'string')
+      assert.equal('name' in row, false)
+      assert.equal('playingTimePer1000PiecesMs' in row, false)
+      assert.ok(Number.isInteger(row.points) && row.points >= 0)
+      assert.ok(Number.isInteger(row.lines) && row.lines >= 0)
+      assert.ok(Number.isInteger(row.pieces) && row.pieces >= 0)
+      assert.ok(typeof row.playingTimeMs === 'number')
     }
   } finally {
     await handle.close()
@@ -1386,7 +1495,12 @@ test('POST /demo-runs accepts the maximum batch', async () => {
 
     const done = await waitForDemoRun(handle.url, run.id)
     assert.equal(done.completedGameCount, 256)
-    assert.deepEqual(done.standings, [])
+    assert.equal(done.games.length, 256)
+    assert.deepEqual(
+      done.games.map((game) => game.index),
+      Array.from({ length: 256 }, (_, index) => index),
+    )
+    assert.deepEqual(done.engines, [])
   } finally {
     await handle.close()
   }
@@ -1530,7 +1644,11 @@ test('a rejected session write fails the run', async () => {
     const done = await waitForDemoRun(handle.url, run.id, 'failed')
 
     assert.match(done.error, /disk full/)
-    assert.deepEqual(done.standings, [])
+    assert.deepEqual(done.games, [])
+    for (const line of done.engines) {
+      assert.equal(line.totalPoints, 0)
+      assert.equal(line.playingTimePer1000PiecesMs, null)
+    }
   } finally {
     await handle.close()
   }
@@ -2030,7 +2148,16 @@ test('live responses satisfy the documented schemas', async () => {
     const finishedRun = DemoRunSnapshotSchema.parse(
       await waitForDemoRun(handle.url, queuedRun.id),
     )
-    assert.equal(finishedRun.standings.length, 2)
+    assert.equal(finishedRun.engines.length, 2)
+    assert.equal(finishedRun.games.length, 1)
+
+    for (const game of finishedRun.games) {
+      for (const row of game.standings) {
+        DemoRunGameStandingSchema.parse(row)
+        assert.equal('name' in row, false)
+        assert.equal('playingTimePer1000PiecesMs' in row, false)
+      }
+    }
 
     const missing = await getJson(handle.url, apiPath(`/users/${UNKNOWN_UUID_V7}`))
     assert.equal(missing.status, 404)

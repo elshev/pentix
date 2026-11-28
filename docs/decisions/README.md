@@ -53,6 +53,7 @@ Allowed status values:
 | 2026-11-26 | [add-glossary-and-decision-index](../../openspec/changes/archive/2026-11-26-add-glossary-and-decision-index/design.md) | Glossary at the repository root, decision index over the archive, project rule for the index row | Accepted |
 | 2026-11-27 | [save-demo-game-sessions](../../openspec/changes/archive/2026-11-27-save-demo-game-sessions/design.md) | AI user per demo engine, user type, stored demo session logs with opening level and seed, guarded column migration | Accepted |
 | 2026-11-27 | [optimize-sqlite-writes](../../openspec/changes/archive/2026-11-27-optimize-sqlite-writes/design.md) | SQLite write-ahead journal, normal synchronization, startup read-back, accepted durability window | Accepted |
+| 2026-11-28 | [add-demo-run-game-breakdown](../../openspec/changes/archive/2026-11-28-add-demo-run-game-breakdown/design.md) | `engines` run totals with `total*` names and time per `1000` pieces, `games` with per-game standings and stored game id | Accepted |
 
 ## Standing decisions
 

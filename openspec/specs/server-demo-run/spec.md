@@ -45,7 +45,7 @@ Each game of a run SHALL create one `PentixGame` through the server's id and pie
 
 - **GIVEN** the built-in registry with its nine engines
 - **WHEN** a run starts
-- **THEN** the snapshot lists those nine engine ids in registration order
+- **THEN** the snapshot lists those nine engine ids
 - **AND** every one of them receives a session in every game
 - **AND** every session names its engine's AI user
 
@@ -74,30 +74,42 @@ Each game of a run SHALL create one `PentixGame` through the server's id and pie
 
 ### Requirement: A run reports its status while it plays
 
-`GET /demo-runs/{id}` SHALL return `200 OK` with the run's snapshot, `404 Not Found` for a run id that is unknown, and `400 Bad Request` for an id that is not a UUIDv7 value. The snapshot SHALL carry `id`, `status`, `gameCount`, `completedGameCount`, `engines`, and `standings`, plus `error` only when the status is `failed`. `status` SHALL be `queued`, `running`, `completed`, or `failed`. `completedGameCount` SHALL count only fully played games, SHALL never decrease, and SHALL be `0` until the first game ends. `standings` SHALL be an empty array until the status becomes `completed`. A failed run SHALL carry a message naming the cause and SHALL publish no standings.
+`GET /demo-runs/{id}` SHALL return `200 OK` with the run's snapshot, `404 Not Found` for a run id that is unknown, and `400 Bad Request` for an id that is not a UUIDv7 value. The snapshot SHALL carry `id`, `status`, `gameCount`, `completedGameCount`, `engines`, and `games`, plus `error` only when the status is `failed`. `status` SHALL be `queued`, `running`, `completed`, or `failed`. `completedGameCount` SHALL count only fully played games, SHALL never decrease, and SHALL be `0` until the first game ends. `engines` SHALL hold one line per competing engine from the start, with zero values until the first game ends. `games` SHALL hold one entry per finished game, ordered by `index` ascending, and its length SHALL equal `completedGameCount`. A failed run SHALL carry a message naming the cause, SHALL publish no game entries, and SHALL report zero values for every engine.
 
 #### Scenario: A fresh run is queued
 
 - **GIVEN** a run that was just created
 - **WHEN** its id is fetched immediately
 - **THEN** the status is `queued` or `running`
-- **AND** `standings` is empty
+- **AND** `games` is empty
+- **AND** every engine line reports zero total points, total lines, total pieces, and playing time
+- **AND** every engine line reports a `null` rate
 
 #### Scenario: Progress is visible
 
 - **GIVEN** a run of `2` games still playing
 - **WHEN** its id is fetched after the first game ends
 - **THEN** `completedGameCount` is `1`
+- **AND** `games` holds one entry with `index` `0`
 - **AND** the status is `running`
-- **AND** `standings` is still empty
 
-#### Scenario: A completed run publishes its standings
+#### Scenario: A completed run publishes its results
 
 - **GIVEN** a run whose last game ended
 - **WHEN** its id is fetched
 - **THEN** the status is `completed`
 - **AND** `completedGameCount` equals `gameCount`
-- **AND** `standings` holds one line per engine
+- **AND** `games` holds `gameCount` entries
+- **AND** `engines` holds one line per engine
+
+#### Scenario: A failed run publishes no game entries
+
+- **GIVEN** a run that fails part-way
+- **WHEN** its id is fetched
+- **THEN** the status is `failed`
+- **AND** `error` names the cause
+- **AND** `games` is empty
+- **AND** every engine line reports zero totals
 
 #### Scenario: Unknown and malformed ids are rejected
 
@@ -115,28 +127,55 @@ Each game of a run SHALL create one `PentixGame` through the server's id and pie
 
 ### Requirement: Standings rank the engines winner to loser
 
-Once a run completes, `standings` SHALL list every engine that started the run exactly once, ordered by `points` descending, then `lines` descending, then `pieces` descending, then `playingTimeMs` ascending, then `engineId` ascending. Each line SHALL carry `engineId`, the registry `name`, `points`, `lines`, `pieces`, and `playingTimeMs`. `points`, `lines`, and `pieces` SHALL be the totals of `statistics.score`, `statistics.clearedLines`, and `statistics.blocks` over the run's games, and `playingTimeMs` SHALL be the total planning time over those games. The order SHALL be stable across reads of the same completed run.
+`engines` SHALL list every engine that started the run exactly once, ordered by `totalPoints` descending, then `totalLines` descending, then `totalPieces` descending, then `playingTimeMs` ascending, then `engineId` ascending. Each line SHALL carry `engineId`, `name`, `totalPoints`, `totalLines`, `totalPieces`, `playingTimeMs`, and `playingTimePer1000PiecesMs`. `totalPoints`, `totalLines`, and `totalPieces` SHALL be the totals of `statistics.score`, `statistics.clearedLines`, and `statistics.blocks` over the run's finished games. `playingTimeMs` SHALL be the total planning time over those games. `name` SHALL be the registry display name of the engine. A line SHALL NOT carry the engine `description`.
 
-#### Scenario: The highest score wins
+`games` SHALL list one entry per finished game, ordered by `index` ascending. Each entry SHALL carry `index`, `id`, and `standings`. `index` SHALL be the zero-based position of the game in the run. `id` SHALL be the UUIDv7 id of the `PentixGame` that the game created. A game's `standings` SHALL list every engine of the run exactly once, ordered by that game's `points` descending, then `lines`, then `pieces`, then shorter `playingTimeMs`, then `engineId`. Each row SHALL carry `engineId`, `points`, `lines`, `pieces`, and `playingTimeMs`, and those fields SHALL describe that one game. A row SHALL NOT carry the engine `name` and SHALL NOT carry a rate. An engine line's `totalPoints`, `totalLines`, `totalPieces`, and `playingTimeMs` SHALL equal the sum of the same fields over its rows in `games`, up to the three-decimal rounding. Every order SHALL be stable across reads of the same run.
+
+#### Scenario: The highest score wins the run
 
 - **GIVEN** a completed run whose engines ended with different totals
-- **WHEN** the standings are read
-- **THEN** the first line has the highest `points`
+- **WHEN** the `engines` list is read
+- **THEN** the first line has the highest `totalPoints`
 - **AND** the last line has the lowest
 - **AND** every line names its engine's display name
 
 #### Scenario: Totals are summed across games
 
 - **GIVEN** an engine that scored `100` points in one game and `150` in the next
-- **WHEN** the completed run's standings are read
-- **THEN** its line reports `250` points
-- **AND** its lines and pieces are summed the same way
+- **WHEN** the completed run's engine line is read
+- **THEN** it reports `250` `totalPoints`
+- **AND** its `totalLines` and `totalPieces` are summed the same way
+
+#### Scenario: Each game keeps its own entry
+
+- **GIVEN** a completed run of `2` games over `2` engines
+- **WHEN** the `games` list is read
+- **THEN** it holds two entries
+- **AND** their `index` values are `0` and `1` in that order
+- **AND** each entry names the UUIDv7 id of a stored game
+- **AND** no two entries report the same `index`
+
+#### Scenario: Each game orders its own standings
+
+- **GIVEN** a completed run whose first game ended with `alpha` above `beta` and whose second game ended with `beta` above `alpha`
+- **WHEN** the `games` list is read
+- **THEN** `games[0].standings` lists `alpha` first
+- **AND** `games[1].standings` lists `beta` first
+- **AND** each row reports the score, lines, pieces, and time of that one game
+
+#### Scenario: The game rows add up to the engine line
+
+- **GIVEN** a completed run of `3` games
+- **WHEN** one engine line is read
+- **THEN** its `totalPoints`, `totalLines`, `totalPieces`, and `playingTimeMs` equal the sum of its rows in `games`
+- **AND** the sums agree to three decimals
+- **AND** its `playingTimePer1000PiecesMs` comes from those totals
 
 #### Scenario: Equal points break on lines, pieces, and time
 
-- **GIVEN** two engines with equal `points`
-- **WHEN** their standing lines are read
-- **THEN** the one with more `lines` comes first
+- **GIVEN** two engines with equal `points` in one game
+- **WHEN** that game's `standings` is read
+- **THEN** the engine with more `lines` comes first
 - **AND** if those are equal, more `pieces` comes first
 - **AND** if those are equal, the shorter `playingTimeMs` comes first
 - **AND** if everything is equal, engine id order decides
@@ -144,18 +183,21 @@ Once a run completes, `standings` SHALL list every engine that started the run e
 #### Scenario: Every competitor is listed once
 
 - **GIVEN** a completed run over the nine built-in engines
-- **WHEN** its standings are read
-- **THEN** there are nine lines
-- **AND** no `engineId` appears twice
+- **WHEN** the result is read
+- **THEN** `engines` holds nine lines
+- **AND** every game entry holds nine rows
+- **AND** no `engineId` appears twice in either list
 
 ### Requirement: Playing time counts only plan executions
 
-`playingTimeMs` SHALL be the sum of the durations measured around each engine `plan` call during the run, in fractional milliseconds rounded to three decimals. It SHALL exclude playback overhead, engine operations, gravity ticks, and game creation, SHALL be non-negative, and SHALL grow only when an engine plans. A run whose engines return empty logs SHALL still report each engine's planning time.
+`playingTimeMs` SHALL be the sum of the durations measured around each engine `plan` call, in fractional milliseconds rounded to three decimals. It SHALL exclude playback overhead, engine operations, gravity ticks, and game creation, SHALL be non-negative, and SHALL grow only when an engine plans. A run whose engines return empty logs SHALL still report each engine's planning time. It SHALL appear on every engine line and on every game row.
+
+`playingTimePer1000PiecesMs` SHALL appear on every engine line and SHALL NOT appear on a game row. It SHALL be `playingTimeMs` multiplied by `1000`, divided by `totalPieces`, and rounded to three decimals. It SHALL be `null` when `totalPieces` is `0`. The service SHALL round the `playingTimeMs` of every game row to three decimals. It SHALL sum those rounded values into the engine total and SHALL round the total again to three decimals. It SHALL compute the rate from the reported `playingTimeMs` and `totalPieces` of its own line.
 
 #### Scenario: Ticks are not billed as playing time
 
 - **GIVEN** two engines that return the same empty log, one facing a taller starting stack
-- **WHEN** their standing lines are compared
+- **WHEN** their game rows are compared
 - **THEN** neither `playingTimeMs` includes the extra gravity ticks
 - **AND** both values stay non-negative
 
@@ -165,6 +207,27 @@ Once a run completes, `standings` SHALL list every engine that started the run e
 - **WHEN** a `playingTimeMs` value is read
 - **THEN** it is a number with no more than three decimals
 - **AND** it is at least the sum of its plans' measured durations
+
+#### Scenario: The rate reports the cost of 1000 pieces
+
+- **GIVEN** an engine line whose `playingTimeMs` is `4.5` and whose `totalPieces` is `300`
+- **WHEN** the line is read
+- **THEN** `playingTimePer1000PiecesMs` is `15`
+- **AND** the game rows carry no such field
+
+#### Scenario: A piece-less line reports no rate
+
+- **GIVEN** a completed run whose engine placed `0` pieces in every game
+- **WHEN** its engine line is read
+- **THEN** `playingTimeMs` is `0`
+- **AND** `playingTimePer1000PiecesMs` is `null`
+
+#### Scenario: Game times sum into the engine total
+
+- **GIVEN** a completed run of `2` games whose rounded times are `1.25` and `2.5`
+- **WHEN** the engine line is read
+- **THEN** its `playingTimeMs` is `3.75`
+- **AND** its rate comes from `3.75` and its `totalPieces`
 
 ### Requirement: Batch games follow the shared demo rules
 
