@@ -13,7 +13,12 @@ import {
   type PieceKey,
   type User,
 } from '../../../../packages/pentix-core/dist/index.js'
-import type { DemoRunSnapshot, DemoRunStanding } from '../demo-runs.js'
+import type {
+  DemoRunEngineStanding,
+  DemoRunGameResult,
+  DemoRunGameStanding,
+  DemoRunSnapshot,
+} from '../demo-runs.js'
 
 const UUID_V7_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -158,16 +163,35 @@ export const DemoRunStatusSchema = z
   .enum(['queued', 'running', 'completed', 'failed'])
   .openapi('DemoRunStatus')
 
-export const DemoRunStandingSchema = z
+export const DemoRunGameStandingSchema = z
   .object({
     engineId: z.string(),
-    name: z.string(),
     points: z.number(),
     lines: z.number().int(),
     pieces: z.number().int(),
     playingTimeMs: z.number(),
   })
-  .openapi('DemoRunStanding') satisfies z.ZodType<DemoRunStanding>
+  .openapi('DemoRunGameStanding') satisfies z.ZodType<DemoRunGameStanding>
+
+export const DemoRunEngineStandingSchema = z
+  .object({
+    engineId: z.string(),
+    name: z.string(),
+    totalPoints: z.number(),
+    totalLines: z.number().int(),
+    totalPieces: z.number().int(),
+    playingTimeMs: z.number(),
+    playingTimePer1000PiecesMs: z.number().nullable(),
+  })
+  .openapi('DemoRunEngineStanding') satisfies z.ZodType<DemoRunEngineStanding>
+
+export const DemoRunGameResultSchema = z
+  .object({
+    index: z.number().int().nonnegative(),
+    id: UuidV7Schema,
+    standings: z.array(DemoRunGameStandingSchema).readonly(),
+  })
+  .openapi('DemoRunGameResult') satisfies z.ZodType<DemoRunGameResult>
 
 export const DemoRunSnapshotSchema = z
   .object({
@@ -175,8 +199,8 @@ export const DemoRunSnapshotSchema = z
     status: DemoRunStatusSchema,
     gameCount: z.number().int(),
     completedGameCount: z.number().int(),
-    engines: z.array(z.string()).readonly(),
-    standings: z.array(DemoRunStandingSchema).readonly(),
+    engines: z.array(DemoRunEngineStandingSchema).readonly(),
+    games: z.array(DemoRunGameResultSchema).readonly(),
     error: z.string().optional(),
   })
   .openapi('DemoRunSnapshot') satisfies z.ZodType<DemoRunSnapshot>

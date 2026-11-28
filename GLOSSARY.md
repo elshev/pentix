@@ -150,8 +150,17 @@ Avoid: rail panel, mini game.
 **Demo run** — One server demo batch that `POST /v1/demo-runs` starts. Every registered engine plays every game of the run. The run record stays in memory, while each finished demo session log is durable.
 Avoid: batch job, tournament, demo game.
 
-**Standing** — One result line of a finished demo run. It carries `name`, `points`, `lines`, `pieces`, and `playingTimeMs`. Ties break on lines, then pieces, then the shorter playing time, then the engine ID.
-Avoid: result row, score row, entry.
+**Engine standing** (`DemoRunEngineStanding`) — One engine's aggregate result for a demo run. It carries `engineId`, `name`, `totalPoints`, `totalLines`, `totalPieces`, `playingTimeMs`, and `playingTimePer1000PiecesMs`, and it omits the engine `description`. The `engines` list holds one line per engine, ordered by those totals. Ties break on total lines, total pieces, the shorter playing time, then the engine ID.
+Avoid: result row, engine card, aggregate row.
+
+**Game standing** (`DemoRunGameStanding`) — One engine's result for one game of a demo run. It carries `engineId`, `points`, `lines`, `pieces`, and `playingTimeMs`, and it omits the engine `name` and the rate. A game's `standings` list holds one row per engine, ordered by points. Ties break on lines, then pieces, then the shorter playing time, then the engine ID.
+Avoid: game row, score row, entry.
+
+**Game result** (`DemoRunGameResult`) — One finished game of a demo run. It carries the zero-based `index`, the stored game `id`, and the ranked `standings`. The `games` list holds one entry per finished game.
+Avoid: game record, game summary.
+
+**Time per 1000 pieces** (`playingTimePer1000PiecesMs`) — The planning time divided by the piece count and scaled to `1000` pieces, rounded to three decimals. It appears on an engine standing only, and it is `null` when `totalPieces` is `0`.
+Avoid: speed, pace, rate per piece.
 
 **Game count** (`gameCount`) — The number of games in a demo run. The default is `1` and the maximum is `256`.
 Avoid: games, count, rounds.

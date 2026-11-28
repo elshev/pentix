@@ -456,8 +456,10 @@ export async function startPentixServer(
 
 export { DemoRunService }
 export type {
+  DemoRunEngineStanding,
+  DemoRunGameResult,
+  DemoRunGameStanding,
   DemoRunServiceOptions,
   DemoRunSnapshot,
-  DemoRunStanding,
   DemoRunStatus,
 } from './demo-runs.js'
