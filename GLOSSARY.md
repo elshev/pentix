@@ -182,6 +182,18 @@ Avoid: storage layer, database.
 **Game lifecycle** (`PentixGameLifecycle`) — The lifecycle service that owns the request-time working set. It hydrates the maps at startup and saves each successful mutation.
 Avoid: manager, controller, service layer.
 
+**App settings** (`apps/pentix-server/settings.json`) — The file that holds the storage paths of `PentixServer`. It carries `dataFile` and `backupDirectory` and no other key. The module `apps/pentix-server/src/settings.ts` reads it through `loadPentixServerSettings()`, and `PENTIX_SERVER_SETTINGS_FILE` names another file.
+Avoid: config file, appsettings, environment file.
+
+**Data file** (`dataFile`) — The SQLite file that holds every retained user, game, and session. The shipped app settings name `C:\db\pentix\pentix.db`, and `PENTIX_DATA_FILE` overrides that value.
+Avoid: database path, storage file, db file.
+
+**Backup directory** (`backupDirectory`) — The folder that receives the backup files. The shipped app settings name `C:\db\Backups\pentix`, and `PENTIX_BACKUP_DIRECTORY` overrides that value.
+Avoid: dump folder, archive folder, export folder.
+
+**Storage backup** (`createStorageBackup`) — One consistent copy of the data file, written by `npm run backup:server` through the `node:sqlite` backup call. The command names the file `<yyyyMMddHHmm>-pentix.db` after the local minute, and it never replaces an existing file.
+Avoid: dump, snapshot, export, database copy.
+
 ## Process artifacts
 
 **Capability** (`openspec/specs/<capability>/`) — One behavior area with its own spec folder.

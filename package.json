@@ -16,6 +16,7 @@
     "build:core": "npm run clean:core && tsc -p packages/pentix-core/tsconfig.json",
     "build:server": "npm run clean:server && tsc -p apps/pentix-server/tsconfig.json",
     "start:server": "npm run build:core && npm run build:server && node apps/pentix-server/dist/main.js",
+    "backup:server": "npm run build:core && npm run build:server && node apps/pentix-server/dist/backup.js",
     "build": "npm run build:core && npm run build:server && npm run build:web",
     "test": "npm run build:core && npm run build:server && node --test tests/pentix-core.test.mjs tests/pentix-server.test.mjs && node --experimental-strip-types --no-warnings --test tests/pentix-web.test.mjs",
     "test:web": "npm run build:core && node --experimental-strip-types --no-warnings --test tests/pentix-web.test.mjs",
