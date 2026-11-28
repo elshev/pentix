@@ -16,12 +16,15 @@ import {
 import type {
   GameCollection,
   GameSessionCollection,
+  HighScoreCollection,
+  HighScoreEntry,
   UserCollection,
 } from './entities.js'
 import { StorageError } from './errors.js'
 import type {
   GameRepository,
   GameSessionRepository,
+  HighScoreRepository,
   PentixStorage,
   UserRepository,
 } from './repositories.js'
@@ -70,6 +73,18 @@ CREATE TABLE IF NOT EXISTS game_sessions (
   seed_column INTEGER,
   pieces TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS high_scores (
+  session_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  user_type TEXT NOT NULL,
+  score INTEGER NOT NULL,
+  achieved_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS high_scores_rank
+  ON high_scores (user_type, score DESC, achieved_at ASC, session_id ASC);
 `
 
 /** A column that a database written by an earlier version does not yet hold. */
@@ -117,6 +132,15 @@ interface GameSessionRow {
   readonly level: number | null
   readonly seed_column: number | null
   readonly pieces: string
+}
+
+interface HighScoreRow {
+  readonly session_id: string
+  readonly user_id: string
+  readonly name: string
+  readonly user_type: string
+  readonly score: number
+  readonly achieved_at: string
 }
 
 function describeError(error: unknown): string {
@@ -477,6 +501,49 @@ function readSessionLog(row: GameSessionRow): SessionActionLog {
   })
 }
 
+function readHighScoreRow(row: HighScoreRow): HighScoreEntry {
+  const label = `high score ${String(row.session_id)}`
+
+  if (
+    typeof row.session_id !== 'string' ||
+    row.session_id.length === 0 ||
+    typeof row.user_id !== 'string' ||
+    row.user_id.length === 0 ||
+    typeof row.name !== 'string' ||
+    row.name.trim().length === 0 ||
+    (row.user_type !== 'ai' && row.user_type !== 'human') ||
+    !Number.isInteger(row.score) ||
+    row.score < 0 ||
+    typeof row.achieved_at !== 'string' ||
+    row.achieved_at.trim().length === 0 ||
+    Number.isNaN(Date.parse(row.achieved_at))
+  ) {
+    throw new StorageError(`Pentix storage contains an invalid ${label}.`)
+  }
+
+  return Object.freeze({
+    sessionId: row.session_id,
+    userId: row.user_id,
+    name: row.name,
+    type: row.user_type,
+    score: row.score,
+    achievedAt: row.achieved_at,
+  })
+}
+
+/** Runs synchronous statements in one write transaction. */
+function inTransaction<T>(database: DatabaseSync, action: () => T): T {
+  database.exec('BEGIN IMMEDIATE')
+  try {
+    const result = action()
+    database.exec('COMMIT')
+    return result
+  } catch (error) {
+    database.exec('ROLLBACK')
+    throw error
+  }
+}
+
 /**
  * Durable storage backed by a single SQLite file. Users, games, and sessions
  * live in separate tables. A game's piece sequence is one ordered JSON field.
@@ -527,6 +594,20 @@ function writeSessionLog(statement: StatementSync, log: SessionActionLog): void 
   )
 }
 
+function writeHighScoreRow(
+  statement: StatementSync,
+  entry: HighScoreEntry,
+): void {
+  statement.run(
+    entry.sessionId,
+    entry.userId,
+    entry.name,
+    entry.type,
+    entry.score,
+    entry.achievedAt,
+  )
+}
+
 function createRepositories(database: DatabaseSync): SqliteStorage {
   const selectUsers = database.prepare(
     'SELECT id, name, type, engine_id FROM users ORDER BY rowid',
@@ -572,6 +653,36 @@ function createRepositories(database: DatabaseSync): SqliteStorage {
        seed_column = excluded.seed_column,
        pieces = excluded.pieces`,
   )
+
+  const selectHighScores = database.prepare(
+    `SELECT session_id, user_id, name, user_type, score, achieved_at
+       FROM high_scores
+      ORDER BY user_type, score DESC, achieved_at ASC, session_id ASC`,
+  )
+  const upsertHighScore = database.prepare(
+    `INSERT INTO high_scores (session_id, user_id, name, user_type, score, achieved_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(session_id) DO UPDATE SET
+       user_id = excluded.user_id,
+       name = excluded.name,
+       user_type = excluded.user_type,
+       score = excluded.score,
+       achieved_at = excluded.achieved_at`,
+  )
+  const insertHighScore = database.prepare(
+    `INSERT INTO high_scores (session_id, user_id, name, user_type, score, achieved_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  )
+  const deleteHighScoreOverflow = database.prepare(
+    `DELETE FROM high_scores
+      WHERE session_id IN (
+        SELECT session_id FROM high_scores
+         WHERE user_type = ?
+         ORDER BY score DESC, achieved_at ASC, session_id ASC
+         LIMIT -1 OFFSET ?
+      )`,
+  )
+  const deleteAllHighScores = database.prepare('DELETE FROM high_scores')
 
   const users: UserRepository = {
     async load(): Promise<UserCollection> {
@@ -628,10 +739,38 @@ function createRepositories(database: DatabaseSync): SqliteStorage {
     },
   }
 
+  const highScores: HighScoreRepository = {
+    async load(): Promise<HighScoreCollection> {
+      const rows = selectHighScores.all() as unknown as readonly HighScoreRow[]
+      return { entries: rows.map(readHighScoreRow) }
+    },
+    async submit(entry: HighScoreEntry, tableLimit: number): Promise<void> {
+      inTransaction(database, () => {
+        writeHighScoreRow(upsertHighScore, entry)
+        deleteHighScoreOverflow.run(entry.type, tableLimit)
+      })
+    },
+    async replace(
+      entries: readonly HighScoreEntry[],
+      tableLimit: number,
+    ): Promise<void> {
+      inTransaction(database, () => {
+        deleteAllHighScores.run()
+        for (const entry of entries) {
+          writeHighScoreRow(insertHighScore, entry)
+        }
+        for (const type of ['ai', 'human'] as const) {
+          deleteHighScoreOverflow.run(type, tableLimit)
+        }
+      })
+    },
+  }
+
   return {
     users,
     games,
     sessions,
+    highScores,
     pragmas(): SqliteStoragePragmas {
       const modeRow = database
         .prepare('PRAGMA journal_mode')

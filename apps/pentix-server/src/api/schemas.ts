@@ -83,6 +83,38 @@ export const BoardSnapshotSchema = z
 
 export const UserTypeSchema = z.enum(['human', 'ai']).openapi('UserType')
 
+const HIGH_SCORE_TYPE_MESSAGE = 'High score type must be one of: ai, human.'
+
+export const HighScoreQuerySchema = z
+  .object({
+    type: z
+      .enum(['ai', 'human'], { error: HIGH_SCORE_TYPE_MESSAGE })
+      .openapi({
+        param: {
+          name: 'type',
+          in: 'query',
+          required: true,
+          description: 'The user type of the requested high-score table.',
+        },
+      }),
+  })
+  .openapi('HighScoreQuery')
+
+export const HighScoreEntrySchema = z
+  .object({
+    name: z.string().min(1),
+    score: z.number().int().nonnegative(),
+    achievedAt: z.string().min(1),
+  })
+  .openapi('HighScoreEntry')
+
+export const HighScoreListSchema = z
+  .object({
+    type: UserTypeSchema,
+    scores: z.array(HighScoreEntrySchema).readonly(),
+  })
+  .openapi('HighScoreList')
+
 export const UserSchema = z
   .object({
     id: UuidV7Schema,

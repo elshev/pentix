@@ -53,7 +53,7 @@ export function registerApiReference<E extends Env>(
     info: {
       title: 'PentixServer API',
       version: API_DOCUMENT_VERSION,
-      description: `Users, Pentix games, game sessions, gameplay actions, and background demo runs. Every API endpoint carries the ${API_BASE_PATH} major-version prefix.`,
+      description: `Users, Pentix games, game sessions, gameplay actions, background demo runs, and high scores. Every API endpoint carries the ${API_BASE_PATH} major-version prefix.`,
     },
     servers: [
       {

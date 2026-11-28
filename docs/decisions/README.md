@@ -55,6 +55,7 @@ Allowed status values:
 | 2026-11-27 | [optimize-sqlite-writes](../../openspec/changes/archive/2026-11-27-optimize-sqlite-writes/design.md) | SQLite write-ahead journal, normal synchronization, startup read-back, accepted durability window | Accepted |
 | 2026-11-28 | [add-demo-run-game-breakdown](../../openspec/changes/archive/2026-11-28-add-demo-run-game-breakdown/design.md) | `engines` run totals with `total*` names and time per `1000` pieces, `games` with per-game standings and stored game id | Accepted |
 | 2026-11-28 | [add-app-settings-and-storage-backup](../../openspec/changes/archive/2026-11-28-add-app-settings-and-storage-backup/design.md) | App settings file with the two storage paths, data file at `C:\db\pentix\pentix.db`, online backup named `<yyyyMMddHHmm>-pentix.db`, refused overwrite | Accepted |
+| 2026-11-28 | [add-highscore-api](../../openspec/changes/archive/2026-11-28-add-highscore-api/design.md) | Persisted `high_scores` table with 1000 rows per AI/human type, startup memory cache, finished-session submissions, empty-table backfill from UUIDv7 dates, `GET /v1/high-scores?type=ai\|human` | Accepted |
 
 ## Standing decisions
 

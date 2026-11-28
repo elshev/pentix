@@ -24,6 +24,7 @@ import { v7 as uuidv7 } from 'uuid'
 
 import { createPentixApp } from './app.js'
 import { DemoRunService } from './demo-runs.js'
+import { HighScoreService } from './high-scores.js'
 import { HttpError, HttpStatus } from './http.js'
 import { createInMemoryStorage } from './storage/memory.js'
 import type { PentixStorage } from './storage/repositories.js'
@@ -42,6 +43,8 @@ export interface PentixServerContext {
   readonly demoStartingLevel?: number
   /** Millisecond clock used to time demo `plan` calls. Defaults to `performance.now()`. */
   readonly demoPlanClock?: () => number
+  /** Clock used to stamp a high-score achievement date. Defaults to the real clock. */
+  readonly highScoreClock?: () => Date
 }
 
 export interface PentixServerStartOptions {
@@ -68,17 +71,20 @@ export class PentixGameLifecycle {
   private readonly selectPieceId?: PieceIdSelector
   private readonly storage: PentixStorage
   private readonly demoEngines: readonly DemoEngine[]
+  private readonly highScores: HighScoreService
 
   constructor(
     createId: () => string,
     selectPieceId?: PieceIdSelector,
     storage: PentixStorage = createInMemoryStorage(),
     demoEngines: readonly DemoEngine[] = demoEngineRegistry.list(),
+    highScores: HighScoreService = new HighScoreService(storage.highScores),
   ) {
     this.createId = createId
     this.selectPieceId = selectPieceId
     this.storage = storage
     this.demoEngines = demoEngines
+    this.highScores = highScores
   }
 
   /**
@@ -118,6 +124,13 @@ export class PentixGameLifecycle {
       this.sessionLogs.set(log.sessionId, log)
       this.sessions.set(log.sessionId, replayPentixGameSession(log, game))
     }
+
+    // An upgraded store holds finished sessions but no score rows. Rebuild the
+    // tables once from those sessions, using the UUIDv7 date of each session id.
+    await this.highScores.backfill(
+      this.sessions.values(),
+      (userId) => this.users.get(userId),
+    )
   }
 
   /**
@@ -243,6 +256,7 @@ export class PentixGameLifecycle {
     await this.storage.games.save(result.game)
     this.games.set(result.game.id, result.game)
     this.sessions.set(result.session.id, result.session)
+    await this.recordFinished(session, result.session)
     return result.session
   }
 
@@ -322,7 +336,34 @@ export class PentixGameLifecycle {
       this.games.set(updatedGame.id, updatedGame)
     }
 
+    await this.recordFinished(preOpSession, updatedSession)
     return updatedSession
+  }
+
+  /**
+   * Submits one score when a session changes to `game-over`. The session log is
+   * already stored, and a missing user leaves the tables alone.
+   */
+  private async recordFinished(
+    before: PentixGameSession,
+    after: PentixGameSession,
+  ): Promise<void> {
+    if (before.status === 'game-over' || after.status !== 'game-over') {
+      return
+    }
+
+    const user = this.users.get(after.userId)
+    if (user === undefined) {
+      return
+    }
+
+    await this.highScores.submit({
+      sessionId: after.id,
+      userId: user.id,
+      name: user.name,
+      type: user.type,
+      score: after.statistics.score,
+    })
   }
 
   async move(
@@ -373,11 +414,14 @@ export async function createPentixServer(
 ): Promise<Server> {
   const storage = context.storage ?? createInMemoryStorage()
   const engines = context.demoEngines ?? demoEngineRegistry.list()
+  const highScores = new HighScoreService(storage.highScores, context.highScoreClock)
+  await highScores.load()
   const lifecycle = new PentixGameLifecycle(
     context.createId ?? uuidv7,
     context.selectPieceId,
     storage,
     engines,
+    highScores,
   )
   await lifecycle.load()
   const demoRuns = new DemoRunService(context.createId ?? uuidv7, {
@@ -386,6 +430,7 @@ export async function createPentixServer(
     startingLevel: context.demoStartingLevel,
     clock: context.demoPlanClock,
     storage,
+    highScores,
     resolveEngineUserId(engineId: string): string {
       const userId = lifecycle.getEngineUserId(engineId)
       if (userId === undefined) {
@@ -394,8 +439,13 @@ export async function createPentixServer(
 
       return userId
     },
+    resolveEngineUserName(engineId: string): string {
+      const userId = lifecycle.getEngineUserId(engineId)
+      const user = userId === undefined ? undefined : lifecycle.getUser(userId)
+      return user?.name ?? engineId
+    },
   })
-  const app = createPentixApp(lifecycle, demoRuns)
+  const app = createPentixApp(lifecycle, demoRuns, highScores)
 
   return createAdaptorServer({ fetch: app.fetch }) as Server
 }

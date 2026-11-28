@@ -13,6 +13,7 @@ import {
   DemoRunGameStandingSchema,
   DemoRunSnapshotSchema,
   ErrorResponseSchema,
+  HighScoreListSchema,
   PentixGameSchema,
   PentixGameSessionSchema,
   UserListSchema,
@@ -24,6 +25,11 @@ import {
 } from '../apps/pentix-server/dist/api/routes.js'
 import { createInMemoryStorage } from '../apps/pentix-server/dist/storage/memory.js'
 import { createSqliteStorage } from '../apps/pentix-server/dist/storage/sqlite.js'
+import {
+  HIGH_SCORE_TABLE_SIZE,
+  HighScoreService,
+  achievedAtFromSessionId,
+} from '../apps/pentix-server/dist/high-scores.js'
 import {
   createStorageBackup,
   formatBackupStamp,
@@ -1168,10 +1174,12 @@ function stubDemoEngine(id, plan) {
 
 /** Options for a direct service test: in-memory storage and AI user ids. */
 function demoRunOptions(overrides = {}) {
+  const storage = overrides.storage ?? createInMemoryStorage()
   return {
     selectPieceId: () => 0,
     seedColumn: 0,
-    storage: createInMemoryStorage(),
+    storage,
+    highScores: new HighScoreService(storage.highScores),
     resolveEngineUserId: (engineId) => `ai-${engineId}`,
     ...overrides,
   }
@@ -1939,7 +1947,7 @@ test('GET /openapi.json serves the documented API', async () => {
     assert.deepEqual(apiDocument.servers, [
       { url: handle.url, description: 'This server' },
     ])
-    assert.equal(Object.keys(apiDocument.paths).length, 11)
+    assert.equal(Object.keys(apiDocument.paths).length, 12)
 
     for (const path of Object.keys(apiDocument.paths)) {
       assert.ok(
@@ -2015,8 +2023,10 @@ test('every route config has exactly one handler', () => {
     () => UNKNOWN_UUID_V7,
     demoRunOptions({ engines: [] }),
   )
+  const storage = createInMemoryStorage()
+  const highScores = new HighScoreService(storage.highScores)
 
-  const tableKeys = buildPentixRoutes(lifecycle, demoRuns).map(
+  const tableKeys = buildPentixRoutes(lifecycle, demoRuns, highScores).map(
     ({ route }) => `${route.method.toUpperCase()} ${route.path}`,
   )
 
@@ -2025,7 +2035,7 @@ test('every route config has exactly one handler', () => {
 
 test('every route key carries the /v1 prefix', () => {
   const keys = listPentixRouteKeys()
-  assert.equal(keys.length, 12)
+  assert.equal(keys.length, 13)
 
   for (const key of keys) {
     const path = key.split(' ')[1]
@@ -2062,6 +2072,19 @@ test('the document derives its constraints from the route schemas', async () => 
     assert.equal(userIdParameter.in, 'path')
     assert.ok(userIdParameter.schema.pattern.startsWith('^'))
     assert.ok(userIdParameter.schema.pattern.includes('-7[0-9a-f]{3}-'))
+
+    const highScoreTypeParameter = apiDocument.paths[
+      apiPath('/high-scores')
+    ].get.parameters.find((parameter) => parameter.name === 'type')
+    assert.equal(highScoreTypeParameter.in, 'query')
+    assert.deepEqual(highScoreTypeParameter.schema.enum, ['ai', 'human'])
+
+    const highScoreResponse = resolveSchema(
+      apiDocument,
+      apiDocument.paths[apiPath('/high-scores')].get.responses['200']
+        .content['application/json'].schema,
+    )
+    assert.deepEqual(highScoreResponse.required.sort(), ['scores', 'type'])
   } finally {
     await handle.close()
   }
@@ -2491,6 +2514,869 @@ test('a backup reads a live write-ahead-logging store', async () => {
     }
   } finally {
     storage.close()
+    await temp.cleanup()
+  }
+})
+
+
+// --- High scores -------------------------------------------------------------
+
+const FIXED_HIGH_SCORE_DATE = '2026-11-28T10:15:00.000Z'
+
+/** One high-score row for a storage or service test. */
+function highScoreEntry(overrides = {}) {
+  return {
+    sessionId: uuidv7(),
+    userId: uuidv7(),
+    name: 'Ada',
+    type: 'human',
+    score: 100,
+    achievedAt: FIXED_HIGH_SCORE_DATE,
+    ...overrides,
+  }
+}
+
+/** The session fields that the high-score backfill reads. */
+function highScoreSession(id, userId, score, status = 'game-over') {
+  return { id, userId, status, statistics: { score } }
+}
+
+test('SQLite high scores round-trip in table order', async () => {
+  const temp = await createTempDataFile()
+  const entries = [
+    highScoreEntry({
+      sessionId: '018f0000-0000-7000-8000-000000000001',
+      name: 'Bot',
+      type: 'ai',
+      score: 30,
+      achievedAt: '2026-11-28T10:00:00.000Z',
+    }),
+    highScoreEntry({
+      sessionId: '018f0000-0000-7000-8000-000000000002',
+      name: 'Bot',
+      type: 'ai',
+      score: 30,
+      achievedAt: '2026-11-28T09:00:00.000Z',
+    }),
+    highScoreEntry({
+      sessionId: '018f0000-0000-7000-8000-000000000003',
+      name: 'Bot',
+      type: 'ai',
+      score: 10,
+    }),
+    highScoreEntry({
+      sessionId: '018f0000-0000-7000-8000-000000000004',
+      score: 50,
+    }),
+    highScoreEntry({
+      sessionId: '018f0000-0000-7000-8000-000000000005',
+      score: 5,
+    }),
+  ]
+
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+  try {
+    for (const entry of entries) {
+      await storage.highScores.submit(entry, HIGH_SCORE_TABLE_SIZE)
+    }
+  } finally {
+    storage.close()
+  }
+
+  const reopened = createSqliteStorage({ dataFile: temp.dataFile })
+  try {
+    const loaded = await reopened.highScores.load()
+    assert.deepEqual(
+      loaded.entries.map((entry) => entry.sessionId),
+      [
+        '018f0000-0000-7000-8000-000000000002',
+        '018f0000-0000-7000-8000-000000000001',
+        '018f0000-0000-7000-8000-000000000003',
+        '018f0000-0000-7000-8000-000000000004',
+        '018f0000-0000-7000-8000-000000000005',
+      ],
+    )
+  } finally {
+    reopened.close()
+    await temp.cleanup()
+  }
+})
+
+test('the high-score store keeps the table limit per type', async () => {
+  const temp = await createTempDataFile()
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+
+  try {
+    for (let score = 0; score < 5; score += 1) {
+      await storage.highScores.submit(
+        highScoreEntry({
+          sessionId: `018f0000-0000-7000-8000-00000000000${score}`,
+          score,
+        }),
+        3,
+      )
+    }
+
+    const loaded = await storage.highScores.load()
+    assert.deepEqual(
+      loaded.entries.map((entry) => entry.score),
+      [4, 3, 2],
+    )
+
+    await storage.highScores.replace(
+      [highScoreEntry({ sessionId: '018f0000-0000-7000-8000-000000000010', score: 7 })],
+      1,
+    )
+    assert.deepEqual(
+      (await storage.highScores.load()).entries.map((entry) => entry.score),
+      [7],
+    )
+  } finally {
+    storage.close()
+    await temp.cleanup()
+  }
+})
+
+test('an old SQLite file gains the high-score table', async () => {
+  const temp = await createTempDataFile()
+  const database = new DatabaseSync(temp.dataFile)
+  database.exec(`
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'human',
+      engine_id TEXT
+    );
+    CREATE TABLE game_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      game_id TEXT NOT NULL,
+      pieces TEXT NOT NULL
+    );
+  `)
+  database.close()
+
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+  try {
+    assert.deepEqual(await storage.highScores.load(), { entries: [] })
+  } finally {
+    storage.close()
+  }
+
+  const check = new DatabaseSync(temp.dataFile)
+  try {
+    const names = check
+      .prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')")
+      .all()
+      .map((row) => row.name)
+    assert.equal(names.includes('high_scores'), true)
+    assert.equal(names.includes('high_scores_rank'), true)
+  } finally {
+    check.close()
+  }
+
+  const again = createSqliteStorage({ dataFile: temp.dataFile })
+  try {
+    assert.deepEqual(await again.highScores.load(), { entries: [] })
+  } finally {
+    again.close()
+    await temp.cleanup()
+  }
+})
+
+test('in-memory high scores keep the limit and update one session', async () => {
+  const storage = createInMemoryStorage()
+
+  try {
+    for (let score = 0; score < HIGH_SCORE_TABLE_SIZE + 5; score += 1) {
+      await storage.highScores.submit(
+        highScoreEntry({
+          sessionId: `018f0000-0000-7000-8000-${String(score).padStart(12, '0')}`,
+          score,
+        }),
+        HIGH_SCORE_TABLE_SIZE,
+      )
+    }
+
+    let entries = (await storage.highScores.load()).entries
+    assert.equal(entries.length, HIGH_SCORE_TABLE_SIZE)
+    assert.equal(entries[0].score, HIGH_SCORE_TABLE_SIZE + 4)
+    assert.equal(entries.at(-1).score, 5)
+
+    const updated = highScoreEntry({
+      sessionId: entries.at(-1).sessionId,
+      name: 'Grace',
+      score: 5000,
+    })
+    await storage.highScores.submit(updated, HIGH_SCORE_TABLE_SIZE)
+    entries = (await storage.highScores.load()).entries
+    assert.equal(entries[0].sessionId, updated.sessionId)
+    assert.equal(
+      entries.filter((entry) => entry.sessionId === updated.sessionId).length,
+      1,
+    )
+  } finally {
+    storage.close()
+  }
+})
+
+
+test('the UUIDv7 helper reads a date and rejects other ids', () => {
+  const id = '018cc251-f400-7000-8000-000000000000'
+  assert.equal(
+    achievedAtFromSessionId(id),
+    new Date(Number.parseInt('018cc251f400', 16)).toISOString(),
+  )
+  assert.equal(achievedAtFromSessionId('session-demo'), undefined)
+  assert.equal(
+    achievedAtFromSessionId('018f0f3a-4a3f-4000-8000-000000000000'),
+    undefined,
+  )
+})
+
+test('the high-score service loads once and answers reads from memory', async () => {
+  const storage = createInMemoryStorage()
+  const stored = highScoreEntry({ name: 'Ada', score: 900 })
+  await storage.highScores.submit(stored, HIGH_SCORE_TABLE_SIZE)
+
+  let calls = 0
+  const repository = {
+    async load() {
+      calls += 1
+      return storage.highScores.load()
+    },
+    async submit(entry, tableLimit) {
+      calls += 1
+      return storage.highScores.submit(entry, tableLimit)
+    },
+    async replace(entries, tableLimit) {
+      calls += 1
+      return storage.highScores.replace(entries, tableLimit)
+    },
+  }
+  const service = new HighScoreService(
+    repository,
+    () => new Date(FIXED_HIGH_SCORE_DATE),
+  )
+
+  try {
+    await service.load()
+    assert.equal(calls, 1)
+    assert.deepEqual(service.list('human'), [
+      { name: 'Ada', score: 900, achievedAt: FIXED_HIGH_SCORE_DATE },
+    ])
+
+    calls = 0
+    service.list('human')
+    service.list('ai')
+    assert.equal(calls, 0)
+
+    await service.submit({
+      sessionId: uuidv7(),
+      userId: stored.userId,
+      name: 'Grace',
+      type: 'human',
+      score: 1000,
+    })
+    assert.equal(calls, 1)
+    assert.deepEqual(service.list('human')[0], {
+      name: 'Grace',
+      score: 1000,
+      achievedAt: FIXED_HIGH_SCORE_DATE,
+    })
+  } finally {
+    storage.close()
+  }
+})
+
+test('a failed submission leaves the memory tables unchanged', async () => {
+  const repository = {
+    async load() {
+      return { entries: [] }
+    },
+    async submit() {
+      throw new Error('high score write failed')
+    },
+    async replace() {},
+  }
+  const service = new HighScoreService(repository)
+  await service.load()
+
+  await assert.rejects(
+    service.submit({
+      sessionId: uuidv7(),
+      userId: uuidv7(),
+      name: 'Ada',
+      type: 'human',
+      score: 500,
+    }),
+    /high score write failed/,
+  )
+  assert.deepEqual(service.list('human'), [])
+  assert.deepEqual(service.list('ai'), [])
+})
+
+test('an empty high-score table is rebuilt from finished sessions', async () => {
+  const storage = createInMemoryStorage()
+  const human = createUser({ id: uuidv7(), name: 'Ada' })
+  const bot = createUser({
+    id: uuidv7(),
+    name: 'Delphi 5',
+    type: 'ai',
+    engineId: 'delphi5',
+  })
+  const humanSession = highScoreSession(uuidv7(), human.id, 120)
+  const botSession = highScoreSession(uuidv7(), bot.id, 80)
+  const users = new Map([
+    [human.id, human],
+    [bot.id, bot],
+  ])
+
+  const service = new HighScoreService(storage.highScores)
+  try {
+    await service.load()
+    await service.backfill(
+      [humanSession, botSession],
+      (userId) => users.get(userId),
+    )
+
+    const entries = (await storage.highScores.load()).entries
+    assert.equal(entries.length, 2)
+
+    const humanEntry = entries.find((entry) => entry.type === 'human')
+    assert.equal(humanEntry.name, 'Ada')
+    assert.equal(humanEntry.score, 120)
+    assert.equal(
+      humanEntry.achievedAt,
+      achievedAtFromSessionId(humanSession.id),
+    )
+
+    const aiEntry = entries.find((entry) => entry.type === 'ai')
+    assert.equal(aiEntry.name, 'Delphi 5')
+    assert.equal(aiEntry.score, 80)
+  } finally {
+    storage.close()
+  }
+})
+
+test('the backfill skips an active session and an id without a UUIDv7 date', async () => {
+  const storage = createInMemoryStorage()
+  const user = createUser({ id: uuidv7(), name: 'Ada' })
+  const service = new HighScoreService(storage.highScores)
+
+  try {
+    await service.load()
+    await service.backfill(
+      [
+        highScoreSession(uuidv7(), user.id, 10, 'active'),
+        highScoreSession('session-demo', user.id, 20),
+      ],
+      () => user,
+    )
+
+    assert.deepEqual(await storage.highScores.load(), { entries: [] })
+  } finally {
+    storage.close()
+  }
+})
+
+test('a non-empty high-score table is not rewritten at startup', async () => {
+  const storage = createInMemoryStorage()
+  const user = createUser({ id: uuidv7(), name: 'Ada' })
+  await storage.highScores.submit(
+    highScoreEntry({ name: 'Grace', score: 5 }),
+    HIGH_SCORE_TABLE_SIZE,
+  )
+
+  let replaceCalls = 0
+  const repository = {
+    async load() {
+      return storage.highScores.load()
+    },
+    async submit(entry, tableLimit) {
+      return storage.highScores.submit(entry, tableLimit)
+    },
+    async replace(entries, tableLimit) {
+      replaceCalls += 1
+      return storage.highScores.replace(entries, tableLimit)
+    },
+  }
+
+  const service = new HighScoreService(repository)
+  try {
+    await service.load()
+    await service.backfill(
+      [highScoreSession(uuidv7(), user.id, 999)],
+      () => user,
+    )
+
+    assert.equal(replaceCalls, 0)
+    assert.equal((await storage.highScores.load()).entries.length, 1)
+  } finally {
+    storage.close()
+  }
+})
+
+
+/** Plays one human 1Line session until no new piece can appear. */
+async function playHumanSessionToGameOver(handle, userId) {
+  const session = await (
+    await post(handle.url, apiPath('/game-sessions'), { userId })
+  ).json()
+  let latest = session
+
+  for (let step = 0; step < 400 && latest.status !== 'game-over'; step += 1) {
+    await post(handle.url, apiPath(`/game-sessions/${latest.id}/drop`))
+    const response = await post(
+      handle.url,
+      apiPath(`/game-sessions/${latest.id}/tick`),
+    )
+    assert.equal(response.status, 200)
+    latest = await response.json()
+  }
+
+  assert.equal(latest.status, 'game-over')
+  return latest
+}
+
+test('a finished human session enters the human high-score table', async () => {
+  const clock = new Date(FIXED_HIGH_SCORE_DATE)
+  const handle = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: {
+      selectPieceId: () => 0,
+      highScoreClock: () => clock,
+    },
+  })
+
+  try {
+    const user = await createTestUser(handle, 'Ada')
+    const finished = await playHumanSessionToGameOver(handle, user.id)
+
+    const { status, body } = await getJson(
+      handle.url,
+      apiPath('/high-scores?type=human'),
+    )
+    assert.equal(status, 200)
+    assert.equal(body.type, 'human')
+
+    const parsed = HighScoreListSchema.parse(body)
+    assert.deepEqual(parsed.scores, [
+      {
+        name: 'Ada',
+        score: finished.statistics.score,
+        achievedAt: clock.toISOString(),
+      },
+    ])
+  } finally {
+    await handle.close()
+  }
+})
+
+test('an unfinished human session stays out of the high-score table', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const user = await createTestUser(handle, 'Ada')
+    const session = await (
+      await post(handle.url, apiPath('/game-sessions'), { userId: user.id })
+    ).json()
+    await post(handle.url, apiPath(`/game-sessions/${session.id}/drop`))
+
+    const { status, body } = await getJson(
+      handle.url,
+      apiPath('/high-scores?type=human'),
+    )
+    assert.equal(status, 200)
+    assert.deepEqual(body, { type: 'human', scores: [] })
+  } finally {
+    await handle.close()
+  }
+})
+
+test('GET /v1/high-scores rejects a missing or bad type filter', async () => {
+  const handle = await startTestServer()
+
+  try {
+    for (const requestPath of [
+      '/high-scores',
+      '/high-scores?type=bot',
+      '/high-scores?type=ai&type=human',
+    ]) {
+      const response = await fetch(apiUrl(handle.url, requestPath))
+      assert.equal(response.status, 400)
+      assert.match(
+        response.headers.get('content-type') ?? '',
+        /application\/json/,
+      )
+      assert.deepEqual(await response.json(), {
+        message: 'High score type must be one of: ai, human.',
+      })
+    }
+
+    for (const type of ['ai', 'human']) {
+      const response = await fetch(
+        apiUrl(handle.url, `/high-scores?type=${type}`),
+      )
+      assert.equal(response.status, 200)
+      assert.deepEqual(await response.json(), { type, scores: [] })
+    }
+  } finally {
+    await handle.close()
+  }
+})
+
+test('a high-score read changes no stored row', async () => {
+  const storage = createInMemoryStorage()
+  const handle = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: { storage },
+  })
+
+  try {
+    const user = await createTestUser(handle, 'Ada')
+    await post(handle.url, apiPath('/game-sessions'), { userId: user.id })
+
+    const snapshot = async () =>
+      JSON.stringify([
+        await storage.users.load(),
+        await storage.games.load(),
+        await storage.sessions.load(),
+        await storage.highScores.load(),
+      ])
+    const before = await snapshot()
+
+    for (const type of ['ai', 'human']) {
+      const { status } = await getJson(
+        handle.url,
+        apiPath(`/high-scores?type=${type}`),
+      )
+      assert.equal(status, 200)
+    }
+
+    assert.equal(await snapshot(), before)
+  } finally {
+    await handle.close()
+    storage.close()
+  }
+})
+
+
+test('a high-score write failure fails the request and keeps the log', async () => {
+  const base = createInMemoryStorage()
+  const storage = {
+    users: base.users,
+    games: base.games,
+    sessions: base.sessions,
+    highScores: {
+      async load() {
+        return { entries: [] }
+      },
+      async submit() {
+        throw new Error('high score write failed')
+      },
+      async replace() {},
+    },
+    close() {
+      base.close()
+    },
+  }
+  const handle = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: { storage, selectPieceId: () => 0 },
+  })
+
+  try {
+    const user = await createTestUser(handle, 'Ada')
+    const session = await (
+      await post(handle.url, apiPath('/game-sessions'), { userId: user.id })
+    ).json()
+
+    let failed = false
+    for (let step = 0; step < 400 && !failed; step += 1) {
+      const dropResponse = await post(
+        handle.url,
+        apiPath(`/game-sessions/${session.id}/drop`),
+      )
+      const dropBody = await dropResponse.json()
+      if (dropResponse.status === 500) {
+        assert.deepEqual(dropBody, { message: 'Internal server error.' })
+        failed = true
+        break
+      }
+
+      const tickResponse = await post(
+        handle.url,
+        apiPath(`/game-sessions/${session.id}/tick`),
+      )
+      const tickBody = await tickResponse.json()
+      if (tickResponse.status === 500) {
+        assert.deepEqual(tickBody, { message: 'Internal server error.' })
+        failed = true
+        break
+      }
+      assert.notEqual(tickBody.status, 'game-over')
+    }
+
+    assert.equal(failed, true)
+    assert.equal((await storage.sessions.load()).sessions.length, 1)
+  } finally {
+    await handle.close()
+    storage.close()
+  }
+})
+
+test('a demo run writes one AI high-score row per engine session', async () => {
+  const storage = createInMemoryStorage()
+  const highScores = new HighScoreService(
+    storage.highScores,
+    () => new Date(FIXED_HIGH_SCORE_DATE),
+  )
+  const engines = [
+    stubDemoEngine('alpha', () => 'H'),
+    stubDemoEngine('beta', () => 'H'),
+  ]
+  const service = new DemoRunService(
+    uuidv7,
+    demoRunOptions({
+      storage,
+      highScores,
+      engines,
+      selectPieceId: () => 0,
+      resolveEngineUserName: (engineId) => `AI ${engineId}`,
+    }),
+  )
+
+  try {
+    const run = service.startRun(1)
+    await service.whenIdle()
+    const snapshot = service.getRun(run.id)
+    assert.equal(snapshot.status, 'completed')
+
+    const rows = (await storage.highScores.load()).entries
+    assert.equal(rows.length, 2)
+    assert.deepEqual(
+      rows.map((row) => row.name).sort(),
+      ['AI alpha', 'AI beta'],
+    )
+
+    for (const row of rows) {
+      assert.equal(row.type, 'ai')
+      assert.equal(row.achievedAt, FIXED_HIGH_SCORE_DATE)
+      const engineId = row.name === 'AI alpha' ? 'alpha' : 'beta'
+      const standing = snapshot.games[0].standings.find(
+        (entry) => entry.engineId === engineId,
+      )
+      assert.equal(row.score, standing.points)
+    }
+  } finally {
+    storage.close()
+  }
+})
+
+test('a high-score failure fails a demo run', async () => {
+  const storage = createInMemoryStorage()
+  const highScores = {
+    async submit() {
+      throw new Error('high score write failed')
+    },
+  }
+  const service = new DemoRunService(
+    uuidv7,
+    demoRunOptions({
+      storage,
+      highScores,
+      engines: [stubDemoEngine('alpha', () => 'H')],
+      selectPieceId: () => 0,
+    }),
+  )
+
+  try {
+    const run = service.startRun(1)
+    await service.whenIdle()
+    const snapshot = service.getRun(run.id)
+    assert.equal(snapshot.status, 'failed')
+    assert.match(snapshot.error, /high score write failed/)
+    assert.equal((await storage.sessions.load()).sessions.length, 1)
+  } finally {
+    storage.close()
+  }
+})
+
+test('the AI high-score table lists finished demo sessions', async () => {
+  const clock = new Date(FIXED_HIGH_SCORE_DATE)
+  const engines = [
+    stubDemoEngine('alpha', () => 'H'),
+    stubDemoEngine('beta', () => 'H'),
+  ]
+  const handle = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: {
+      demoEngines: engines,
+      selectPieceId: () => 0,
+      highScoreClock: () => clock,
+    },
+  })
+
+  try {
+    const response = await post(handle.url, apiPath('/demo-runs'), {
+      gameCount: 1,
+    })
+    assert.equal(response.status, 202)
+    const run = await response.json()
+    await waitForDemoRun(handle.url, run.id)
+
+    const { status, body } = await getJson(
+      handle.url,
+      apiPath('/high-scores?type=ai'),
+    )
+    assert.equal(status, 200)
+
+    const rawResponse = await fetch(apiUrl(handle.url, '/high-scores?type=ai'))
+    assert.match(
+      rawResponse.headers.get('content-type') ?? '',
+      /application\/json/,
+    )
+
+    const parsed = HighScoreListSchema.parse(body)
+    assert.equal(parsed.type, 'ai')
+    assert.equal(parsed.scores.length, 2)
+    assert.deepEqual(
+      parsed.scores.map((score) => score.name).sort(),
+      ['Engine alpha', 'Engine beta'],
+    )
+    assert.deepEqual(
+      parsed.scores.map((score) => score.achievedAt),
+      [clock.toISOString(), clock.toISOString()],
+    )
+  } finally {
+    await handle.close()
+  }
+})
+
+
+test('SQLite keeps 1000 human rows after 1500 submissions and a reopen', async () => {
+  const temp = await createTempDataFile()
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+
+  try {
+    for (let score = 0; score < 1500; score += 1) {
+      await storage.highScores.submit(
+        highScoreEntry({
+          sessionId: `018f0000-0000-7000-8000-${String(score).padStart(12, '0')}`,
+          score,
+        }),
+        HIGH_SCORE_TABLE_SIZE,
+      )
+    }
+  } finally {
+    storage.close()
+  }
+
+  const reopened = createSqliteStorage({ dataFile: temp.dataFile })
+  try {
+    const entries = (await reopened.highScores.load()).entries
+    assert.equal(entries.length, HIGH_SCORE_TABLE_SIZE)
+    assert.equal(entries[0].score, 1499)
+    assert.equal(entries.at(-1).score, 500)
+  } finally {
+    reopened.close()
+    await temp.cleanup()
+  }
+})
+
+test('a server start backfills an empty table from stored sessions', async () => {
+  const temp = await createTempDataFile()
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+  const user = createUser({ id: uuidv7(), name: 'Ada' })
+  const game = createPentixGame({ id: uuidv7(), selectPieceId: () => 0 })
+  const session = createDemoSession({
+    id: uuidv7(),
+    userId: user.id,
+    game,
+    level: DEFAULT_DEMO_STARTING_LEVEL,
+    seedColumn: 0,
+  })
+  const played = playDemoSession({
+    engine: stubDemoEngine('alpha', () => 'H'),
+    game,
+    session,
+    selectPieceId: () => 0,
+  })
+  assert.equal(played.session.status, 'game-over')
+
+  try {
+    await storage.users.create(user)
+    await storage.games.create(played.game)
+    await storage.sessions.create(played.log)
+  } finally {
+    storage.close()
+  }
+
+  const reopened = createSqliteStorage({ dataFile: temp.dataFile })
+  const handle = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: {
+      storage: reopened,
+      demoEngines: [],
+      selectPieceId: () => 0,
+    },
+  })
+
+  try {
+    const { status, body } = await getJson(
+      handle.url,
+      apiPath('/high-scores?type=human'),
+    )
+    assert.equal(status, 200)
+    assert.equal(body.scores.length, 1)
+    assert.deepEqual(body.scores[0], {
+      name: 'Ada',
+      score: played.session.statistics.score,
+      achievedAt: achievedAtFromSessionId(played.session.id),
+    })
+  } finally {
+    await handle.close()
+    reopened.close()
+    await temp.cleanup()
+  }
+})
+
+
+test('SQLite high-score storage rejects a row with a bad type', async () => {
+  const temp = await createTempDataFile()
+  const storage = createSqliteStorage({ dataFile: temp.dataFile })
+  storage.close()
+
+  const database = new DatabaseSync(temp.dataFile)
+  database
+    .prepare(
+      `INSERT INTO high_scores (session_id, user_id, name, user_type, score, achieved_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      '018f0000-0000-7000-8000-000000000001',
+      '018f0000-0000-7000-8000-000000000002',
+      'Ada',
+      'bot',
+      10,
+      FIXED_HIGH_SCORE_DATE,
+    )
+  database.close()
+
+  const reopened = createSqliteStorage({ dataFile: temp.dataFile })
+  try {
+    await assert.rejects(
+      reopened.highScores.load(),
+      /invalid high score 018f0000-0000-7000-8000-000000000001/,
+    )
+  } finally {
+    reopened.close()
     await temp.cleanup()
   }
 })
