@@ -34,6 +34,9 @@ Avoid: state, phase.
 **High score** (`HighScoreEntry`) — One finished session reduced to the values of a high-score table: `sessionId`, `userId`, `name`, `type`, `score`, and `achievedAt`. The `type` is `ai` or `human`, and each table keeps the best `1000` rows of its type.
 Avoid: best score, leaderboard row.
 
+**High-score detail** (`HighScoreDetail`) — One high-score row with its session `statistics`, its stored game in compact form, and the best finished sessions of that game. `GET /v1/high-scores/{sessionId}` returns it. `game.board` is one row-major `0`/`1` line, `game.pieceIds` is base64 with one byte per id, and each best-session entry carries `type` and an `actions` array aligned with `game.pieceIds`. The list orders by score descending, then `achievedAt`, then the session id.
+Avoid: score card, score page, row expansion.
+
 **Game session engine** (`GameSessionEngine`) — The stateless shared engine that provides `move`, `rotate`, `tick`, and `drop`. It returns new values and never mutates its inputs.
 Avoid: gameplay engine, game engine, server engine.
 

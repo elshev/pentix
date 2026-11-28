@@ -13,6 +13,7 @@ import {
   DemoRunGameStandingSchema,
   DemoRunSnapshotSchema,
   ErrorResponseSchema,
+  HighScoreDetailSchema,
   HighScoreListSchema,
   PentixGameSchema,
   PentixGameSessionSchema,
@@ -23,6 +24,10 @@ import {
   buildPentixRoutes,
   listPentixRouteKeys,
 } from '../apps/pentix-server/dist/api/routes.js'
+import {
+  DEFAULT_BEST_SESSION_COUNT,
+  buildHighScoreDetail,
+} from '../apps/pentix-server/dist/high-score-details.js'
 import { createInMemoryStorage } from '../apps/pentix-server/dist/storage/memory.js'
 import { createSqliteStorage } from '../apps/pentix-server/dist/storage/sqlite.js'
 import {
@@ -1947,7 +1952,7 @@ test('GET /openapi.json serves the documented API', async () => {
     assert.deepEqual(apiDocument.servers, [
       { url: handle.url, description: 'This server' },
     ])
-    assert.equal(Object.keys(apiDocument.paths).length, 12)
+    assert.equal(Object.keys(apiDocument.paths).length, 13)
 
     for (const path of Object.keys(apiDocument.paths)) {
       assert.ok(
@@ -1978,6 +1983,47 @@ test('the document matches the registered routes', async () => {
       assert.ok(Array.isArray(operation.tags))
       assert.ok(operation.tags.length > 0)
     }
+
+    const detailOperation =
+      apiDocument.paths[`${API_BASE_PATH}/high-scores/{sessionId}`].get
+    assert.deepEqual(detailOperation.tags, ['High scores'])
+    const parameters = detailOperation.parameters.map(
+      (parameter) => `${parameter.in}:${parameter.name}`,
+    )
+    assert.ok(parameters.includes('path:sessionId'))
+    assert.ok(parameters.includes('query:bestSessionCount'))
+    const countParameter = detailOperation.parameters.find(
+      (parameter) =>
+        parameter.in === 'query' && parameter.name === 'bestSessionCount',
+    )
+    assert.equal(countParameter.required, false)
+    assert.equal(countParameter.schema.default, DEFAULT_BEST_SESSION_COUNT)
+    for (const status of ['200', '400', '404']) {
+      assert.ok(detailOperation.responses[status])
+    }
+
+    const listOperation = apiDocument.paths[`${API_BASE_PATH}/high-scores`].get
+    assert.deepEqual(listOperation.tags, ['High scores'])
+    const entrySchema = resolveSchema(
+      apiDocument,
+      listOperation.responses['200'].content['application/json'].schema,
+    )
+    assert.ok(entrySchema.properties.scores)
+    const scoreEntry = apiDocument.components.schemas.HighScoreEntry
+    assert.ok(scoreEntry.properties.sessionId)
+    for (const schemaName of [
+      'HighScoreDetail',
+      'HighScoreDetailStatistics',
+      'HighScoreGame',
+      'HighScoreSessionSummary',
+    ]) {
+      assert.ok(apiDocument.components.schemas[schemaName])
+    }
+    assert.equal(
+      apiDocument.components.schemas.HighScoreDetailStatistics.properties
+        .pieceCounts,
+      undefined,
+    )
   } finally {
     await handle.close()
   }
@@ -2035,7 +2081,7 @@ test('every route config has exactly one handler', () => {
 
 test('every route key carries the /v1 prefix', () => {
   const keys = listPentixRouteKeys()
-  assert.equal(keys.length, 13)
+  assert.equal(keys.length, 14)
 
   for (const key of keys) {
     const path = key.split(' ')[1]
@@ -2763,7 +2809,12 @@ test('the high-score service loads once and answers reads from memory', async ()
     await service.load()
     assert.equal(calls, 1)
     assert.deepEqual(service.list('human'), [
-      { name: 'Ada', score: 900, achievedAt: FIXED_HIGH_SCORE_DATE },
+      {
+        sessionId: stored.sessionId,
+        name: 'Ada',
+        score: 900,
+        achievedAt: FIXED_HIGH_SCORE_DATE,
+      },
     ])
 
     calls = 0
@@ -2771,8 +2822,9 @@ test('the high-score service loads once and answers reads from memory', async ()
     service.list('ai')
     assert.equal(calls, 0)
 
+    const submittedSessionId = uuidv7()
     await service.submit({
-      sessionId: uuidv7(),
+      sessionId: submittedSessionId,
       userId: stored.userId,
       name: 'Grace',
       type: 'human',
@@ -2780,10 +2832,19 @@ test('the high-score service loads once and answers reads from memory', async ()
     })
     assert.equal(calls, 1)
     assert.deepEqual(service.list('human')[0], {
+      sessionId: submittedSessionId,
       name: 'Grace',
       score: 1000,
       achievedAt: FIXED_HIGH_SCORE_DATE,
     })
+    assert.deepEqual(service.find(submittedSessionId), {
+      sessionId: submittedSessionId,
+      name: 'Grace',
+      score: 1000,
+      achievedAt: FIXED_HIGH_SCORE_DATE,
+      type: 'human',
+    })
+    assert.equal(service.find(uuidv7()), undefined)
   } finally {
     storage.close()
   }
@@ -2941,10 +3002,12 @@ async function playHumanSessionToGameOver(handle, userId) {
 
 test('a finished human session enters the human high-score table', async () => {
   const clock = new Date(FIXED_HIGH_SCORE_DATE)
+  const storage = createInMemoryStorage()
   const handle = await startPentixServer({
     host: '127.0.0.1',
     port: 0,
     context: {
+      storage,
       selectPieceId: () => 0,
       highScoreClock: () => clock,
     },
@@ -2964,13 +3027,41 @@ test('a finished human session enters the human high-score table', async () => {
     const parsed = HighScoreListSchema.parse(body)
     assert.deepEqual(parsed.scores, [
       {
+        sessionId: finished.id,
         name: 'Ada',
         score: finished.statistics.score,
         achievedAt: clock.toISOString(),
       },
     ])
+
+    const detail = HighScoreDetailSchema.parse(
+      (
+        await getJson(
+          handle.url,
+          apiPath(`/high-scores/${finished.id}`),
+        )
+      ).body,
+    )
+    assert.equal('pieceCounts' in detail.statistics, false)
+    assert.equal(detail.bestSessions.length, 1)
+    const human = detail.bestSessions[0]
+    assert.equal(human.sessionId, finished.id)
+    assert.equal(human.type, 'human')
+    assert.equal('level' in human, false)
+    assert.equal('seedColumn' in human, false)
+    assert.equal('engineId' in human, false)
+    const storedLog = (await storage.sessions.load()).sessions.find(
+      (log) => log.sessionId === finished.id,
+    )
+    assert.ok(storedLog)
+    assert.deepEqual(
+      human.actions,
+      storedLog.pieces.map((piece) => piece.actions),
+    )
+    assert.equal(human.actions.join('').includes('T'), true)
   } finally {
     await handle.close()
+    storage.close()
   }
 })
 
@@ -3028,25 +3119,86 @@ test('GET /v1/high-scores rejects a missing or bad type filter', async () => {
 })
 
 test('a high-score read changes no stored row', async () => {
-  const storage = createInMemoryStorage()
+  const base = createInMemoryStorage()
+  const writes = { create: 0, save: 0, submit: 0, replace: 0 }
+  const storage = {
+    users: {
+      ...base.users,
+      create: async (user) => {
+        writes.create += 1
+        return base.users.create(user)
+      },
+      save: async (user) => {
+        writes.save += 1
+        return base.users.save(user)
+      },
+    },
+    games: {
+      ...base.games,
+      create: async (game) => {
+        writes.create += 1
+        return base.games.create(game)
+      },
+      save: async (game) => {
+        writes.save += 1
+        return base.games.save(game)
+      },
+    },
+    sessions: {
+      ...base.sessions,
+      create: async (log) => {
+        writes.create += 1
+        return base.sessions.create(log)
+      },
+      save: async (log) => {
+        writes.save += 1
+        return base.sessions.save(log)
+      },
+    },
+    highScores: {
+      ...base.highScores,
+      submit: async (entry, tableLimit) => {
+        writes.submit += 1
+        return base.highScores.submit(entry, tableLimit)
+      },
+      replace: async (entries, tableLimit) => {
+        writes.replace += 1
+        return base.highScores.replace(entries, tableLimit)
+      },
+    },
+    close: () => base.close(),
+  }
   const handle = await startPentixServer({
     host: '127.0.0.1',
     port: 0,
-    context: { storage },
+    context: {
+      storage,
+      demoEngines: [stubDemoEngine('alpha', () => 'H')],
+      selectPieceId: () => 0,
+    },
   })
 
   try {
-    const user = await createTestUser(handle, 'Ada')
-    await post(handle.url, apiPath('/game-sessions'), { userId: user.id })
+    const runResponse = await post(handle.url, apiPath('/demo-runs'), {
+      gameCount: 1,
+    })
+    const run = await runResponse.json()
+    await waitForDemoRun(handle.url, run.id)
+    const list = await getJson(handle.url, apiPath('/high-scores?type=ai'))
+    const row = list.body.scores[0]
 
     const snapshot = async () =>
       JSON.stringify([
-        await storage.users.load(),
-        await storage.games.load(),
-        await storage.sessions.load(),
-        await storage.highScores.load(),
+        await base.users.load(),
+        await base.games.load(),
+        await base.sessions.load(),
+        await base.highScores.load(),
       ])
     const before = await snapshot()
+
+    for (const key of Object.keys(writes)) {
+      writes[key] = 0
+    }
 
     for (const type of ['ai', 'human']) {
       const { status } = await getJson(
@@ -3055,11 +3207,17 @@ test('a high-score read changes no stored row', async () => {
       )
       assert.equal(status, 200)
     }
+    const detail = await getJson(
+      handle.url,
+      apiPath(`/high-scores/${row.sessionId}`),
+    )
+    assert.equal(detail.status, 200)
 
+    assert.deepEqual(writes, { create: 0, save: 0, submit: 0, replace: 0 })
     assert.equal(await snapshot(), before)
   } finally {
     await handle.close()
-    storage.close()
+    base.close()
   }
 })
 
@@ -3259,7 +3417,441 @@ test('the AI high-score table lists finished demo sessions', async () => {
 })
 
 
+test('the high-score list schema requires a session id', () => {
+  const legacyEntry = {
+    name: 'Ada',
+    score: 10,
+    achievedAt: FIXED_HIGH_SCORE_DATE,
+  }
+
+  assert.equal(
+    HighScoreListSchema.safeParse({
+      type: 'human',
+      scores: [legacyEntry],
+    }).success,
+    false,
+  )
+  assert.equal(
+    HighScoreListSchema.safeParse({
+      type: 'human',
+      scores: [{ sessionId: uuidv7(), ...legacyEntry }],
+    }).success,
+    true,
+  )
+})
+
+test('GET /v1/high-scores/{sessionId} expands a row into its game sessions', async () => {
+  const clock = new Date(FIXED_HIGH_SCORE_DATE)
+  const storage = createInMemoryStorage()
+  const handle = await startDemoServer({
+    storage,
+    highScoreClock: () => clock,
+  })
+
+  try {
+    const runResponse = await post(handle.url, apiPath('/demo-runs'), {
+      gameCount: 2,
+    })
+    assert.equal(runResponse.status, 202)
+    const run = await runResponse.json()
+    const finished = await waitForDemoRun(handle.url, run.id)
+    assert.equal(finished.games.length, 2)
+
+    const firstGameId = finished.games[0].id
+    const sessionLogs = (await storage.sessions.load()).sessions
+    const sessionGame = new Map(
+      sessionLogs.map((log) => [log.sessionId, log.gameId]),
+    )
+    const list = await getJson(handle.url, apiPath('/high-scores?type=ai'))
+    assert.equal(list.status, 200)
+    const row = list.body.scores.find(
+      (entry) => sessionGame.get(entry.sessionId) === firstGameId,
+    )
+    assert.ok(row)
+
+    const { status, body } = await getJson(
+      handle.url,
+      apiPath(`/high-scores/${row.sessionId}`),
+    )
+    assert.equal(status, 200)
+    const detail = HighScoreDetailSchema.parse(body)
+
+    assert.equal(detail.sessionId, row.sessionId)
+    assert.equal(detail.name, row.name)
+    assert.equal(detail.score, row.score)
+    assert.equal(detail.achievedAt, clock.toISOString())
+    assert.equal(detail.type, 'ai')
+    assert.equal(detail.gameId, firstGameId)
+    assert.equal(detail.statistics.score, row.score)
+    assert.equal('pieceCounts' in detail.statistics, false)
+
+    const storedGames = (await storage.games.load()).games
+    const storedGame = storedGames.find((game) => game.id === firstGameId)
+    assert.ok(storedGame)
+    assert.deepEqual(detail.game, {
+      id: storedGame.id,
+      name: storedGame.name,
+      width: storedGame.board.width,
+      height: storedGame.board.height,
+      board: storedGame.board.rows
+        .flat()
+        .map((cell) => (cell.isOccupied ? '1' : '0'))
+        .join(''),
+      pieceIds: Buffer.from(storedGame.pieceIds).toString('base64'),
+    })
+    const decodedPieceIds = [...Buffer.from(detail.game.pieceIds, 'base64')]
+    assert.deepEqual(decodedPieceIds, storedGame.pieceIds)
+
+    assert.equal(detail.bestSessions.length, 2)
+    for (const entry of detail.bestSessions) {
+      assert.equal(sessionGame.get(entry.sessionId), firstGameId)
+      assert.equal(entry.achievedAt, clock.toISOString())
+      assert.equal(entry.type, 'ai')
+      assert.equal('log' in entry, false)
+      const stored = sessionLogs.find(
+        (log) => log.sessionId === entry.sessionId,
+      )
+      assert.ok(stored)
+      assert.equal(entry.level, stored.level)
+      assert.equal(entry.seedColumn, stored.seedColumn)
+      assert.deepEqual(
+        entry.actions,
+        stored.pieces.map((piece) => piece.actions.replaceAll('T', '')),
+      )
+      for (const [index, piece] of stored.pieces.entries()) {
+        assert.equal(piece.pieceId, decodedPieceIds[index])
+      }
+      const standing = finished.games[0].standings.find(
+        (line) => line.engineId === entry.engineId,
+      )
+      assert.ok(standing)
+      assert.equal(entry.score, standing.points)
+      assert.equal(entry.clearedLines, standing.lines)
+      assert.equal(entry.blocks, standing.pieces)
+    }
+  } finally {
+    await handle.close()
+    storage.close()
+  }
+})
+
+test('a human game starts on the game of the expanded row', async () => {
+  const storage = createInMemoryStorage()
+  const handle = await startDemoServer({ storage })
+
+  try {
+    const runResponse = await post(handle.url, apiPath('/demo-runs'), {
+      gameCount: 1,
+    })
+    const run = await runResponse.json()
+    await waitForDemoRun(handle.url, run.id)
+    const list = await getJson(handle.url, apiPath('/high-scores?type=ai'))
+    const row = list.body.scores[0]
+    const detail = (
+      await getJson(handle.url, apiPath(`/high-scores/${row.sessionId}`))
+    ).body
+
+    const user = await createTestUser(handle, 'Grace')
+    const response = await post(handle.url, apiPath('/game-sessions'), {
+      userId: user.id,
+      gameId: detail.gameId,
+    })
+    assert.equal(response.status, 201)
+    const session = PentixGameSessionSchema.parse(await response.json())
+    assert.equal(session.gameId, detail.gameId)
+    assert.notEqual(session.id, detail.sessionId)
+    assert.equal(detail.game.width, session.board.width)
+    assert.equal(detail.game.height, session.board.height)
+    assert.equal(
+      detail.game.board,
+      session.board.rows
+        .flat()
+        .map((cell) => (cell.isOccupied ? '1' : '0'))
+        .join(''),
+    )
+  } finally {
+    await handle.close()
+    storage.close()
+  }
+})
+
+
+test('the detail returns at most the requested best-session count', async () => {
+  const engineIds = [
+    'alpha',
+    'beta',
+    'gamma',
+    'delta',
+    'epsilon',
+    'zeta',
+    'eta',
+    'theta',
+    'iota',
+  ]
+  const storage = createInMemoryStorage()
+  const handle = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: {
+      storage,
+      demoEngines: engineIds.map((engineId) =>
+        stubDemoEngine(engineId, () => 'H'),
+      ),
+      selectPieceId: () => 0,
+      highScoreClock: () => new Date(FIXED_HIGH_SCORE_DATE),
+    },
+  })
+
+  try {
+    const runResponse = await post(handle.url, apiPath('/demo-runs'), {
+      gameCount: 1,
+    })
+    const run = await runResponse.json()
+    await waitForDemoRun(handle.url, run.id)
+    const list = await getJson(handle.url, apiPath('/high-scores?type=ai'))
+    assert.equal(list.body.scores.length, 9)
+    const row = list.body.scores[0]
+
+    const all = HighScoreDetailSchema.parse(
+      (await getJson(handle.url, apiPath(`/high-scores/${row.sessionId}`)))
+        .body,
+    )
+    assert.equal(all.bestSessions.length, DEFAULT_BEST_SESSION_COUNT)
+    const scored = all.bestSessions.map((entry) => entry.score)
+    assert.deepEqual(scored, [...scored].sort((a, b) => b - a))
+
+    const limited = HighScoreDetailSchema.parse(
+      (
+        await getJson(
+          handle.url,
+          apiPath(`/high-scores/${row.sessionId}?bestSessionCount=3`),
+        )
+      ).body,
+    )
+    assert.equal(limited.bestSessions.length, 3)
+    assert.deepEqual(
+      limited.bestSessions.map((entry) => entry.sessionId),
+      all.bestSessions.slice(0, 3).map((entry) => entry.sessionId),
+    )
+  } finally {
+    await handle.close()
+    storage.close()
+  }
+})
+
+test('the detail ranks best sessions by score, date, then session id', async () => {
+  const S1 = '018f0000-0000-7000-8000-000000000001'
+  const S2 = '018f0000-0000-7000-8000-000000000002'
+  const S3 = '018f0000-0000-7000-8000-000000000003'
+  const S4 = '018f0000-0000-7000-8000-000000000004'
+  const S5 = '018f0000-0000-7000-8000-000000000005'
+  const gameA = createPentixGame({ id: uuidv7(), selectPieceId: () => 3 })
+  const gameB = createPentixGame({ id: uuidv7(), selectPieceId: () => 3 })
+  const users = new Map()
+  for (const name of ['Alpha', 'Beta', 'Gamma']) {
+    users.set(
+      name,
+      createUser({
+        id: uuidv7(),
+        name,
+        type: 'ai',
+        engineId: name.toLowerCase(),
+      }),
+    )
+  }
+
+  const payload = new Map()
+  const addSession = (sessionId, game, score, userName, achievedAt) => {
+    const user = users.get(userName)
+    payload.set(sessionId, {
+      session: {
+        id: sessionId,
+        userId: user.id,
+        gameId: game.id,
+        status: 'game-over',
+        statistics: {
+          score,
+          level: 9,
+          clearedLines: score + 1,
+          blocks: score + 2,
+          actions: { moves: 1, rotates: 1, drops: 0 },
+        },
+      },
+      log: {
+        sessionId,
+        userId: user.id,
+        gameId: game.id,
+        level: 9,
+        seedColumn: 7,
+        pieces: [{ pieceId: 3, actions: 'LCT' }],
+      },
+      user,
+      achievedAt,
+    })
+  }
+
+  addSession(S1, gameA, 800, 'Alpha', '2026-11-28T12:00:00.000Z')
+  addSession(S2, gameA, 1200, 'Beta', '2026-11-28T11:00:00.000Z')
+  addSession(S3, gameA, 1200, 'Gamma', '2026-11-28T10:00:00.000Z')
+  addSession(S4, gameB, 5000, 'Alpha', '2026-11-28T09:00:00.000Z')
+  addSession(S5, gameA, 0, 'Beta', undefined)
+
+  const storage = createInMemoryStorage()
+  for (const sessionId of [S1, S2, S3, S4]) {
+    const record = payload.get(sessionId)
+    await storage.highScores.submit(
+      {
+        sessionId,
+        userId: record.user.id,
+        name: record.user.name,
+        type: 'ai',
+        score: record.session.statistics.score,
+        achievedAt: record.achievedAt,
+      },
+      HIGH_SCORE_TABLE_SIZE,
+    )
+  }
+
+  const highScores = new HighScoreService(storage.highScores)
+  await highScores.load()
+  const lifecycle = {
+    getReplayedSession: (sessionId) => payload.get(sessionId)?.session,
+    getSessionLog: (sessionId) => payload.get(sessionId)?.log,
+    getGame: (gameId) =>
+      gameId === gameA.id ? gameA : gameId === gameB.id ? gameB : undefined,
+    listGameSessions: (gameId) =>
+      [...payload.values()]
+        .filter((record) => record.session.gameId === gameId)
+        .map(({ session, log, user }) => ({ session, log, user })),
+  }
+
+  try {
+    const detail = buildHighScoreDetail(
+      lifecycle,
+      highScores,
+      S2,
+      DEFAULT_BEST_SESSION_COUNT,
+    )
+    assert.equal(detail.gameId, gameA.id)
+    assert.equal(detail.score, 1200)
+    assert.equal(detail.type, 'ai')
+    assert.equal(detail.statistics.score, 1200)
+    assert.equal(detail.statistics.level, 9)
+    assert.equal(detail.statistics.clearedLines, 1201)
+    assert.equal(detail.statistics.blocks, 1202)
+    assert.equal('pieceCounts' in detail.statistics, false)
+    assert.deepEqual(detail.game, {
+      id: gameA.id,
+      name: gameA.name,
+      width: gameA.board.width,
+      height: gameA.board.height,
+      board: '0'.repeat(gameA.board.width * gameA.board.height),
+      pieceIds: Buffer.from(gameA.pieceIds).toString('base64'),
+    })
+    assert.deepEqual(
+      [...Buffer.from(detail.game.pieceIds, 'base64')],
+      gameA.pieceIds,
+    )
+    assert.deepEqual(
+      detail.bestSessions.map((entry) => entry.sessionId),
+      [S3, S2, S1, S5],
+    )
+    assert.equal(
+      detail.bestSessions.at(-1).achievedAt,
+      achievedAtFromSessionId(S5),
+    )
+    const firstSession = detail.bestSessions[0]
+    assert.equal(firstSession.type, 'ai')
+    assert.equal(firstSession.level, 9)
+    assert.equal(firstSession.seedColumn, 7)
+    assert.deepEqual(firstSession.actions, ['LC'])
+    assert.equal('log' in firstSession, false)
+    assert.equal(firstSession.engineId, 'gamma')
+
+    const limited = buildHighScoreDetail(lifecycle, highScores, S2, 3)
+    assert.deepEqual(
+      limited.bestSessions.map((entry) => entry.sessionId),
+      [S3, S2, S1],
+    )
+
+    const otherGame = buildHighScoreDetail(lifecycle, highScores, S4, 9)
+    assert.deepEqual(
+      otherGame.bestSessions.map((entry) => entry.sessionId),
+      [S4],
+    )
+
+    assert.equal(buildHighScoreDetail(lifecycle, highScores, uuidv7(), 9), undefined)
+  } finally {
+    storage.close()
+  }
+})
+
+
+test('the high-score detail rejects a bad id or count', async () => {
+  const handle = await startTestServer()
+
+  try {
+    const badId = await getJson(
+      handle.url,
+      apiPath('/high-scores/not-a-uuid'),
+    )
+    assert.equal(badId.status, 400)
+    assert.deepEqual(badId.body, {
+      message: 'High score session id must be a UUIDv7 value.',
+    })
+
+    for (const count of ['0', '33', '1.5']) {
+      const response = await getJson(
+        handle.url,
+        apiPath(`/high-scores/${UNKNOWN_UUID_V7}?bestSessionCount=${count}`),
+      )
+      assert.equal(response.status, 400)
+      assert.deepEqual(response.body, {
+        message: 'High score session count must be an integer from 1 to 32.',
+      })
+    }
+
+    const missing = await getJson(
+      handle.url,
+      apiPath(`/high-scores/${UNKNOWN_UUID_V7}`),
+    )
+    assert.equal(missing.status, 404)
+    assert.deepEqual(missing.body, {
+      message: `High score session ${UNKNOWN_UUID_V7} was not found.`,
+    })
+  } finally {
+    await handle.close()
+  }
+})
+
+test('a high-score row without a stored log answers 404', async () => {
+  const storage = createInMemoryStorage()
+  const orphan = highScoreEntry()
+  await storage.highScores.submit(orphan, HIGH_SCORE_TABLE_SIZE)
+  const handle = await startPentixServer({
+    host: '127.0.0.1',
+    port: 0,
+    context: { storage },
+  })
+
+  try {
+    const { status, body } = await getJson(
+      handle.url,
+      apiPath(`/high-scores/${orphan.sessionId}`),
+    )
+    assert.equal(status, 404)
+    assert.deepEqual(body, {
+      message: `High score session ${orphan.sessionId} was not found.`,
+    })
+  } finally {
+    await handle.close()
+    storage.close()
+  }
+})
+
+
 test('SQLite keeps 1000 human rows after 1500 submissions and a reopen', async () => {
+
   const temp = await createTempDataFile()
   const storage = createSqliteStorage({ dataFile: temp.dataFile })
 
@@ -3336,6 +3928,7 @@ test('a server start backfills an empty table from stored sessions', async () =>
     assert.equal(status, 200)
     assert.equal(body.scores.length, 1)
     assert.deepEqual(body.scores[0], {
+      sessionId: played.session.id,
       name: 'Ada',
       score: played.session.statistics.score,
       achievedAt: achievedAtFromSessionId(played.session.id),
