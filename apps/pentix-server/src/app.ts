@@ -12,6 +12,7 @@ import {
 import { writeJson } from './api/responses.js'
 import { HttpError, HttpStatus } from './http.js'
 import type { DemoRunService } from './demo-runs.js'
+import type { HighScoreService } from './high-scores.js'
 import type { PentixGameLifecycle } from './server.js'
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024
@@ -75,11 +76,12 @@ async function capJsonBody(
 export function createPentixApp(
   lifecycle: PentixGameLifecycle,
   demoRuns: DemoRunService,
+  highScores: HighScoreService,
 ): OpenAPIHono {
   const app = new OpenAPIHono({ defaultHook })
 
   app.use('*', capJsonBody)
-  app.openapiRoutes(buildPentixRoutes(lifecycle, demoRuns))
+  app.openapiRoutes(buildPentixRoutes(lifecycle, demoRuns, highScores))
   registerApiReference(app)
 
   app.notFound((c) => {

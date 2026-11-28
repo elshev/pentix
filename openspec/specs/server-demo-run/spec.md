@@ -250,7 +250,15 @@ The shared demo playback in `pentix-core` SHALL play every session of a run. In 
 
 ### Requirement: A run record lives in memory and its demo sessions are durable
 
-A run's own record SHALL stay in server memory. That record holds `status`, `gameCount`, `completedGameCount`, `engines`, and `standings`. Finished runs SHALL remain bounded to the `32` most recent completions. A restart SHALL forget every run id, so a forgotten or evicted id SHALL answer `404`. The run's `PentixGame` rows and its per-engine `SessionActionLog` rows SHALL be durable in the storage that the server was started with. The run SHALL NOT create, update, or remove a human user, a retained human game, or a retained human session.
+A run's own record SHALL stay in server memory. That record holds `status`,
+`gameCount`, `completedGameCount`, `engines`, and `standings`. Finished runs
+SHALL remain bounded to the `32` most recent completions. A restart SHALL forget
+every run id, so a forgotten or evicted id SHALL answer `404`. The run's
+`PentixGame` rows, its per-engine `SessionActionLog` rows, and its per-session
+high-score rows SHALL be durable in the storage that the server was started
+with. A high-score submission failure SHALL fail the run. The run SHALL NOT
+create, update, or remove a human user, a retained human game, a retained human
+session, or a human high-score row.
 
 #### Scenario: A restart forgets the run but keeps its sessions
 
@@ -264,7 +272,15 @@ A run's own record SHALL stay in server memory. That record holds `status`, `gam
 - **GIVEN** a server with durable storage holding a human user, game, and session
 - **WHEN** a demo run completes
 - **THEN** the human user, game, and session rows are unchanged
-- **AND** the only new rows are the run's games, its session logs, and the seeded AI users
+- **AND** the only new rows are the run's games, its session logs, its AI
+  high-score rows, and the seeded AI users
+
+#### Scenario: The AI scores survive the run
+
+- **GIVEN** a completed run over two engines on durable storage
+- **WHEN** the server restarts
+- **THEN** the AI high-score table holds one row per finished engine session
+- **AND** each row keeps its score and achievement date
 
 #### Scenario: Retention is bounded
 

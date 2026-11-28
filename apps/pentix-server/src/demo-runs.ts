@@ -22,6 +22,7 @@ import {
   type GameSessionStatistics,
   type PieceIdSelector,
 } from '../../../packages/pentix-core/dist/index.js'
+import type { HighScoreRecorder } from './high-scores.js'
 import type { PentixStorage } from './storage/repositories.js'
 
 /** The most games one run may play. */
@@ -98,8 +99,12 @@ export interface DemoRunServiceOptions {
   readonly clock?: () => number
   /** Storage for each game and each finished session log. */
   readonly storage: PentixStorage
+  /** Receives one score for every finished engine session. */
+  readonly highScores: HighScoreRecorder
   /** Returns the AI user id that an engine's demo sessions belong to. */
   readonly resolveEngineUserId: (engineId: string) => string
+  /** Returns the AI user name for a high-score row. Defaults to the engine name. */
+  readonly resolveEngineUserName?: (engineId: string) => string
 }
 
 interface DemoRunTotals {
@@ -227,7 +232,9 @@ export class DemoRunService {
   private readonly seedColumn?: number
   private readonly clock?: () => number
   private readonly storage: PentixStorage
+  private readonly highScores: HighScoreRecorder
   private readonly resolveEngineUserId: (engineId: string) => string
+  private readonly resolveEngineUserName?: (engineId: string) => string
   private readonly runs = new Map<string, DemoRunRecord>()
   private readonly queue: string[] = []
   private readonly idleWaiters: (() => void)[] = []
@@ -241,7 +248,9 @@ export class DemoRunService {
     this.seedColumn = options.seedColumn
     this.clock = options.clock
     this.storage = options.storage
+    this.highScores = options.highScores
     this.resolveEngineUserId = options.resolveEngineUserId
+    this.resolveEngineUserName = options.resolveEngineUserName
   }
 
   /** Creates a queued run and returns its snapshot before any game is played. */
@@ -491,6 +500,13 @@ export class DemoRunService {
       }
 
       await this.storage.sessions.create(playback.log)
+      await this.highScores.submit({
+        sessionId: playback.session.id,
+        userId: playback.session.userId,
+        name: this.resolveEngineUserName?.(engine.id) ?? engine.name,
+        type: 'ai',
+        score: playback.session.statistics.score,
+      })
 
       const row = toGameStanding(
         engine,

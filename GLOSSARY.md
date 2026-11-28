@@ -31,6 +31,9 @@ Avoid: game, run, attempt.
 **Session status** (`GameSessionStatus`) — The value `active` or `game-over`.
 Avoid: state, phase.
 
+**High score** (`HighScoreEntry`) — One finished session reduced to the values of a high-score table: `sessionId`, `userId`, `name`, `type`, `score`, and `achievedAt`. The `type` is `ai` or `human`, and each table keeps the best `1000` rows of its type.
+Avoid: best score, leaderboard row.
+
 **Game session engine** (`GameSessionEngine`) — The stateless shared engine that provides `move`, `rotate`, `tick`, and `drop`. It returns new values and never mutates its inputs.
 Avoid: gameplay engine, game engine, server engine.
 
@@ -173,10 +176,10 @@ Avoid: API, backend, server app.
 **API version** (`API_VERSION`) — The major version in every API path. The current value is `1`, so every endpoint starts with `/v1`, and the OpenAPI document reports `1.0.0`. The value lives in `apps/pentix-server/src/api/version.ts`.
 Avoid: API revision, schema version, version number.
 
-**Repository** (`UserRepository`, `GameRepository`, `GameSessionRepository`) — An engine-agnostic storage interface. The HTTP layer never names a storage engine.
+**Repository** (`UserRepository`, `GameRepository`, `GameSessionRepository`, `HighScoreRepository`) — An engine-agnostic storage interface. The HTTP layer never names a storage engine.
 Avoid: store, DAO, data access layer.
 
-**Pentix storage** (`PentixStorage`) — The bundle of the three repositories plus the `close()` handle release.
+**Pentix storage** (`PentixStorage`) — The bundle of the four repositories plus the `close()` handle release.
 Avoid: storage layer, database.
 
 **Game lifecycle** (`PentixGameLifecycle`) — The lifecycle service that owns the request-time working set. It hydrates the maps at startup and saves each successful mutation.
@@ -185,7 +188,7 @@ Avoid: manager, controller, service layer.
 **App settings** (`apps/pentix-server/settings.json`) — The file that holds the storage paths of `PentixServer`. It carries `dataFile` and `backupDirectory` and no other key. The module `apps/pentix-server/src/settings.ts` reads it through `loadPentixServerSettings()`, and `PENTIX_SERVER_SETTINGS_FILE` names another file.
 Avoid: config file, appsettings, environment file.
 
-**Data file** (`dataFile`) — The SQLite file that holds every retained user, game, and session. The shipped app settings name `C:\db\pentix\pentix.db`, and `PENTIX_DATA_FILE` overrides that value.
+**Data file** (`dataFile`) — The SQLite file that holds every retained user, game, session, and high score. The shipped app settings name `C:\db\pentix\pentix.db`, and `PENTIX_DATA_FILE` overrides that value.
 Avoid: database path, storage file, db file.
 
 **Backup directory** (`backupDirectory`) — The folder that receives the backup files. The shipped app settings name `C:\db\Backups\pentix`, and `PENTIX_BACKUP_DIRECTORY` overrides that value.

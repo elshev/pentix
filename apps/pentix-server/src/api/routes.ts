@@ -4,6 +4,7 @@ import { createRoute, type RouteHandler } from '@hono/zod-openapi'
 import { HttpError, HttpStatus } from '../http.js'
 import { checkUuid } from '../request.js'
 import { DEFAULT_DEMO_RUN_GAME_COUNT, type DemoRunService } from '../demo-runs.js'
+import type { HighScoreService } from '../high-scores.js'
 import type { PentixGameLifecycle } from '../server.js'
 import { writeJson } from './responses.js'
 import {
@@ -12,6 +13,8 @@ import {
   CreateUserRequestSchema,
   DemoRunSnapshotSchema,
   ErrorResponseSchema,
+  HighScoreListSchema,
+  HighScoreQuerySchema,
   MoveRequestSchema,
   PentixGameSchema,
   PentixGameSessionSchema,
@@ -322,6 +325,24 @@ const getDemoRunRoute = createRoute({
   },
 })
 
+const listHighScoresRoute = createRoute({
+  method: 'get',
+  path: versionedPath('/high-scores'),
+  tags: ['High scores'],
+  summary: 'List the best finished sessions for one user type',
+  request: { query: HighScoreQuerySchema },
+  responses: {
+    200: {
+      description: 'The high-score table for the requested user type.',
+      content: { 'application/json': { schema: HighScoreListSchema } },
+    },
+    400: {
+      description: 'The type filter is missing or invalid.',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+  },
+})
+
 /** Every API route, in registration order. The table below pairs them with handlers. */
 export const PENTIX_ROUTE_CONFIGS = [
   createGameRoute,
@@ -336,6 +357,7 @@ export const PENTIX_ROUTE_CONFIGS = [
   dropRoute,
   startDemoRunRoute,
   getDemoRunRoute,
+  listHighScoresRoute,
 ] as const
 
 /** The documented `METHOD /path` keys, derived from the same configs the app registers. */
@@ -366,6 +388,7 @@ function readGameId(gameId: string | null | undefined): string | undefined {
 export function buildPentixRoutes(
   lifecycle: PentixGameLifecycle,
   demoRuns: DemoRunService,
+  highScores: HighScoreService,
 ) {
   const createGame: RouteHandler<typeof createGameRoute> = async (c) => {
     const body = c.req.valid('json')
@@ -456,6 +479,14 @@ export function buildPentixRoutes(
     return writeJson(c, HttpStatus.ok200, run)
   }
 
+  const listHighScores: RouteHandler<typeof listHighScoresRoute> = (c) => {
+    const { type } = c.req.valid('query')
+    return writeJson(c, HttpStatus.ok200, {
+      type,
+      scores: highScores.list(type),
+    })
+  }
+
   return [
     { route: createGameRoute, handler: createGame },
     { route: createGameSessionRoute, handler: createGameSession },
@@ -469,5 +500,6 @@ export function buildPentixRoutes(
     { route: dropRoute, handler: drop },
     { route: startDemoRunRoute, handler: startDemoRun },
     { route: getDemoRunRoute, handler: getDemoRun },
+    { route: listHighScoresRoute, handler: listHighScores },
   ] as const
 }

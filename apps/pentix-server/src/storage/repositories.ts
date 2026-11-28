@@ -6,6 +6,8 @@ import type {
 import type {
   GameCollection,
   GameSessionCollection,
+  HighScoreCollection,
+  HighScoreEntry,
   UserCollection,
 } from './entities.js'
 
@@ -54,13 +56,28 @@ export interface GameSessionRepository {
 }
 
 /**
+ * Persistence contract for high-score rows. A row is a finished session
+ * reduced to its user, name, type, score, and achievement date. Both
+ * implementations keep at most `tableLimit` rows of each user type.
+ */
+export interface HighScoreRepository {
+  /** Returns every retained high-score row, or an empty collection when nothing is stored. */
+  load(): Promise<HighScoreCollection>
+  /** Persists one row and drops the rows of its type beyond `tableLimit`. */
+  submit(entry: HighScoreEntry, tableLimit: number): Promise<void>
+  /** Replaces every row with the supplied rows and applies `tableLimit` per type. */
+  replace(entries: readonly HighScoreEntry[], tableLimit: number): Promise<void>
+}
+
+/**
  * The repository set injected into `PentixServerContext` and consumed by the
- * lifecycle. Users, games, and sessions are stored separately.
+ * lifecycle. Users, games, sessions, and high scores are stored separately.
  */
 export interface PentixStorage {
   readonly users: UserRepository
   readonly games: GameRepository
   readonly sessions: GameSessionRepository
+  readonly highScores: HighScoreRepository
   /** Releases any store handle. In-memory storage has nothing to release. */
   close(): void
 }
