@@ -4,6 +4,7 @@ import { createRoute, type RouteHandler } from '@hono/zod-openapi'
 import { HttpError, HttpStatus } from '../http.js'
 import { checkUuid } from '../request.js'
 import { DEFAULT_DEMO_RUN_GAME_COUNT, type DemoRunService } from '../demo-runs.js'
+import { buildHighScoreDetail } from '../high-score-details.js'
 import type { HighScoreService } from '../high-scores.js'
 import type { PentixGameLifecycle } from '../server.js'
 import { writeJson } from './responses.js'
@@ -13,6 +14,9 @@ import {
   CreateUserRequestSchema,
   DemoRunSnapshotSchema,
   ErrorResponseSchema,
+  HighScoreDetailParamsSchema,
+  HighScoreDetailQuerySchema,
+  HighScoreDetailSchema,
   HighScoreListSchema,
   HighScoreQuerySchema,
   MoveRequestSchema,
@@ -343,6 +347,31 @@ const listHighScoresRoute = createRoute({
   },
 })
 
+const getHighScoreDetailRoute = createRoute({
+  method: 'get',
+  path: versionedPath('/high-scores/{sessionId}'),
+  tags: ['High scores'],
+  summary: 'Read one high-score row with its game and best sessions',
+  request: {
+    params: HighScoreDetailParamsSchema,
+    query: HighScoreDetailQuerySchema,
+  },
+  responses: {
+    200: {
+      description: 'The row, its statistics, its game, and its best sessions.',
+      content: { 'application/json': { schema: HighScoreDetailSchema } },
+    },
+    400: {
+      description: 'The session id or the session count is invalid.',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    404: {
+      description: 'The row or its stored session log was not found.',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+  },
+})
+
 /** Every API route, in registration order. The table below pairs them with handlers. */
 export const PENTIX_ROUTE_CONFIGS = [
   createGameRoute,
@@ -358,6 +387,7 @@ export const PENTIX_ROUTE_CONFIGS = [
   startDemoRunRoute,
   getDemoRunRoute,
   listHighScoresRoute,
+  getHighScoreDetailRoute,
 ] as const
 
 /** The documented `METHOD /path` keys, derived from the same configs the app registers. */
@@ -487,6 +517,27 @@ export function buildPentixRoutes(
     })
   }
 
+  const getHighScoreDetail: RouteHandler<
+    typeof getHighScoreDetailRoute
+  > = (c) => {
+    const { sessionId } = c.req.valid('param')
+    const { bestSessionCount } = c.req.valid('query')
+    const detail = buildHighScoreDetail(
+      lifecycle,
+      highScores,
+      sessionId,
+      bestSessionCount,
+    )
+    if (detail === undefined) {
+      throw new HttpError(
+        HttpStatus.notFound404,
+        `High score session ${sessionId} was not found.`,
+      )
+    }
+
+    return writeJson(c, HttpStatus.ok200, detail)
+  }
+
   return [
     { route: createGameRoute, handler: createGame },
     { route: createGameSessionRoute, handler: createGameSession },
@@ -501,5 +552,6 @@ export function buildPentixRoutes(
     { route: startDemoRunRoute, handler: startDemoRun },
     { route: getDemoRunRoute, handler: getDemoRun },
     { route: listHighScoresRoute, handler: listHighScores },
+    { route: getHighScoreDetailRoute, handler: getHighScoreDetail },
   ] as const
 }

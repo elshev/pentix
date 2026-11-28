@@ -20,7 +20,10 @@ import {
   demoEngineRegistry,
   type DemoEngine,
   type GameSessionStatistics,
+  type PentixGame,
+  type PentixGameSession,
   type PieceIdSelector,
+  type SessionActionLog,
 } from '../../../packages/pentix-core/dist/index.js'
 import type { HighScoreRecorder } from './high-scores.js'
 import type { PentixStorage } from './storage/repositories.js'
@@ -105,6 +108,12 @@ export interface DemoRunServiceOptions {
   readonly resolveEngineUserId: (engineId: string) => string
   /** Returns the AI user name for a high-score row. Defaults to the engine name. */
   readonly resolveEngineUserName?: (engineId: string) => string
+  /** Retains a finished session that the service already stored. */
+  readonly retainSession?: (
+    session: PentixGameSession,
+    log: SessionActionLog,
+    game: PentixGame,
+  ) => void
 }
 
 interface DemoRunTotals {
@@ -235,6 +244,11 @@ export class DemoRunService {
   private readonly highScores: HighScoreRecorder
   private readonly resolveEngineUserId: (engineId: string) => string
   private readonly resolveEngineUserName?: (engineId: string) => string
+  private readonly retainSession?: (
+    session: PentixGameSession,
+    log: SessionActionLog,
+    game: PentixGame,
+  ) => void
   private readonly runs = new Map<string, DemoRunRecord>()
   private readonly queue: string[] = []
   private readonly idleWaiters: (() => void)[] = []
@@ -251,6 +265,7 @@ export class DemoRunService {
     this.highScores = options.highScores
     this.resolveEngineUserId = options.resolveEngineUserId
     this.resolveEngineUserName = options.resolveEngineUserName
+    this.retainSession = options.retainSession
   }
 
   /** Creates a queued run and returns its snapshot before any game is played. */
@@ -507,6 +522,7 @@ export class DemoRunService {
         type: 'ai',
         score: playback.session.statistics.score,
       })
+      this.retainSession?.(playback.session, playback.log, game)
 
       const row = toGameStanding(
         engine,

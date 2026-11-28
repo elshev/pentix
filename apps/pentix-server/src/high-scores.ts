@@ -31,11 +31,17 @@ export interface HighScoreSubmission {
   readonly score: number
 }
 
-/** One row as the endpoint returns it. */
+/** One row as the list endpoint returns it. */
 export interface HighScoreView {
+  readonly sessionId: string
   readonly name: string
   readonly score: number
   readonly achievedAt: string
+}
+
+/** One row with the user type, as the detail endpoint returns it. */
+export interface HighScoreDetailRow extends HighScoreView {
+  readonly type: UserType
 }
 
 /** The operation that a completion path needs from the high-score service. */
@@ -101,11 +107,22 @@ function orderTables(
   })
 }
 
+/** Reduces a stored row to the values the list endpoint returns. */
+function toView(entry: HighScoreEntry): HighScoreView {
+  return Object.freeze({
+    sessionId: entry.sessionId,
+    name: entry.name,
+    score: entry.score,
+    achievedAt: entry.achievedAt,
+  })
+}
+
 export class HighScoreService implements HighScoreRecorder {
   private readonly repository: HighScoreRepository
   private readonly clock: () => Date
   private tables: Readonly<Record<UserType, readonly HighScoreEntry[]>> =
     Object.freeze({ ai: Object.freeze([]), human: Object.freeze([]) })
+  private entriesById = new Map<string, HighScoreEntry>()
   private loaded = false
 
   constructor(
@@ -114,6 +131,16 @@ export class HighScoreService implements HighScoreRecorder {
   ) {
     this.repository = repository
     this.clock = clock
+  }
+
+  /** Keeps the ordered tables and the row lookup in step. */
+  private setTables(
+    tables: Readonly<Record<UserType, readonly HighScoreEntry[]>>,
+  ): void {
+    this.tables = tables
+    this.entriesById = new Map(
+      [...tables.ai, ...tables.human].map((entry) => [entry.sessionId, entry]),
+    )
   }
 
   /** True when the store held no row, so the lifecycle may rebuild it once. */
@@ -128,7 +155,7 @@ export class HighScoreService implements HighScoreRecorder {
   /** Reads every stored row once and keeps the ordered tables in memory. */
   async load(): Promise<void> {
     const collection = await this.repository.load()
-    this.tables = orderTables(collection.entries, HIGH_SCORE_TABLE_SIZE)
+    this.setTables(orderTables(collection.entries, HIGH_SCORE_TABLE_SIZE))
     this.loaded = true
   }
 
@@ -145,23 +172,27 @@ export class HighScoreService implements HighScoreRecorder {
       achievedAt: this.clock().toISOString(),
     })
     await this.repository.submit(entry, HIGH_SCORE_TABLE_SIZE)
-    this.tables = orderTables(
-      [...this.tables.ai, ...this.tables.human, entry],
-      HIGH_SCORE_TABLE_SIZE,
+    this.setTables(
+      orderTables(
+        [...this.tables.ai, ...this.tables.human, entry],
+        HIGH_SCORE_TABLE_SIZE,
+      ),
     )
   }
 
   /** Returns one table, in its stored order. */
   list(type: UserType): readonly HighScoreView[] {
-    return Object.freeze(
-      this.tables[type].map((entry) =>
-        Object.freeze({
-          name: entry.name,
-          score: entry.score,
-          achievedAt: entry.achievedAt,
-        }),
-      ),
-    )
+    return Object.freeze(this.tables[type].map(toView))
+  }
+
+  /** Returns one row with its user type, or `undefined` when no row matches. */
+  find(sessionId: string): HighScoreDetailRow | undefined {
+    const entry = this.entriesById.get(sessionId)
+    if (entry === undefined) {
+      return undefined
+    }
+
+    return Object.freeze({ ...toView(entry), type: entry.type })
   }
 
   /**
@@ -212,6 +243,6 @@ export class HighScoreService implements HighScoreRecorder {
     const tables = orderTables(entries, HIGH_SCORE_TABLE_SIZE)
     const rows = [...tables.ai, ...tables.human]
     await this.repository.replace(rows, HIGH_SCORE_TABLE_SIZE)
-    this.tables = tables
+    this.setTables(tables)
   }
 }

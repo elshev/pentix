@@ -19,6 +19,14 @@ import type {
   DemoRunGameStanding,
   DemoRunSnapshot,
 } from '../demo-runs.js'
+import {
+  DEFAULT_BEST_SESSION_COUNT,
+  MAX_BEST_SESSION_COUNT,
+  type HighScoreDetail,
+  type HighScoreDetailStatistics,
+  type HighScoreGameView,
+  type HighScoreSessionSummary,
+} from '../high-score-details.js'
 
 const UUID_V7_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -102,6 +110,7 @@ export const HighScoreQuerySchema = z
 
 export const HighScoreEntrySchema = z
   .object({
+    sessionId: UuidV7Schema,
     name: z.string().min(1),
     score: z.number().int().nonnegative(),
     achievedAt: z.string().min(1),
@@ -114,6 +123,43 @@ export const HighScoreListSchema = z
     scores: z.array(HighScoreEntrySchema).readonly(),
   })
   .openapi('HighScoreList')
+
+const HIGH_SCORE_SESSION_COUNT_MESSAGE = `High score session count must be an integer from 1 to ${MAX_BEST_SESSION_COUNT}.`
+
+export const HighScoreDetailQuerySchema = z
+  .object({
+    bestSessionCount: z.coerce
+      .number({ error: HIGH_SCORE_SESSION_COUNT_MESSAGE })
+      .int(HIGH_SCORE_SESSION_COUNT_MESSAGE)
+      .min(1, HIGH_SCORE_SESSION_COUNT_MESSAGE)
+      .max(MAX_BEST_SESSION_COUNT, HIGH_SCORE_SESSION_COUNT_MESSAGE)
+      .default(DEFAULT_BEST_SESSION_COUNT)
+      .openapi({
+        param: {
+          name: 'bestSessionCount',
+          in: 'query',
+          required: false,
+          description: 'The most best sessions of the game to return.',
+        },
+      }),
+  })
+  .openapi('HighScoreDetailQuery')
+
+/** Path parameters for one high-score detail request. */
+export const HighScoreDetailParamsSchema = z
+  .object({
+    sessionId: z
+      .string()
+      .regex(
+        UUID_V7_PATTERN,
+        'High score session id must be a UUIDv7 value.',
+      )
+      .openapi({
+        param: { name: 'sessionId', in: 'path' },
+        example: UUID_V7_EXAMPLE,
+      }),
+  })
+  .openapi('HighScoreDetailParams')
 
 export const UserSchema = z
   .object({
@@ -190,6 +236,81 @@ export const PentixGameSessionSchema = z
     nextPieceIndex: z.number().int(),
   })
   .openapi('PentixGameSession') satisfies z.ZodType<PentixGameSession>
+
+const HIGH_SCORE_ACTION_PATTERN = /^[TLRCAH]*$/u
+
+const HIGH_SCORE_PIECE_IDS_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/u
+
+export const HighScoreDetailStatisticsSchema = z
+  .object({
+    score: z.number().int(),
+    level: z.number().int(),
+    clearedLines: z.number().int(),
+    blocks: z.number().int(),
+    actions: GameSessionActionCountsSchema,
+  })
+  .openapi('HighScoreDetailStatistics') satisfies z.ZodType<HighScoreDetailStatistics>
+
+export const HighScoreGameSchema = z
+  .object({
+    id: UuidV7Schema,
+    name: z.string(),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    board: z
+      .string()
+      .regex(/^[01]*$/u, 'Board must hold only 0 and 1 characters.'),
+    pieceIds: z
+      .string()
+      .regex(
+        HIGH_SCORE_PIECE_IDS_PATTERN,
+        'Piece ids must be a base64 string.',
+      ),
+  })
+  .openapi('HighScoreGame') satisfies z.ZodType<HighScoreGameView>
+
+export const HighScoreSessionSummarySchema = z
+  .object({
+    sessionId: UuidV7Schema,
+    userId: UuidV7Schema,
+    name: z.string().min(1),
+    engineId: z
+      .string()
+      .regex(DEMO_ENGINE_ID_PATTERN, 'Value must be a demo engine id.')
+      .optional(),
+    type: UserTypeSchema,
+    level: z.number().int().optional(),
+    seedColumn: z.number().int().optional(),
+    score: z.number().int().nonnegative(),
+    clearedLines: z.number().int().nonnegative(),
+    blocks: z.number().int().nonnegative(),
+    achievedAt: z.string().min(1),
+    actions: z
+      .array(
+        z
+          .string()
+          .regex(
+            HIGH_SCORE_ACTION_PATTERN,
+            'Actions must use T, L, R, C, A, or H.',
+          ),
+      )
+      .readonly(),
+  })
+  .openapi('HighScoreSessionSummary') satisfies z.ZodType<HighScoreSessionSummary>
+
+export const HighScoreDetailSchema = z
+  .object({
+    sessionId: UuidV7Schema,
+    name: z.string().min(1),
+    score: z.number().int().nonnegative(),
+    achievedAt: z.string().min(1),
+    type: UserTypeSchema,
+    gameId: UuidV7Schema,
+    statistics: HighScoreDetailStatisticsSchema,
+    game: HighScoreGameSchema,
+    bestSessions: z.array(HighScoreSessionSummarySchema).readonly(),
+  })
+  .openapi('HighScoreDetail') satisfies z.ZodType<HighScoreDetail>
 
 export const DemoRunStatusSchema = z
   .enum(['queued', 'running', 'completed', 'failed'])

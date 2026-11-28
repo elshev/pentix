@@ -59,6 +59,13 @@ export interface PentixServerHandle {
   close(): Promise<void>
 }
 
+/** One retained session of a game, with its log and retained user. */
+export interface GameSessionRecord {
+  readonly session: PentixGameSession
+  readonly log: SessionActionLog
+  readonly user?: User
+}
+
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 3100
 
@@ -66,6 +73,7 @@ export class PentixGameLifecycle {
   private readonly games = new Map<string, PentixGame>()
   private readonly sessions = new Map<string, PentixGameSession>()
   private readonly sessionLogs = new Map<string, SessionActionLog>()
+  private readonly sessionIdsByGame = new Map<string, Set<string>>()
   private readonly users = new Map<string, User>()
   private readonly createId: () => string
   private readonly selectPieceId?: PieceIdSelector
@@ -113,6 +121,7 @@ export class PentixGameLifecycle {
 
     this.sessions.clear()
     this.sessionLogs.clear()
+    this.sessionIdsByGame.clear()
     for (const log of sessionLogs.sessions) {
       const game = this.games.get(log.gameId)
       if (game === undefined) {
@@ -121,8 +130,10 @@ export class PentixGameLifecycle {
         )
       }
 
+      const session = replayPentixGameSession(log, game)
       this.sessionLogs.set(log.sessionId, log)
-      this.sessions.set(log.sessionId, replayPentixGameSession(log, game))
+      this.sessions.set(log.sessionId, session)
+      this.indexSession(session)
     }
 
     // An upgraded store holds finished sessions but no score rows. Rebuild the
@@ -175,6 +186,71 @@ export class PentixGameLifecycle {
 
   getGame(gameId: string): PentixGame | undefined {
     return this.games.get(gameId)
+  }
+
+  /** Returns the retained action log of one session, or `undefined`. */
+  getSessionLog(sessionId: string): SessionActionLog | undefined {
+    return this.sessionLogs.get(sessionId)
+  }
+
+  /** Returns the retained replayed session, or `undefined`. */
+  getReplayedSession(sessionId: string): PentixGameSession | undefined {
+    return this.sessions.get(sessionId)
+  }
+
+  /**
+   * Returns every retained session of one game with its log and retained user.
+   * The read uses the in-memory index and touches no repository.
+   */
+  listGameSessions(gameId: string): readonly GameSessionRecord[] {
+    const sessionIds = this.sessionIdsByGame.get(gameId)
+    if (sessionIds === undefined) {
+      return Object.freeze([])
+    }
+
+    const records: GameSessionRecord[] = []
+    for (const sessionId of sessionIds) {
+      const session = this.sessions.get(sessionId)
+      const log = this.sessionLogs.get(sessionId)
+      if (session === undefined || log === undefined) {
+        continue
+      }
+
+      const user = this.users.get(session.userId)
+      records.push(
+        Object.freeze({
+          session,
+          log,
+          ...(user === undefined ? {} : { user }),
+        }),
+      )
+    }
+
+    return Object.freeze(records)
+  }
+
+  /** Adds one session id to its game's index. */
+  private indexSession(session: PentixGameSession): void {
+    const sessionIds =
+      this.sessionIdsByGame.get(session.gameId) ?? new Set<string>()
+    sessionIds.add(session.id)
+    this.sessionIdsByGame.set(session.gameId, sessionIds)
+  }
+
+  /**
+   * Retains a session that another service already stored, such as a finished
+   * demo session. The caller owns the repository write, so this method touches
+   * no storage.
+   */
+  retainSession(
+    session: PentixGameSession,
+    log: SessionActionLog,
+    game: PentixGame,
+  ): void {
+    this.games.set(game.id, game)
+    this.sessions.set(session.id, session)
+    this.sessionLogs.set(log.sessionId, log)
+    this.indexSession(session)
   }
 
   async createUser(name: string): Promise<User> {
@@ -234,6 +310,7 @@ export class PentixGameLifecycle {
     await this.storage.sessions.create(log)
     this.sessionLogs.set(session.id, log)
     this.sessions.set(session.id, session)
+    this.indexSession(session)
     return session
   }
 
@@ -443,6 +520,9 @@ export async function createPentixServer(
       const userId = lifecycle.getEngineUserId(engineId)
       const user = userId === undefined ? undefined : lifecycle.getUser(userId)
       return user?.name ?? engineId
+    },
+    retainSession(session, log, game) {
+      lifecycle.retainSession(session, log, game)
     },
   })
   const app = createPentixApp(lifecycle, demoRuns, highScores)
